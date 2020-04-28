@@ -1,4 +1,4 @@
-List of maintainers
+ist of maintainers
 ===================
 
 Descriptions of section entries and preferred order
@@ -29453,4 +29453,5 @@ S:	Unmaintained
 F:	sound/soc/qcom/qdsp6/q6cvs.c
 F:	sound/soc/qcom/qdsp6/q6cvp.c
 F:	sound/soc/qcom/qdsp6/q6mvm.c
+F:	sound/soc/qcom/qdsp6/q6voice.c
 F:	sound/soc/qcom/qdsp6/q6voice-common.c
