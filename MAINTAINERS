@@ -29456,3 +29456,4 @@ F:	sound/soc/qcom/qdsp6/q6cvp.c
 F:	sound/soc/qcom/qdsp6/q6mvm.c
 F:	sound/soc/qcom/qdsp6/q6voice.c
 F:	sound/soc/qcom/qdsp6/q6voice-common.c
+F:	sound/soc/qcom/qdsp6/q6voice-dai.c
