@@ -29450,6 +29450,7 @@ F:	*/
 
 M:	Avoid Warnings <dev@null.cz>
 S:	Unmaintained
+F:	include/dt-bindings/sound/qcom,q6voice.h
 F:	sound/soc/qcom/qdsp6/q6cvs.c
 F:	sound/soc/qcom/qdsp6/q6cvp.c
 F:	sound/soc/qcom/qdsp6/q6mvm.c
