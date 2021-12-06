@@ -365,6 +365,10 @@
 			   <GCC_LPASS_SWAY_CLK>;
 };
 
+&gpi_dma0 {
+	status = "okay";
+};
+
 &gpi_dma1 {
 	status = "okay";
 };
@@ -451,6 +455,26 @@
 	status = "okay";
 	firmware-name = "qcom/sdm845/Xiaomi/beryllium/mba.mbn",
 	"qcom/sdm845/Xiaomi/beryllium/modem.mbn";
+};
+
+&i2c5 {
+	#dma-cells = <3>;
+	status="okay";
+
+	dmas = <&gpi_dma0 0 5 QCOM_GPI_I2C>,
+		   <&gpi_dma0 1 5 QCOM_GPI_I2C>;
+	dma-names = "tx", "rx";
+
+	/*smart PA*/
+	tas2559_codec: tas2559@4c{
+		#sound-dai-cells = <1>;
+		compatible = "ti,tas2559";
+		reg = <0x4c>;
+		ti,tas2559-reset-gpio = <&tlmm 12 0>;
+		ti,tas2560-reset-gpio = <&tlmm 76 0>;
+		ti,tas2559-addr = <0x4c>;
+		ti,tas2560-addr = <0x4d>;
+	};
 };
 
 &pm8998_gpios {
@@ -637,6 +661,21 @@
 		link-name = "VoiceMMode1";
 		cpu {
 			sound-dai = <&q6voicedai VOICEMMODE1>;
+		};
+	};
+
+	tas2559-dai-link {
+		link-name = "Primary Spkr Playback";
+		cpu {
+			sound-dai = <&q6afedai QUATERNARY_MI2S_RX>;
+		};
+
+		platform {
+			sound-dai = <&q6routing>;
+		};
+
+		codec {
+			sound-dai =  <&tas2559_codec 0>;
 		};
 	};
 
