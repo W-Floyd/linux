@@ -92,22 +92,13 @@ static void nt36672a_send_cmds(struct mipi_dsi_multi_context *dsi_ctx,
 	}
 }
 
-static void nt36672a_panel_power_off(struct drm_panel *panel)
+static int nt36672a_panel_disable(struct drm_panel *panel)
 {
 	struct nt36672a_panel *pinfo = to_nt36672a_panel(panel);
-	int ret;
-
-	gpiod_set_value(pinfo->reset_gpio, 1);
-
-	ret = regulator_bulk_disable(ARRAY_SIZE(pinfo->supplies), pinfo->supplies);
-	if (ret)
-		dev_err(panel->dev, "regulator_bulk_disable failed %d\n", ret);
-}
-
-static int nt36672a_panel_unprepare(struct drm_panel *panel)
-{
-	struct nt36672a_panel *pinfo = to_nt36672a_panel(panel);
+	struct mipi_dsi_device *dsi = pinfo->link;
 	struct mipi_dsi_multi_context dsi_ctx = { .dsi = pinfo->link };
+
+	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
 
 	/* send off cmds */
 	nt36672a_send_cmds(&dsi_ctx, pinfo->desc->off_cmds,
@@ -127,13 +118,22 @@ static int nt36672a_panel_unprepare(struct drm_panel *panel)
 	/* 0x3C = 60ms delay */
 	msleep(60);
 
-	nt36672a_panel_power_off(panel);
+	return dsi_ctx.accum_err;
+}
+
+static int nt36672a_panel_unprepare(struct drm_panel *panel)
+{
+	struct nt36672a_panel *pinfo = to_nt36672a_panel(panel);
+
+	gpiod_set_value(pinfo->reset_gpio, 1);
+	regulator_bulk_disable(ARRAY_SIZE(pinfo->supplies), pinfo->supplies);
 
 	return 0;
 }
 
-static int nt36672a_panel_power_on(struct nt36672a_panel *pinfo)
+static int nt36672a_panel_prepare(struct drm_panel *panel)
 {
+	struct nt36672a_panel *pinfo = to_nt36672a_panel(panel);
 	int ret;
 
 	ret = regulator_bulk_enable(ARRAY_SIZE(pinfo->supplies), pinfo->supplies);
@@ -154,12 +154,13 @@ static int nt36672a_panel_power_on(struct nt36672a_panel *pinfo)
 	return 0;
 }
 
-static int nt36672a_panel_prepare(struct drm_panel *panel)
+static int nt36672a_panel_enable(struct drm_panel *panel)
 {
 	struct nt36672a_panel *pinfo = to_nt36672a_panel(panel);
+	struct mipi_dsi_device *dsi = pinfo->link;
 	struct mipi_dsi_multi_context dsi_ctx = { .dsi = pinfo->link };
 
-	dsi_ctx.accum_err = nt36672a_panel_power_on(pinfo);
+	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
 
 	/* send first part of init cmds */
 	nt36672a_send_cmds(&dsi_ctx, pinfo->desc->on_cmds_1,
@@ -177,9 +178,6 @@ static int nt36672a_panel_prepare(struct drm_panel *panel)
 			   pinfo->desc->num_on_cmds_2);
 
 	mipi_dsi_msleep(&dsi_ctx, 120);
-
-	if (dsi_ctx.accum_err < 0)
-		gpiod_set_value(pinfo->reset_gpio, 0);
 
 	return dsi_ctx.accum_err;
 }
@@ -208,6 +206,8 @@ static int nt36672a_panel_get_modes(struct drm_panel *panel,
 }
 
 static const struct drm_panel_funcs panel_funcs = {
+	.enable = nt36672a_panel_enable,
+	.disable = nt36672a_panel_disable,
 	.unprepare = nt36672a_panel_unprepare,
 	.prepare = nt36672a_panel_prepare,
 	.get_modes = nt36672a_panel_get_modes,
@@ -573,6 +573,8 @@ static int nt36672a_panel_add(struct nt36672a_panel *pinfo)
 	if (IS_ERR(pinfo->reset_gpio))
 		return dev_err_probe(dev, PTR_ERR(pinfo->reset_gpio),
 				     "failed to get reset gpio from DT\n");
+
+	pinfo->base.prepare_prev_first = true;
 
 	ret = drm_panel_of_backlight(&pinfo->base);
 	if (ret)
