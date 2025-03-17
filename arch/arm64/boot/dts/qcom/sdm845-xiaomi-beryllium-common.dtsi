@@ -190,6 +190,16 @@
 		enable-active-high;
 		gpio = <&pm8998_gpios 11 GPIO_ACTIVE_HIGH>;
 	};
+
+	cam0_actuator_regulator: gpio-regulator@5 {
+		compatible = "regulator-fixed";
+		regulator-name = "cam0_actuator_regulator";
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
+		regulator-enable-ramp-delay = <100>;
+		enable-active-high;
+		gpio = <&tlmm 26 GPIO_ACTIVE_HIGH>;
+	};
 };
 
 &adsp_pas {
@@ -319,6 +329,14 @@
 
 &cci_i2c0 {
 	status = "okay";
+
+	actuator: actuator@c {
+		compatible = "rohm,bu64748";
+		reg = <0x0c>;
+		vcc-supply = <&cam0_actuator_regulator>;
+		vio-supply = <&cam_iovdd>;
+		status = "okay";
+	};
 
 	camera@10 {
 		compatible = "sony,imx363";
