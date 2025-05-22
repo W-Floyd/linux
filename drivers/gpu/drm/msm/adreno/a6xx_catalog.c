@@ -700,7 +700,9 @@ static const struct adreno_info a6xx_gpus[] = {
 		.speedbins = ADRENO_SPEEDBINS(
 			{ 0,   0 },
 			{ 206, 1 },
+			{ 235, 1 }, // khaje
 			{ 200, 2 },
+			{ 216, 2}, // khaje
 			{ 157, 3 },
 			{ 127, 4 },
 		),

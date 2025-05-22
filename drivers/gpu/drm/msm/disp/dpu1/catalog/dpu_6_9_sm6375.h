@@ -140,7 +140,7 @@ static const struct dpu_perf_cfg sm6375_perf_data = {
 
 static const struct dpu_mdss_version sm6375_mdss_ver = {
 	.core_major_ver = 6,
-	.core_minor_ver = 9,
+	.core_minor_ver = 10,
 };
 
 const struct dpu_mdss_cfg dpu_sm6375_cfg = {

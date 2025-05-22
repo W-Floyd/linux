@@ -1,0 +1,642 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/*
+ * Copyright (c) 2025, Ivaylo Ivanov <ivo.ivanov.ivanov1@gmail.com>
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/usb/pd.h>
+#include "sm6225.dtsi"
+#include "pm6125.dtsi"
+
+/ {
+	model = "Lenovo Tab M10 Plus 3rd gen";
+	compatible = "lenovo,tb128", "qcom,sm6225", "qcom,sm6115";
+	chassis-type = "tablet";
+
+	/* required for bootloader to select correct board */
+	qcom,msm-id = <518 0x10000>;
+	qcom,board-id = <0x10022 0x0>;
+
+	aliases {
+		mmc0 = &sdhc_2;
+	};
+
+	bat: battery {
+		compatible = "simple-battery";
+		charge-full-design-microamp-hours = <1430000>;
+		energy-full-design-microwatt-hours = <5290000>;
+		voltage-min-design-microvolt = <3200000>;
+	};
+
+	chosen {
+		bootargs = "root=/dev/sda19 rw rootwait noinitrd init=/sbin/init console=tty0 PMOS_NOSPLASH";
+
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		framebuffer0: framebuffer@5c000000 {
+			compatible = "simple-framebuffer";
+			reg = <0 0x5c000000 0 (2000 * 1200 * 4)>;
+			width = <1200>;
+			height = <2000>;
+			stride = <(1200 * 4)>;
+			format = "a8r8g8b8";
+			clocks = <&gcc GCC_DISP_HF_AXI_CLK>;
+		};
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&vol_up_n>;
+
+		key-volume-up {
+			label = "Volume Up";
+			linux,code = <KEY_VOLUMEUP>;
+			gpios = <&pm6125_gpios 5 GPIO_ACTIVE_LOW>;
+			debounce-interval = <15>;
+			linux,can-disable;
+			wakeup-source;
+		};
+	};
+
+	usb_p1_vbus: regulator-0 {
+		compatible = "regulator-fixed";
+		regulator-name = "vbus_p1";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		gpio = <&tlmm 72 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+};
+
+&gpu {
+	status = "okay";
+
+	zap-shader {
+		firmware-name = "qcom/sm6225/LENOVO/TB128FU/a610_zap.mbn";
+	};
+};
+
+&i2c1 {
+	status = "okay";
+
+	fuel-gauge@55 {
+		compatible = "ti,bq27541";
+		reg = <0x55>;
+		interrupts-extended = <&tlmm 28 IRQ_TYPE_NONE>;
+		monitored-battery = <&bat>;
+	};
+};
+
+&i2c2 {
+	status = "okay";
+
+	sy6974: sy6974@6b {
+		compatible = "silergy,sy6974";
+		reg = <0x6b>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&sy6974_int_default>, <&sy6974_en>;
+
+		interrupt-parent = <&tlmm>;
+		interrupts = <66 IRQ_TYPE_NONE>;
+
+		sy,battery-regulation-voltage = <4192>; /* 4.192V */
+		sy,termination-current = <240>;
+		sy,charge-current = <500>;
+		sy,shutdown-current = <256>;
+		sy,charge-voltage = <4432>;
+		status = "disabled";
+	};
+};
+
+&i2c5 {
+	status = "okay";
+
+	rt1715: rt1715@4e {
+		compatible = "richtek,rt1715";
+		reg = <0x4e>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <17 IRQ_TYPE_LEVEL_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&rt1715_int_default>;
+
+		usb_con: connector {
+			compatible = "usb-c-connector";
+			label = "USB-C";
+			data-role = "dual";
+			power-role = "dual";
+			try-power-role = "sink";
+			typec-power-opmode = "default";
+			vbus-supply = <&usb_p1_vbus>;
+			sink-pdos = <PDO_FIXED(5000, 2000, 0)
+				     PDO_FIXED(10000, 1800,
+					        PDO_FIXED_DUAL_ROLE |
+					        PDO_FIXED_DATA_SWAP)>;
+			source-pdos = <PDO_FIXED(5000, 2000,
+						 PDO_FIXED_DUAL_ROLE |
+						 PDO_FIXED_DATA_SWAP)>;
+			op-sink-microwatt = <18000000>;
+
+			//altmodes {
+			//	displayport {
+			//		svid = /bits/ 16 <0xff01>;
+			//		vdo = <0x001c1c47>;
+			//	};
+			//};
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+				port@0 {
+					reg = <0>;
+					usb_con_hs: endpoint {
+						remote-endpoint = <&usb_dwc3_hs>;
+					};
+				};
+			};
+		};
+	};
+};
+
+&mdss {
+	status = "okay";
+};
+
+&mdss_dsi0 {
+	vdda-supply = <&pm6125_l18>;
+	status = "okay";
+
+	panel: panel@0 {
+		compatible = "lenovo,tb128fu-boe-nt36523w", "novatek,nt36523w";
+		reg = <0>;
+
+		reset-gpios = <&tlmm 82 GPIO_ACTIVE_LOW>;
+		vddio-supply = <&pm6125_l9>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&te_active &mdss_dsi_active>;
+
+		rotation = <180>; /* Yep, it's mounted upside down! */
+
+		port {
+			panel_in: endpoint {
+				remote-endpoint = <&mdss_dsi0_out>;
+			};
+		};
+	};
+};
+
+&mdss_dsi0_out {
+	data-lanes = <0 1 2 3>;
+	remote-endpoint = <&panel_in>;
+};
+
+&mdss_dsi0_phy {
+	status = "okay";
+};
+
+&spi0 {
+	clock-frequency = <9600000>;
+	status = "okay";
+
+	nt36xxx: touchscreen@1 {
+		compatible = "novatek,nt36523-spi";
+		reg = <1>;
+
+		spi-max-frequency = <9600000>;
+
+		pinctrl-0 = <&ts_int_active &ts_reset_active>;
+		pinctrl-1 = <&ts_int_suspend &ts_reset_suspend>;
+		pinctrl-names = "default", "sleep";
+
+		reset-gpio = <&tlmm 86 GPIO_ACTIVE_HIGH>;
+		irq-gpio = <&tlmm 80 IRQ_TYPE_EDGE_FALLING>;
+
+		novatek,swrst-n8-addr = <0x03F0FE>;
+		novatek,spi-rd-fast-addr = <0x03F310>;
+
+		firmware-name = "qcom/sm6225/LENOVO/TB128FU/nt36523.bin";
+
+		panel = <&panel>;
+
+		touchscreen-inverted-x;
+		touchscreen-inverted-y;
+		novatek,pen-support;
+		novatek,wgp-stylus;
+	};
+};
+
+&pm6125_gpios {
+	vol_up_n: vol-up-n-state {
+		pins = "gpio5";
+		function = "normal";
+		power-source = <0>;
+		bias-pull-up;
+		input-enable;
+	};
+};
+
+&pm6125_rtc {
+	status = "okay";
+};
+
+&pon_pwrkey {
+	status = "okay";
+};
+
+&pon_resin {
+	linux,code = <KEY_VOLUMEDOWN>;
+	status = "okay";
+};
+
+&remoteproc_adsp {
+	firmware-name = "qcom/sm6225/LENOVO/TB128FU/adsp.mbn";
+	status = "okay";
+};
+
+&remoteproc_cdsp {
+	firmware-name = "qcom/sm6225/LENOVO/TB128FU/cdsp.mbn";
+	status = "okay";
+};
+
+&remoteproc_mpss {
+	firmware-name = "qcom/sm6225/LENOVO/TB128FU/modem.mbn";
+	status = "okay";
+};
+
+&rpm_requests {
+	regulators-0 {
+		compatible = "qcom,rpm-pm6125-regulators";
+
+		/*
+		 * S3/S4 is VDD_CX
+		 * S5 is VDD_MX/WCSS_MX
+		 */
+
+		pm6125_s6: s6 {
+			regulator-min-microvolt = <400000>;
+			regulator-max-microvolt = <1419000>;
+		};
+
+		pm6125_s7: s7 {
+			regulator-min-microvolt = <1569000>;
+			regulator-max-microvolt = <2040000>;
+		};
+
+		pm6125_s8: s8 {
+			regulator-min-microvolt = <1060000>;
+			regulator-max-microvolt = <1170000>;
+		};
+
+		pm6125_l1: l1 {
+			regulator-min-microvolt = <950000>;
+			regulator-max-microvolt = <1150000>;
+		};
+
+		pm6125_l4: l4 {
+			regulator-min-microvolt = <720000>;
+			regulator-max-microvolt = <1050000>;
+		};
+
+		pm6125_l5: l5 {
+			regulator-min-microvolt = <1648000>;
+			/* 3.056V capped to 2.96V for SDHCI */
+			regulator-max-microvolt = <3200000>;
+			regulator-allow-set-load;
+			/* Broken hw, this one can't be turned off or SDHCI will break! */
+			regulator-always-on;
+		};
+
+		pm6125_l6: l6 {
+			regulator-min-microvolt = <570000>;
+			regulator-max-microvolt = <650000>;
+		};
+
+		pm6125_l7: l7 {
+			/* 1.2V-1.304V fixed at 1.256V for SDHCI bias */
+			regulator-min-microvolt = <1256000>;
+			regulator-max-microvolt = <1256000>;
+			/*
+			 * TODO: SDHCI seems to also work with this one turned off, however
+			 * there exists a possibility that it may not work with some very
+			 * specific SDCard types, perhaps validating this against a wide
+			 * range of models could rule that out, saving some power would
+			 * certainly be nice..
+			 */
+			regulator-always-on;
+		};
+
+		pm6125_l8: l8 {
+			regulator-min-microvolt = <400000>;
+			regulator-max-microvolt = <728000>;
+		};
+
+		pm6125_l9: l9 {
+			regulator-min-microvolt = <1504000>;
+			regulator-max-microvolt = <2000000>;
+		};
+
+		pm6125_l10: l10 {
+			regulator-min-microvolt = <1700000>;
+			regulator-max-microvolt = <1900000>;
+		};
+
+		pm6125_l11: l11 {
+			regulator-min-microvolt = <1700000>;
+			regulator-max-microvolt = <1950000>;
+		};
+
+		pm6125_l12: l12 {
+			regulator-min-microvolt = <1620000>;
+			regulator-max-microvolt = <1980000>;
+		};
+
+		pm6125_l13: l13 {
+			regulator-min-microvolt = <1504000>;
+			regulator-max-microvolt = <2000000>;
+		};
+
+		pm6125_l14: l14 {
+			regulator-min-microvolt = <1700000>;
+			regulator-max-microvolt = <1900000>;
+		};
+
+		pm6125_l15: l15 {
+			regulator-min-microvolt = <2700000>;
+			regulator-max-microvolt = <3544000>;
+		};
+
+		pm6125_l16: l16 {
+			regulator-min-microvolt = <1700000>;
+			regulator-max-microvolt = <1900000>;
+		};
+
+		pm6125_l17: l17 {
+			regulator-min-microvolt = <1220000>;
+			regulator-max-microvolt = <1304000>;
+		};
+
+		pm6125_l18: l18 {
+			/* 1.104V-1.312V fixed @ 1.232V for DSIPHY */
+			regulator-min-microvolt = <1100000>;
+			regulator-max-microvolt = <1300000>;
+		};
+
+		pm6125_l19: l19 {
+			regulator-min-microvolt = <1620000>;
+			regulator-max-microvolt = <3300000>;
+		};
+
+		pm6125_l20: l20 {
+			regulator-min-microvolt = <1620000>;
+			regulator-max-microvolt = <3300000>;
+		};
+
+		pm6125_l21: l21 {
+			regulator-min-microvolt = <1600000>;
+			regulator-max-microvolt = <3544000>;
+		};
+
+		pm6125_l22: l22 {
+			regulator-min-microvolt = <2950000>;
+			/* 3.304V capped to 2.96V for SDHCI */
+			regulator-max-microvolt = <3300000>;
+			regulator-allow-set-load;
+			/* Broken hw, this one can't be turned off or SDHCI will break! */
+			regulator-always-on;
+		};
+
+		pm6125_l23: l23 {
+			regulator-min-microvolt = <3200000>;
+			regulator-max-microvolt = <3400000>;
+		};
+
+		pm6125_l24: l24 {
+			regulator-min-microvolt = <2700000>;
+			regulator-max-microvolt = <3544000>;
+		};
+	};
+};
+
+&qupv3_id_0 {
+	status = "okay";
+};
+
+&sdc2_state_off {
+	cd-pins {
+		pins = "gpio88";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+};
+
+&sdc2_state_on {
+	cd-pins {
+		pins = "gpio88";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+};
+
+&tlmm {
+	/*
+	 * This is a wholly undocumented pin (other than a single vague "pwr-gpios" reference)
+	 * that needs to be toggled for the SD Card slot to work properly..
+	 */
+	sdc2_gate_pin: sdc2-gate-state {
+		pins = "gpio93";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+		output-high;
+	};
+
+	ts_reset_active: ts-reset-active-state {
+		pins = "gpio86";
+		function = "gpio";
+		drive-strength = <16>;
+		bias-pull-up;
+	};
+
+	ts_reset_suspend: ts-reset-suspend-state {
+		pins = "gpio86";
+		function = "gpio";
+		drive-strength = <16>;
+		bias-disable;
+		output-high;
+	};
+
+	ts_int_active: ts-int-active-state {
+		pins = "gpio80";
+		function = "gpio";
+		drive-strength = <16>;
+		bias-pull-up;
+	};
+
+	ts_int_suspend: ts-int-suspend-state {
+		pins = "gpio80";
+		function = "gpio";
+		drive-strength = <16>;
+		input-enable;
+		bias-disable;
+	};
+
+	te_active: te-active-state {
+		pins = "gpio81";
+		function = "mdp_vsync";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	mdss_dsi_active: dsi-active-state {
+		pins = "gpio82";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-disable;
+	};
+
+	charger_int_default: charger-int-default-state {
+		pins = "gpio65";
+		function = "gpio";
+		drive-strength = <2>;
+		input-enable;
+		bias-pull-up;
+	};
+
+	sy6974_en: sy6974-en-state {
+		pins = "gpio16";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	rt1715_int_default: rt1715-int-default-state {
+		pins = "gpio17";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	/* can active ldo via gpio */
+	rt1715_ldo_en: rt1715-ldo-enable-state {
+		pins = "gpio72";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable = <0x00>;
+		output-high;
+	};
+
+	sy6974_int_default: sy6974-int-default-state {
+		pins = "gpio66";
+		function = "gpio";
+		drive-strength = <2>;
+		input-enable;
+		bias-pull-up;
+	};
+
+	pm8008_int_default: pm8008-int-default-state {
+		pins = "gpio25";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+};
+
+&sdhc_2 {
+	pinctrl-0 = <&sdc2_state_on &sdc2_gate_pin>;
+	pinctrl-1 = <&sdc2_state_off>;
+	pinctrl-names = "default", "sleep";
+
+	cd-gpios = <&tlmm 88 GPIO_ACTIVE_LOW>;
+
+	vmmc-supply = <&pm6125_l22>;
+	vqmmc-supply = <&pm6125_l5>;
+
+	no-sdio;
+	no-mmc;
+
+	status = "okay";
+};
+
+&sleep_clk {
+	clock-frequency = <32764>;
+};
+
+&uart3 {
+	status = "okay";
+
+	/delete-property/interrupts;
+	interrupts-extended = <&intc GIC_SPI 330 IRQ_TYPE_LEVEL_HIGH>,
+				<&tlmm 11 IRQ_TYPE_EDGE_FALLING>;
+
+	//pinctrl-names = "default", "sleep";
+	//pinctrl-1 = <&qup_uart3_sleep>;
+
+	bluetooth: bluetooth {
+		compatible = "qcom,wcn3990-bt";
+		vddio-supply = <&pm6125_l9>;
+		vddxo-supply = <&pm6125_l16>;
+		//vddrf-supply = <&vreg_l2c_1p3>;
+		//vddch0-supply = <&vreg_l10c_3p3>;
+		max-speed = <3200000>;
+	};
+};
+
+
+&ufs_mem_hc {
+	vcc-supply = <&pm6125_l24>;
+	vcc-max-microamp = <600000>;
+	vccq2-supply = <&pm6125_l11>;
+	vccq2-max-microamp = <600000>;
+	vdd-hba-supply = <&pm6125_l18>; // ??? sus
+	status = "okay";
+};
+
+&ufs_mem_phy {
+	vdda-phy-supply = <&pm6125_l4>;
+	vdda-pll-supply = <&pm6125_l18>;
+	status = "okay";
+};
+
+&usb {
+	qcom,select-utmi-as-pipe-clk;
+	status = "okay";
+};
+
+&usb_dwc3 {
+	maximum-speed = "high-speed";
+
+	phys = <&usb_hsphy>;
+	phy-names = "usb2-phy";
+};
+
+&usb_dwc3_hs {
+	remote-endpoint = <&usb_con_hs>;
+};
+
+&usb_hsphy {
+	vdda-pll-supply = <&pm6125_l4>;
+	vdda18-supply = <&pm6125_l12>;
+	vdda33-supply = <&pm6125_l15>;
+	status = "okay";
+};
+
+&wifi {
+	vdd-0.8-cx-mx-supply = <&pm6125_l8>;
+	vdd-1.8-xo-supply = <&pm6125_l16>;
+	vdd-1.3-rfa-supply = <&pm6125_l17>;
+	vdd-3.3-ch0-supply = <&pm6125_l23>;
+	//qcom,ath10k-calibration-variant = "Lenovo_P11";
+	status = "okay";
+};
+
+&xo_board {
+	clock-frequency = <19200000>;
+};

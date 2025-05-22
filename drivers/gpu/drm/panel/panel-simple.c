@@ -5534,6 +5534,38 @@ static const struct panel_desc_dsi osd101t2045_53ts = {
 	.lanes = 4,
 };
 
+static const struct drm_display_mode nt36523w_tm_2k_mode = {
+	.clock = (1200 + 30 + 1 + 30) * (2000 + 26 + 3 + 92) * 60 / 1000,
+	.hdisplay = 1200,
+	.hsync_start = 1200 + 30,
+	.hsync_end = 1200 + 30 + 1,
+	.htotal = 1200 + 30 + 1 + 30,
+	.vdisplay = 2000,
+	.vsync_start = 2000 + 26,
+	.vsync_end = 2000 + 26 + 3,
+	.vtotal = 2000 + 26 + 3 + 92,
+	.width_mm = 139,
+	.height_mm = 231,
+	.type = DRM_MODE_TYPE_DRIVER,
+};
+
+static const struct panel_desc_dsi nt36523w_tm_2k = {
+	.desc = {
+		.modes = &nt36523w_tm_2k_mode,
+		.num_modes = 1,
+		.bpc = 8,
+		.size = {
+			.width = 139,
+			.height = 231,
+		},
+		.connector_type = DRM_MODE_CONNECTOR_DSI,
+	},
+	.flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_CLOCK_NON_CONTINUOUS |
+		 MIPI_DSI_MODE_LPM,
+	.format = MIPI_DSI_FMT_RGB888,
+	.lanes = 4,
+};
+
 static const struct of_device_id dsi_of_match[] = {
 	{
 		.compatible = "auo,b080uan01",
@@ -5556,6 +5588,9 @@ static const struct of_device_id dsi_of_match[] = {
 	}, {
 		.compatible = "osddisplays,osd101t2045-53ts",
 		.data = &osd101t2045_53ts
+	}, {
+		.compatible = "novatek,nt36523w-tm-2k",
+		.data = &nt36523w_tm_2k
 	}, {
 		/* sentinel */
 	}

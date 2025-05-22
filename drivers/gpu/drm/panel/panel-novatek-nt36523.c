@@ -930,6 +930,138 @@ static int j606f_boe_init_sequence(struct panel_info *pinfo)
 
 	return 0;
 }
+static int tb128fu_boe_init_sequence(struct panel_info *pinfo)
+{
+	struct mipi_dsi_device *dsi = pinfo->dsi[0];
+	struct device *dev = &dsi->dev;
+	int ret;
+
+	mipi_dsi_dcs_write_seq(dsi, 0xff, 0x23);
+	mipi_dsi_dcs_write_seq(dsi, 0xfb, 0x01);
+	mipi_dsi_dcs_write_seq(dsi, 0x00, 0x80);
+	mipi_dsi_dcs_write_seq(dsi, 0x07, 0x00);
+	mipi_dsi_dcs_write_seq(dsi, 0x08, 0x01);
+	mipi_dsi_dcs_write_seq(dsi, 0x09, 0x00);
+	mipi_dsi_dcs_write_seq(dsi, 0xff, 0x25);
+	mipi_dsi_dcs_write_seq(dsi, 0xfb, 0x01);
+	mipi_dsi_dcs_write_seq(dsi, 0x17, 0xc2);
+	mipi_dsi_dcs_write_seq(dsi, 0x19, 0x0f);
+	mipi_dsi_dcs_write_seq(dsi, 0x1b, 0x5b);
+	mipi_dsi_dcs_write_seq(dsi, 0x1d, 0x00);
+	mipi_dsi_dcs_write_seq(dsi, 0xff, 0x27);
+	mipi_dsi_dcs_write_seq(dsi, 0xfb, 0x01);
+	mipi_dsi_dcs_write_seq(dsi, 0xd0, 0x71);
+	mipi_dsi_dcs_write_seq(dsi, 0xd1, 0x84);
+	mipi_dsi_dcs_write_seq(dsi, 0xd2, 0x30);
+	mipi_dsi_dcs_write_seq(dsi, 0xd4, 0x10);
+	mipi_dsi_dcs_write_seq(dsi, 0xde, 0x00);
+	mipi_dsi_dcs_write_seq(dsi, 0xdf, 0x00);
+	mipi_dsi_dcs_write_seq(dsi, 0xff, 0x2a);
+	mipi_dsi_dcs_write_seq(dsi, 0xfb, 0x01);
+	mipi_dsi_dcs_write_seq(dsi, 0xf1, 0x03);
+	mipi_dsi_dcs_write_seq(dsi, 0xff, 0xd0);
+	mipi_dsi_dcs_write_seq(dsi, 0xfb, 0x01);
+	mipi_dsi_dcs_write_seq(dsi, 0x00, 0x33);
+	mipi_dsi_dcs_write_seq(dsi, 0xff, 0x26);
+	mipi_dsi_dcs_write_seq(dsi, 0xfb, 0x01);
+	mipi_dsi_dcs_write_seq(dsi, 0x00, 0x81);
+	mipi_dsi_dcs_write_seq(dsi, 0x01, 0x70);
+	mipi_dsi_dcs_write_seq(dsi, MIPI_DCS_SET_VSYNC_TIMING, 0x75);
+	mipi_dsi_dcs_write_seq(dsi, 0x41, 0x75);
+	mipi_dsi_dcs_write_seq(dsi, 0x42, 0x75);
+	mipi_dsi_dcs_write_seq(dsi, MIPI_DCS_GET_SCANLINE, 0x02);
+	mipi_dsi_dcs_write_seq(dsi, 0x46, 0x75);
+	mipi_dsi_dcs_write_seq(dsi, 0x47, 0x02);
+	mipi_dsi_dcs_write_seq(dsi, 0x48, 0x85);
+	mipi_dsi_dcs_write_seq(dsi, 0x4d, 0x4e);
+	mipi_dsi_dcs_write_seq(dsi, 0x4e, 0x1b);
+	ret = mipi_dsi_dcs_set_display_brightness(dsi, 0);
+	if (ret < 0) {
+		dev_err(dev, "Failed to set display brightness: %d\n", ret);
+		return ret;
+	}
+	mipi_dsi_dcs_write_seq(dsi, 0x52, 0x6a);
+	mipi_dsi_dcs_write_seq(dsi, 0x56, 0x00);
+	mipi_dsi_dcs_write_seq(dsi, 0x58, 0x6a);
+	mipi_dsi_dcs_write_seq(dsi, 0x5b, 0x00);
+	mipi_dsi_dcs_write_seq(dsi, 0x5c, 0x6a);
+	mipi_dsi_dcs_write_seq(dsi, 0x64, 0x00);
+	mipi_dsi_dcs_write_seq(dsi, 0x65, 0x6a);
+	mipi_dsi_dcs_write_seq(dsi, 0x8c, 0x7c);
+	mipi_dsi_dcs_write_seq(dsi, 0x92, 0x50);
+	mipi_dsi_dcs_write_seq(dsi, 0x93, 0x10);
+	mipi_dsi_dcs_write_seq(dsi, 0x94, 0x10);
+	mipi_dsi_dcs_write_seq(dsi, 0x96, 0x10);
+	mipi_dsi_dcs_write_seq(dsi, 0xff, 0x25);
+	mipi_dsi_dcs_write_seq(dsi, 0xfb, 0x01);
+	mipi_dsi_dcs_write_seq(dsi, 0x15, 0x02);
+	mipi_dsi_dcs_write_seq(dsi, 0x16, 0xf3);
+	mipi_dsi_dcs_write_seq(dsi, 0xff, 0x20);
+	mipi_dsi_dcs_write_seq(dsi, 0xfb, 0x01);
+	mipi_dsi_dcs_write_seq(dsi, 0x58, 0x40);
+	mipi_dsi_dcs_write_seq(dsi, 0x75, 0xc4);
+	mipi_dsi_dcs_write_seq(dsi, 0x8b, 0x23);
+	mipi_dsi_dcs_write_seq(dsi, 0x8c, 0x23);
+	mipi_dsi_dcs_write_seq(dsi, 0xff, 0x2a);
+	mipi_dsi_dcs_write_seq(dsi, 0xfb, 0x01);
+	mipi_dsi_dcs_write_seq(dsi, 0x01, 0x01);
+	mipi_dsi_dcs_write_seq(dsi, 0x02, 0x11);
+	mipi_dsi_dcs_write_seq(dsi, 0x05, 0x01);
+	mipi_dsi_dcs_write_seq(dsi, 0x06, 0x75);
+	mipi_dsi_dcs_write_seq(dsi, 0x08, 0x01);
+	mipi_dsi_dcs_write_seq(dsi, 0x09, 0x75);
+	mipi_dsi_dcs_write_seq(dsi, 0x99, 0x95);
+	mipi_dsi_dcs_write_seq(dsi, 0x9a, 0x03);
+	mipi_dsi_dcs_write_seq(dsi, 0xff, 0xe0);
+	mipi_dsi_dcs_write_seq(dsi, 0xfb, 0x01);
+	mipi_dsi_dcs_write_seq(dsi, 0x14, 0x60);
+	mipi_dsi_dcs_write_seq(dsi, 0x16, 0xc0);
+	mipi_dsi_dcs_write_seq(dsi, 0xff, 0xf0);
+	mipi_dsi_dcs_write_seq(dsi, 0xfb, 0x01);
+	ret = mipi_dsi_dcs_set_pixel_format(dsi, 0x08);
+	if (ret < 0) {
+		dev_err(dev, "Failed to set pixel format: %d\n", ret);
+		return ret;
+	}
+	mipi_dsi_dcs_write_seq(dsi, 0xff, 0x10);
+	mipi_dsi_dcs_write_seq(dsi, 0xfb, 0x01);
+	mipi_dsi_dcs_write_seq(dsi, 0xb9, 0x01);
+	mipi_dsi_dcs_write_seq(dsi, 0xff, 0x20);
+	mipi_dsi_dcs_write_seq(dsi, 0xfb, 0x01);
+	mipi_dsi_dcs_write_seq(dsi, 0x18, 0x40);
+	mipi_dsi_dcs_write_seq(dsi, 0xff, 0x10);
+	mipi_dsi_dcs_write_seq(dsi, 0xfb, 0x01);
+	mipi_dsi_dcs_write_seq(dsi, 0xb9, 0x02);
+	mipi_dsi_dcs_write_seq(dsi, 0xbb, 0x13);
+	mipi_dsi_dcs_write_seq(dsi, 0x3b,
+				     0x03, 0x5f, 0x1a, 0x04, 0x04);
+	mipi_dsi_dcs_write_seq(dsi, 0x68, 0x03, 0x01);
+	mipi_dsi_dcs_set_display_brightness(dsi, 0x0000);
+	mipi_dsi_dcs_write_seq(dsi, MIPI_DCS_WRITE_CONTROL_DISPLAY,
+				     0x2c);
+	mipi_dsi_dcs_write_seq(dsi, MIPI_DCS_WRITE_POWER_SAVE, 0x00);
+	ret = mipi_dsi_dcs_set_tear_on(dsi, MIPI_DSI_DCS_TEAR_MODE_VBLANK);
+	if (ret < 0) {
+		dev_err(dev, "Failed to set tear on: %d\n", ret);
+		return ret;
+	}
+
+	ret = mipi_dsi_dcs_exit_sleep_mode(dsi);
+	if (ret < 0) {
+		dev_err(dev, "Failed to exit sleep mode: %d\n", ret);
+		return ret;
+	}
+	msleep(120);
+
+	ret = mipi_dsi_dcs_set_display_on(dsi);
+	if (ret < 0) {
+		dev_err(dev, "Failed to set display on: %d\n", ret);
+		return ret;
+	}
+	msleep(48);
+
+	return 0;
+}
 
 static const struct drm_display_mode elish_boe_modes[] = {
 	{
@@ -972,6 +1104,22 @@ static const struct drm_display_mode j606f_boe_modes[] = {
 		.vtotal = 2000 + 26 + 2 + 93,
 		.width_mm = 143,
 		.height_mm = 235,
+	},
+};
+
+static const struct drm_display_mode tb128fu_boe_modes[] = {
+	{
+		.clock = (1200 + 30 + 1 + 30) * (2000 + 26 + 3 + 92) * 60 / 1000,
+		.hdisplay = 1200,
+		.hsync_start = 1200 + 30,
+		.hsync_end = 1200 + 30 + 1,
+		.htotal = 1200 + 30 + 1 + 30,
+		.vdisplay = 2000,
+		.vsync_start = 2000 + 26,
+		.vsync_end = 2000 + 26 + 3,
+		.vtotal = 2000 + 26 + 3 + 92,
+		.width_mm = 139,
+		.height_mm = 231,
 	},
 };
 
@@ -1022,6 +1170,20 @@ static const struct panel_desc j606f_boe_desc = {
 	.mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
 		      MIPI_DSI_CLOCK_NON_CONTINUOUS | MIPI_DSI_MODE_LPM,
 	.init_sequence = j606f_boe_init_sequence,
+	.has_dcs_backlight = true,
+};
+
+static const struct panel_desc tb128fu_boe_desc = {
+	.modes = tb128fu_boe_modes,
+	.num_modes = ARRAY_SIZE(tb128fu_boe_modes),
+	.width_mm = 139,
+	.height_mm = 231,
+	.bpc = 8,
+	.lanes = 4,
+	.format = MIPI_DSI_FMT_RGB888,
+	.mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_CLOCK_NON_CONTINUOUS |
+		      MIPI_DSI_MODE_LPM,
+	.init_sequence = tb128fu_boe_init_sequence,
 	.has_dcs_backlight = true,
 };
 
@@ -1288,6 +1450,10 @@ static const struct of_device_id nt36523_of_match[] = {
 	{
 		.compatible = "lenovo,j606f-boe-nt36523w",
 		.data = &j606f_boe_desc,
+	},
+	{
+		.compatible = "lenovo,tb128fu-boe-nt36523w",
+		.data = &tb128fu_boe_desc,
 	},
 	{
 		.compatible = "xiaomi,elish-boe-nt36523",

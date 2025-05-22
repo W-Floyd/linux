@@ -134,9 +134,11 @@ enum {
 
 /* QCOM UFS host controller core clk frequencies */
 #define UNIPRO_CORE_CLK_FREQ_37_5_MHZ          38
+#define UNIPRO_CORE_CLK_FREQ_50_MHZ            50
 #define UNIPRO_CORE_CLK_FREQ_75_MHZ            75
 #define UNIPRO_CORE_CLK_FREQ_100_MHZ           100
 #define UNIPRO_CORE_CLK_FREQ_150_MHZ           150
+#define UNIPRO_CORE_CLK_FREQ_200_MHZ           200
 #define UNIPRO_CORE_CLK_FREQ_300_MHZ           300
 #define UNIPRO_CORE_CLK_FREQ_201_5_MHZ         202
 #define UNIPRO_CORE_CLK_FREQ_403_MHZ           403
