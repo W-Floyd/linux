@@ -1297,6 +1297,18 @@ config TOUCHSCREEN_SURFACE3_SPI
 	  To compile this driver as a module, choose M here: the
 	  module will be called surface3_spi.
 
+config TOUCHSCREEN_SW49410
+	tristate "LGE / SiliconWorks SW49410 SPI touchscreen"
+	depends on SPI
+	help
+	  Say Y here if you have the SW49410 SPI touchscreen
+	  controller chip as found on the LG G7 ThinQ in your system.
+
+	  If unsure, say N.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called sw49410_touch_spi.
+
 config TOUCHSCREEN_SX8654
 	tristate "Semtech SX8654 touchscreen"
 	depends on I2C
