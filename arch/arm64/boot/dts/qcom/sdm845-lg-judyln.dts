@@ -141,6 +141,12 @@
 	status = "okay";
 };
 
+&pmi8998_fg {
+	status = "okay";
+	monitored-battery = <&battery>;
+	power-supplies = <&pmi8998_charger>;
+};
+
 &qup_spi5_default {
 	drive-strength = <6>;
 	bias-disable;
