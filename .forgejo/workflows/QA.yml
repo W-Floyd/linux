@@ -1,0 +1,80 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+name: Quality assurance
+
+on: [pull_request]
+
+jobs:
+  checkpatch:
+    name: checkpatch
+    runs-on: codeberg-medium
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 250
+      - name: Run checkpatch review
+        uses: https://github.com/okias/checkpatch-action@1d3915e610146bbad77ef8a7a9e29338fffc85d9
+        env:
+          CHECKPATCH_COMMAND: checkpatch.pl --no-tree --strict
+
+  yaml-linting:
+    name: yaml-linting
+    runs-on: codeberg-medium
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 250
+
+      - name: Fetch file names
+        run: |
+          PR=${FORGEJO_REF#"refs/pull/"}
+          PRNUM=${PR%"/head"}  # Forgejo
+          URL=${FORGEJO_API_URL}/repos/${FORGEJO_REPOSITORY}/pulls/${PRNUM}/files
+
+          len=0
+          list=
+          p=1
+          while true; do
+            list_page=$(curl $URL?page=$p -X GET -s | jq '.[].filename' -r)
+            len_page=$(echo "$list_page" | grep -c . || true)
+            [ "$len_page" == 0 ] && break
+            list+="$list_page"$'\n'
+            ((len+=len_page))
+            ((p++))
+          done
+          echo -e " - Files $len:\n $list"
+          if [[ $len == 0 ]] ; then exit 0; fi
+          echo "list<<EOF" >> $FORGEJO_ENV
+          # here we can place the command that will generate multi-line text
+          echo $list >> $FORGEJO_ENV
+          echo "EOF" >> $FORGEJO_ENV
+
+      - name: Install yamllint
+        run: |
+          sudo apt-get -qq update > /dev/null
+          sudo apt-get -qq install python3-dev python3-pip > /dev/null
+          pip install --break-system-packages git+https://github.com/devicetree-org/dt-schema.git@master
+          pip install --break-system-packages yamllint
+
+      - name: Run yamllint review
+        run: |
+          status=0
+          touch out.txt
+          echo "dt-doc-validate output:"
+          for item in ${{ env.list }}; do
+            if [[ "${item}" != **/*yaml ]]; then
+              continue
+            fi
+
+            yamllint -d "{rules: {line-length: {level: warning, max: 100}}}" \
+                     -f github ${item}
+            yamllint -d "{rules: {line-length: {level: warning, max: 100}}}" \
+                     -f standard ${item} >> out.txt
+
+            # remove warning about URL
+            dt-doc-validate "${item}" 2>&1 || status=1
+
+            exit $status
+          done
+
+          echo "yamllint output:"
+          cat out.txt

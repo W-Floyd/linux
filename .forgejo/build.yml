@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+name: Build
+
+on: [pull_request]
+
+jobs:
+  build:
+    name: build-kernel
+    runs-on: codeberg-medium
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 150
+
+      - name: install dependecies
+        run: |
+          sudo apt-get -qq update > /dev/null
+          sudo apt-get -qq install clang llvm lld bc git build-essential binutils-multiarch device-tree-compiler fakeroot libncurses5-dev libssl-dev bison flex libelf-dev dwarves python3-pip > /dev/null
+
+      - name: defconfig+sdm845.config
+        run: |
+          ARCH=arm64 LLVM=1 make defconfig sdm845.config O=.output -j4
+
+      - name: build
+        run: |
+          ARCH=arm64 LLVM=1 make O=.output -j5
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: linux-build
+          path: .output
+          retention-days: 7
+          compression-level: 0
+          include-hidden-files: true
