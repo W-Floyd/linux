@@ -117,6 +117,19 @@
 		vin-supply = <&vreg_s3a_1p35>;
 	};
 
+	cam_vaf_2p8: cam-vaf-2p8-regulator {
+		compatible = "regulator-fixed";
+		regulator-name = "cam_vaf_2p8";
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
+		regulator-enable-ramp-delay = <100>;
+		enable-active-high;
+		gpio = <&tlmm 8 GPIO_ACTIVE_HIGH>;
+		vin-supply = <&vreg_bob>;
+
+		regulator-always-on;
+	};
+
 	vph_pwr: vph-pwr-regulator {
 		compatible = "regulator-fixed";
 		regulator-name = "vph_pwr";
@@ -513,6 +526,13 @@
 };
 
 &cci_i2c0 {
+	rear_camera_actuator: actuator@c {
+		compatible = "dongwoon,dw9714v", "dongwoon,dw9714a", "dongwoon,dw9714";
+		reg = <0x0c>;
+
+		vcc-supply = <&vreg_lvs1a_1p8>;
+	};
+
 	rear_camera: camera@1a {
 		compatible = "sony,imx519";
 		reg = <0x1a>;
@@ -533,6 +553,8 @@
 
 		orientation = <1>;
 		rotation = <270>;
+
+		lens-focus = <&rear_camera_actuator>;
 
 		port {
 			rear_camera_ep: endpoint {
