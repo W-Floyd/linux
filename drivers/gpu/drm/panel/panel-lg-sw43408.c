@@ -43,11 +43,12 @@ static inline struct sw43408_panel *to_panel_info(struct drm_panel *panel)
 	return container_of(panel, struct sw43408_panel, base);
 }
 
-static int sw43408_unprepare(struct drm_panel *panel)
+static int sw43408_disable(struct drm_panel *panel)
 {
 	struct sw43408_panel *sw43408 = to_panel_info(panel);
 	struct mipi_dsi_multi_context ctx = { .dsi = sw43408->link };
-	int ret;
+
+	sw43408->link->mode_flags &= ~MIPI_DSI_MODE_LPM;
 
 	mipi_dsi_dcs_set_display_off_multi(&ctx);
 
@@ -55,18 +56,26 @@ static int sw43408_unprepare(struct drm_panel *panel)
 
 	mipi_dsi_msleep(&ctx, 100);
 
-	gpiod_set_value(sw43408->reset_gpio, 1);
-
-	ret = regulator_bulk_disable(ARRAY_SIZE(sw43408_supplies), sw43408->supplies);
-
-	return ret ? : ctx.accum_err;
+	return ctx.accum_err;
 }
 
-static int sw43408_program(struct drm_panel *panel)
+static int sw43408_unprepare(struct drm_panel *panel)
+{
+	struct sw43408_panel *sw43408 = to_panel_info(panel);
+
+	gpiod_set_value(sw43408->reset_gpio, 1);
+	regulator_bulk_disable(ARRAY_SIZE(sw43408_supplies), sw43408->supplies);
+
+	return 0;
+}
+
+static int sw43408_enable(struct drm_panel *panel)
 {
 	struct sw43408_panel *sw43408 = to_panel_info(panel);
 	struct mipi_dsi_multi_context ctx = { .dsi = sw43408->link };
 	struct drm_dsc_picture_parameter_set pps;
+
+	sw43408->link->mode_flags |= MIPI_DSI_MODE_LPM;
 
 	mipi_dsi_dcs_write_seq_multi(&ctx, MIPI_DCS_SET_GAMMA_CURVE, 0x02);
 
@@ -106,13 +115,13 @@ static int sw43408_program(struct drm_panel *panel)
 
 	mipi_dsi_msleep(&ctx, 50);
 
-	sw43408->link->mode_flags &= ~MIPI_DSI_MODE_LPM;
+	
 
 	drm_dsc_pps_payload_pack(&pps, sw43408->link->dsc);
 
 	mipi_dsi_picture_parameter_set_multi(&ctx, &pps);
 
-	sw43408->link->mode_flags |= MIPI_DSI_MODE_LPM;
+	
 
 	/*
 	 * This panel uses PPS selectors with offset:
@@ -147,16 +156,7 @@ static int sw43408_prepare(struct drm_panel *panel)
 
 	sw43408_reset(ctx);
 
-	ret = sw43408_program(panel);
-	if (ret)
-		goto poweroff;
-
 	return 0;
-
-poweroff:
-	gpiod_set_value(ctx->reset_gpio, 1);
-	regulator_bulk_disable(ARRAY_SIZE(sw43408_supplies), ctx->supplies);
-	return ret;
 }
 
 static const struct drm_display_mode lh546wf1_ed01_mode = {
@@ -218,6 +218,8 @@ static int sw43408_backlight_init(struct sw43408_panel *ctx)
 }
 
 static const struct drm_panel_funcs sw43408_funcs = {
+	.disable = sw43408_disable,
+	.enable = sw43408_enable,
 	.unprepare = sw43408_unprepare,
 	.prepare = sw43408_prepare,
 	.get_modes = sw43408_get_modes,
