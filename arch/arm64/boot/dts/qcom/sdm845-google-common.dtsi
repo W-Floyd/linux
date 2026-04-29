@@ -465,7 +465,7 @@
 
 		clocks = <&clock_camcc CAM_CC_MCLK2_CLK>;
 		assigned-clocks = <&clock_camcc CAM_CC_MCLK2_CLK>;
-		assigned-clock-rates = <24000000>;
+		assigned-clock-rates = <19200000>;
 
 		reset-gpios = <&tlmm 21 GPIO_ACTIVE_LOW>;
 
@@ -494,7 +494,7 @@
 
 		clocks = <&clock_camcc CAM_CC_MCLK2_CLK>;
 		assigned-clocks = <&clock_camcc CAM_CC_MCLK2_CLK>;
-		assigned-clock-rates = <24000000>;
+		assigned-clock-rates = <19200000>;
 
 		reset-gpios = <&tlmm 9 GPIO_ACTIVE_LOW>;
 
