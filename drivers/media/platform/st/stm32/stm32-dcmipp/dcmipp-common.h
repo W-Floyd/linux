@@ -213,5 +213,8 @@ struct dcmipp_ent_device *dcmipp_bytecap_ent_init(struct device *dev,
 						  struct v4l2_device *v4l2_dev,
 						  void __iomem *regs);
 void dcmipp_bytecap_ent_release(struct dcmipp_ent_device *ved);
+struct dcmipp_ent_device *dcmipp_isp_ent_init(const char *entity_name,
+					      struct dcmipp_device *dcmipp);
+void dcmipp_isp_ent_release(struct dcmipp_ent_device *ved);
 
 #endif
