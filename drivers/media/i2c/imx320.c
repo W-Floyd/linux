@@ -585,7 +585,7 @@ static int imx320_read_reg(struct imx320 *imx320, u16 reg, u32 len, u32 *val)
 
 	ret = i2c_transfer(client->adapter, msgs, ARRAY_SIZE(msgs));
 	if (ret != ARRAY_SIZE(msgs))
-		return -EIO;
+		return ret < 0 ? ret : -EIO;
 
 	*val = get_unaligned_be32(data_buf);
 
@@ -596,14 +596,16 @@ static int imx320_write_reg(struct imx320 *imx320, u16 reg, u32 len, u32 val)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&imx320->sd);
 	u8 buf[6];
+	int ret;
 
 	if (len > 4)
 		return -EINVAL;
 
 	put_unaligned_be16(reg, buf);
 	put_unaligned_be32(val << (8 * (4 - len)), buf + 2);
-	if (i2c_master_send(client, buf, len + 2) != len + 2)
-		return -EIO;
+	ret = i2c_master_send(client, buf, len + 2);
+	if (ret != len + 2)
+		return ret < 0 ? ret : -EIO;
 
 	return 0;
 }
@@ -1117,6 +1119,7 @@ out_err:
 static int imx320_get_resources(struct imx320 *imx320, struct device *dev)
 {
 	unsigned int i;
+	int ret;
 
 	imx320->xclk = devm_clk_get(dev, NULL);
 	if (IS_ERR(imx320->xclk))
@@ -1132,8 +1135,12 @@ static int imx320_get_resources(struct imx320 *imx320, struct device *dev)
 	for (i = 0; i < ARRAY_SIZE(imx320_supply_name); i++)
 		imx320->supplies[i].supply = imx320_supply_name[i];
 
-	return devm_regulator_bulk_get(dev, ARRAY_SIZE(imx320_supply_name),
-				       imx320->supplies);
+	ret = devm_regulator_bulk_get(dev, ARRAY_SIZE(imx320_supply_name),
+				      imx320->supplies);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to get supplies\n");
+
+	return 0;
 }
 
 static int imx320_probe(struct i2c_client *client)
