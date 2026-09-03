@@ -264,6 +264,70 @@
 	};
 
 	/*
+	 * Front camera sub-PMIC bus. The s2mpb02 also carries two rails for
+	 * the rear camera's actuator and OIS, plus a flash/torch LED
+	 * controller that is not modelled yet.
+	 *
+	 * Only the rails with known camera consumers are described. The
+	 * bucks and buck-boost feed loads that have not been identified, and
+	 * declaring a fixed voltage for them would make the regulator core
+	 * reprogram whatever the bootloader left in place.
+	 */
+	i2c-1 {
+		compatible = "i2c-gpio";
+		sda-gpios = <&tlmm 23 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&tlmm 24 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <2>;
+		pinctrl-0 = <&i2c1_sda_state &i2c1_scl_state>;
+		pinctrl-names = "default";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		pmic@59 {
+			compatible = "samsung,s2mpb02";
+			reg = <0x59>;
+
+			regulators {
+				s2mpb02_l5: ldo5 {
+					regulator-name = "cam_front_vdig";
+					regulator-min-microvolt = <1050000>;
+					regulator-max-microvolt = <1050000>;
+				};
+
+				s2mpb02_l6: ldo6 {
+					regulator-name = "cam_front_vio";
+					regulator-min-microvolt = <1800000>;
+					regulator-max-microvolt = <1800000>;
+				};
+
+				s2mpb02_l10: ldo10 {
+					regulator-name = "cam_v_custom3";
+					regulator-min-microvolt = <1800000>;
+					regulator-max-microvolt = <1800000>;
+				};
+
+				s2mpb02_l13: ldo13 {
+					regulator-name = "cam_front_vana";
+					regulator-min-microvolt = <2800000>;
+					regulator-max-microvolt = <2800000>;
+				};
+
+				s2mpb02_l14: ldo14 {
+					regulator-name = "cam_vaf";
+					regulator-min-microvolt = <3300000>;
+					regulator-max-microvolt = <3300000>;
+				};
+
+				s2mpb02_l15: ldo15 {
+					regulator-name = "cam_v_custom4";
+					regulator-min-microvolt = <2800000>;
+					regulator-max-microvolt = <2800000>;
+				};
+			};
+		};
+	};
+
+	/*
 	 * Camera sub-PMIC bus. Supplies the rear camera rails; the sensor
 	 * itself additionally draws two rails from the s2mpb02 on another
 	 * bus, which are only needed for the actuator and OIS.
@@ -727,7 +791,7 @@
 	status = "okay";
 
 	bluetooth {
-		compatible = "brcm,bcm4349-bt";
+		compatible = "brcm,bcm4361-bt";
 
 		shutdown-gpios = <&pm8998_gpios 3 GPIO_ACTIVE_HIGH>;
 		device-wakeup-gpios = <&tlmm 136 GPIO_ACTIVE_HIGH>;
@@ -1192,6 +1256,20 @@
 		function = "mdp_vsync";
 		drive-strength = <2>;
 		bias-pull-down;
+	};
+
+	i2c1_sda_state: i2c1-sda-state {
+		pins = "gpio23";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	i2c1_scl_state: i2c1-scl-state {
+		pins = "gpio24";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
 	};
 
 	i2c2_sda_state: i2c2-sda-state {
