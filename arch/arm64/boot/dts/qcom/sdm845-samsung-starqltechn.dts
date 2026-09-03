@@ -497,8 +497,8 @@
 
 		reset-gpios = <&tlmm 12 GPIO_ACTIVE_LOW>;
 
-		pinctrl-0 = <&cam_mclk2_default>;
-		pinctrl-1 = <&cam_mclk2_sleep>;
+		pinctrl-0 = <&cam_front_mclk_active &cam_front_rst_active>;
+		pinctrl-1 = <&cam_front_mclk_suspend &cam_front_rst_suspend>;
 		pinctrl-names = "default", "sleep";
 
 		orientation = <0>;
@@ -1327,6 +1327,35 @@
 			drive-strength = <2>;
 			bias-pull-down;
 		};
+	};
+
+	cam_front_mclk_active: cam-front-mclk-active-state {
+		pins = "gpio15";
+		function = "cam_mclk";
+		drive-strength = <4>;
+		bias-disable;
+	};
+
+	cam_front_mclk_suspend: cam-front-mclk-suspend-state {
+		pins = "gpio15";
+		function = "cam_mclk";
+		drive-strength = <4>;
+		bias-pull-down;
+	};
+
+	cam_front_rst_active: cam-front-rst-active-state {
+		pins = "gpio12";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	cam_front_rst_suspend: cam-front-rst-suspend-state {
+		pins = "gpio12";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+		output-low;
 	};
 
 	dsi_default: dsi-default-state {
