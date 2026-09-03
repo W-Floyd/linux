@@ -489,6 +489,7 @@
 		clocks = <&clock_camcc CAM_CC_MCLK2_CLK>;
 		assigned-clocks = <&clock_camcc CAM_CC_MCLK2_CLK>;
 		assigned-clock-rates = <24000000>;
+		power-domains = <&clock_camcc TITAN_TOP_GDSC>;
 
 		vana-supply = <&s2mpb02_l13>;
 		vio-supply = <&s2mpb02_l6>;
