@@ -324,6 +324,36 @@
 					regulator-min-microvolt = <2800000>;
 					regulator-max-microvolt = <2800000>;
 				};
+
+				/*
+				 * BUCK1, BUCK2 and the buck-boost are the input
+				 * rails the LDOs above regulate down from, so
+				 * they have no consumer of their own and must
+				 * stay on. The bootloader leaves them in
+				 * pin-controlled mode at voltages that do not
+				 * match the ones the vendor uses, so declare
+				 * them here and let the core program them.
+				 */
+				s2mpb02_b1: buck1 {
+					regulator-name = "cam_buck1";
+					regulator-min-microvolt = <1300000>;
+					regulator-max-microvolt = <1300000>;
+					regulator-always-on;
+				};
+
+				s2mpb02_b2: buck2 {
+					regulator-name = "cam_buck2";
+					regulator-min-microvolt = <1300000>;
+					regulator-max-microvolt = <1300000>;
+					regulator-always-on;
+				};
+
+				s2mpb02_bb: bb {
+					regulator-name = "cam_buckboost";
+					regulator-min-microvolt = <3500000>;
+					regulator-max-microvolt = <3500000>;
+					regulator-always-on;
+				};
 			};
 		};
 	};
