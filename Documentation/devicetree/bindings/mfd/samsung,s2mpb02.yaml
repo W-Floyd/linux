@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/mfd/samsung,s2mpb02.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Samsung S2MPB02 Power Management IC
+
+maintainers:
+  - William Floyd <git@notmy.space>
+
+description:
+  The S2MPB02 is a companion power management IC for the camera sensors in
+  smart phones. It provides eighteen LDO regulators, two bucks and a
+  buck-boost, along with a flash/torch LED controller that is not covered by
+  this binding. It is typically reached over a dedicated I2C bus rather than
+  the main PMIC bus.
+
+properties:
+  compatible:
+    const: samsung,s2mpb02
+
+  reg:
+    maxItems: 1
+
+  regulators:
+    type: object
+    patternProperties:
+      "^(ldo([1-9]|1[0-8])|buck[12]|bb)$":
+        type: object
+        $ref: /schemas/regulator/regulator.yaml#
+        unevaluatedProperties: false
+
+        required:
+          - regulator-name
+
+    additionalProperties: false
+
+required:
+  - compatible
+  - reg
+  - regulators
+
+additionalProperties: false
+
+examples:
+  - |
+    i2c {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        pmic@59 {
+            compatible = "samsung,s2mpb02";
+            reg = <0x59>;
+
+            regulators {
+                ldo5 {
+                    regulator-name = "cam_vdig";
+                    regulator-min-microvolt = <1050000>;
+                    regulator-max-microvolt = <1050000>;
+                };
+
+                ldo6 {
+                    regulator-name = "cam_vio";
+                    regulator-min-microvolt = <1800000>;
+                    regulator-max-microvolt = <1800000>;
+                };
+
+                ldo13 {
+                    regulator-name = "cam_vana";
+                    regulator-min-microvolt = <2800000>;
+                    regulator-max-microvolt = <2800000>;
+                };
+            };
+        };
+    };
+
+...
