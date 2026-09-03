@@ -72,6 +72,18 @@
 		gpio = <&tlmm 8 GPIO_ACTIVE_HIGH>;
 	};
 
+	wlan_en: wlan-en-regulator {
+		compatible = "regulator-fixed";
+
+		regulator-name = "wlan-en";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+
+		enable-active-high;
+		gpio = <&tlmm 99 GPIO_ACTIVE_HIGH>;
+		startup-delay-us = <200000>;
+	};
+
 	vib_regulator: gpio-regulator {
 		compatible = "regulator-fixed";
 
@@ -321,6 +333,25 @@
 
 &mdss_dsi0_phy {
 	vdds-supply = <&vdda_mipi_dsi0_pll>;
+	status = "okay";
+};
+
+&pcie0 {
+	perst-gpios = <&tlmm 35 GPIO_ACTIVE_LOW>;
+	wake-gpios = <&tlmm 116 GPIO_ACTIVE_HIGH>;
+
+	vddpe-3v3-supply = <&wlan_en>;
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&pcie0_default_state>;
+
+	status = "okay";
+};
+
+&pcie0_phy {
+	vdda-phy-supply = <&vdda_pcie_core>;
+	vdda-pll-supply = <&vdda_pcie_1p2>;
+
 	status = "okay";
 };
 
@@ -1038,6 +1069,29 @@
 &tlmm {
 	gpio-reserved-ranges = <27 4>, /* SPI (eSE - embedded Secure Element) */
 			       <85 4>; /* SPI (fingerprint reader) */
+
+	pcie0_default_state: pcie0-default-state {
+		clkreq-pins {
+			pins = "gpio36";
+			function = "pci_e0";
+			bias-pull-up;
+		};
+
+		reset-n-pins {
+			pins = "gpio35";
+			function = "gpio";
+			drive-strength = <2>;
+			output-low;
+			bias-pull-down;
+		};
+
+		wake-n-pins {
+			pins = "gpio116";
+			function = "gpio";
+			drive-strength = <2>;
+			bias-pull-down;
+		};
+	};
 
 	dsi_default: dsi-default-state {
 		pins = "gpio6";
