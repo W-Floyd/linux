@@ -417,6 +417,7 @@ struct regmap_irq_chip_data *sec_irq_init(struct sec_pmic_dev *sec_pmic)
 		sec_irq_chip = &s5m8767_irq_chip;
 		break;
 	case S2DOS05:
+	case S2MPB02:
 	case S2MPB03:
 		return NULL;
 	case S2MPA01:
