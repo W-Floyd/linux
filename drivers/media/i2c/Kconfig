@@ -235,6 +235,17 @@ config VIDEO_IMX319
 	  To compile this driver as a module, choose M here: the
 	  module will be called imx319.
 
+config VIDEO_IMX320
+	tristate "Sony IMX320 sensor support"
+	depends on I2C && VIDEO_DEV
+	select V4L2_FWNODE
+	help
+	  This is a Video4Linux2 sensor driver for the Sony IMX320
+	  camera.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called imx320.
+
 config VIDEO_IMX334
 	tristate "Sony IMX334 sensor support"
 	depends on OF_GPIO
