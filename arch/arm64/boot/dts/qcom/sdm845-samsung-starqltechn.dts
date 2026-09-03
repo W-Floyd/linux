@@ -29,6 +29,10 @@
 	model = "Samsung Galaxy S9 SM-G9600";
 	compatible = "samsung,starqltechn", "qcom,sdm845";
 
+	aliases {
+		serial0 = &uart9;
+	};
+
 	battery: battery {
 		compatible = "simple-battery";
 		constant-charge-current-max-microamp = <2150000>;
@@ -254,6 +258,71 @@
 					regulator-min-microvolt = <850000>;
 					regulator-max-microvolt = <2100000>;
 					regulator-name = "buck";
+				};
+			};
+		};
+	};
+
+	/*
+	 * Camera sub-PMIC bus. Supplies the rear camera rails; the sensor
+	 * itself additionally draws two rails from the s2mpb02 on another
+	 * bus, which are only needed for the actuator and OIS.
+	 */
+	i2c-2 {
+		compatible = "i2c-gpio";
+		sda-gpios = <&tlmm 11 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&tlmm 74 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <2>;
+		pinctrl-0 = <&i2c2_sda_state &i2c2_scl_state>;
+		pinctrl-names = "default";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		pmic@56 {
+			compatible = "samsung,s2mpb03";
+			reg = <0x56>;
+
+			regulators {
+				s2mpb03_l1: ldo1 {
+					regulator-name = "cam_vdig";
+					regulator-min-microvolt = <1000000>;
+					regulator-max-microvolt = <1000000>;
+				};
+
+				s2mpb03_l2: ldo2 {
+					regulator-name = "cam_v_custom2";
+					regulator-min-microvolt = <1100000>;
+					regulator-max-microvolt = <1100000>;
+				};
+
+				s2mpb03_l3: ldo3 {
+					regulator-name = "cam_vio";
+					regulator-min-microvolt = <1800000>;
+					regulator-max-microvolt = <1800000>;
+				};
+
+				s2mpb03_l4: ldo4 {
+					regulator-name = "cam_v_custom10";
+					regulator-min-microvolt = <1100000>;
+					regulator-max-microvolt = <1100000>;
+				};
+
+				s2mpb03_l5: ldo5 {
+					regulator-name = "cam_vana";
+					regulator-min-microvolt = <3200000>;
+					regulator-max-microvolt = <3200000>;
+				};
+
+				s2mpb03_l6: ldo6 {
+					regulator-name = "cam_v_custom1";
+					regulator-min-microvolt = <2850000>;
+					regulator-max-microvolt = <2850000>;
+				};
+
+				s2mpb03_l7: ldo7 {
+					regulator-name = "cam_v_custom5";
+					regulator-min-microvolt = <2800000>;
+					regulator-max-microvolt = <2800000>;
 				};
 			};
 		};
@@ -652,7 +721,18 @@
 };
 
 &uart9 {
+	/* Bluetooth needs a serdev-capable port, not the console compatible */
+	compatible = "qcom,geni-uart";
+
 	status = "okay";
+
+	bluetooth {
+		compatible = "brcm,bcm4349-bt";
+
+		shutdown-gpios = <&pm8998_gpios 3 GPIO_ACTIVE_HIGH>;
+		device-wakeup-gpios = <&tlmm 136 GPIO_ACTIVE_HIGH>;
+		host-wakeup-gpios = <&tlmm 108 GPIO_ACTIVE_HIGH>;
+	};
 };
 
 &i2c14 {
@@ -1112,6 +1192,20 @@
 		function = "mdp_vsync";
 		drive-strength = <2>;
 		bias-pull-down;
+	};
+
+	i2c2_sda_state: i2c2-sda-state {
+		pins = "gpio11";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	i2c2_scl_state: i2c2-scl-state {
+		pins = "gpio74";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
 	};
 
 	i2c21_sda_state: i2c21-sda-state {
