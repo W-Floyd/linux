@@ -10,6 +10,7 @@
 #include <dt-bindings/input/linux-event-codes.h>
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/leds/common.h>
+#include <dt-bindings/media/video-interfaces.h>
 #include <dt-bindings/regulator/qcom,rpmh-regulator.h>
 #include <dt-bindings/sound/qcom,q6afe.h>
 #include <dt-bindings/sound/qcom,q6asm.h>
@@ -428,10 +429,59 @@
 	vdda-pll-supply = <&vreg_l26a_1p2>;
 
 	status = "okay";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@2 {
+			reg = <2>;
+
+			csiphy2_ep: endpoint {
+				bus-type = <MEDIA_BUS_TYPE_CSI2_DPHY>;
+				data-lanes = <0 1>;
+				remote-endpoint = <&imx320_ep>;
+			};
+		};
+	};
 };
 
 &cci {
 	status = "okay";
+};
+
+&cci_i2c1 {
+	/* Front camera, Sony IMX320 8MP */
+	camera@10 {
+		compatible = "sony,imx320";
+		reg = <0x10>;
+
+		clocks = <&clock_camcc CAM_CC_MCLK2_CLK>;
+		assigned-clocks = <&clock_camcc CAM_CC_MCLK2_CLK>;
+		assigned-clock-rates = <24000000>;
+
+		vana-supply = <&s2mpb02_l13>;
+		vio-supply = <&s2mpb02_l6>;
+		vcore-supply = <&s2mpb02_l5>;
+
+		reset-gpios = <&tlmm 12 GPIO_ACTIVE_LOW>;
+
+		pinctrl-0 = <&cam_mclk2_default>;
+		pinctrl-1 = <&cam_mclk2_sleep>;
+		pinctrl-names = "default", "sleep";
+
+		orientation = <0>;
+		rotation = <270>;
+
+		port {
+			imx320_ep: endpoint {
+				remote-endpoint = <&csiphy2_ep>;
+				data-lanes = <1 2>;
+				link-frequencies = /bits/ 64 <172500000 681000000
+							      738000000>;
+			};
+		};
+	};
 };
 
 &gpu {
