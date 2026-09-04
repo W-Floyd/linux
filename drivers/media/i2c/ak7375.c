@@ -51,6 +51,19 @@ static const struct ak73xx_chipdef ak7345_cdef = {
 	.power_delay_us	= 20000,
 };
 
+static const struct ak73xx_chipdef ak7374_cdef = {
+	.reg_position	= 0x0,
+	.reg_cont	= 0x2,
+	.shift_pos	= 6,	/* 10 bits position values, need to << 6 */
+	.mode_active	= 0x0,
+	.has_standby	= false,
+	.focus_pos_max	= 1023,
+	.focus_steps	= 1,
+	.ctrl_steps	= 16,
+	.ctrl_delay_us	= 1000,
+	.power_delay_us	= 10000,
+};
+
 static const struct ak73xx_chipdef ak7375_cdef = {
 	.reg_position	= 0x0,
 	.reg_cont	= 0x2,
@@ -330,6 +343,7 @@ static int __maybe_unused ak7375_vcm_resume(struct device *dev)
 
 static const struct of_device_id ak7375_of_table[] = {
 	{ .compatible = "asahi-kasei,ak7345", .data = &ak7345_cdef, },
+	{ .compatible = "asahi-kasei,ak7374", .data = &ak7374_cdef, },
 	{ .compatible = "asahi-kasei,ak7375", .data = &ak7375_cdef, },
 	{ /* sentinel */ }
 };
