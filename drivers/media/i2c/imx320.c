@@ -63,9 +63,16 @@
 #define IMX320_DATA_LANES		2
 #define IMX320_RGB_DEPTH		10
 
-/* Time from XCLR release to the sensor accepting I2C, T7 in Sony datasheets */
-#define IMX320_XCLR_MIN_DELAY_US	8000
-#define IMX320_XCLR_DELAY_RANGE_US	1000
+/*
+ * Power-up timing, measured from the stock kernel with ftrace. The front
+ * module releases XCLR *before* MCLK starts, which is the opposite of the
+ * rear sensor on this board:
+ *
+ *	XCLR high -> 4.2 ms -> MCLK on -> 9.7 ms -> first CCI transfer
+ */
+#define IMX320_XCLR_TO_MCLK_US		5000
+#define IMX320_MCLK_TO_I2C_US		10000
+#define IMX320_DELAY_RANGE_US		1000
 
 struct imx320_reg {
 	u16 address;
@@ -910,19 +917,23 @@ static int imx320_power_on(struct device *dev)
 		return ret;
 	}
 
+	gpiod_set_value_cansleep(imx320->reset_gpio, 0);
+	usleep_range(IMX320_XCLR_TO_MCLK_US,
+		     IMX320_XCLR_TO_MCLK_US + IMX320_DELAY_RANGE_US);
+
 	ret = clk_prepare_enable(imx320->xclk);
 	if (ret) {
 		dev_err(dev, "failed to enable clock\n");
-		goto reg_off;
+		goto reset_assert;
 	}
 
-	gpiod_set_value_cansleep(imx320->reset_gpio, 0);
-	usleep_range(IMX320_XCLR_MIN_DELAY_US,
-		     IMX320_XCLR_MIN_DELAY_US + IMX320_XCLR_DELAY_RANGE_US);
+	usleep_range(IMX320_MCLK_TO_I2C_US,
+		     IMX320_MCLK_TO_I2C_US + IMX320_DELAY_RANGE_US);
 
 	return 0;
 
-reg_off:
+reset_assert:
+	gpiod_set_value_cansleep(imx320->reset_gpio, 1);
 	regulator_bulk_disable(ARRAY_SIZE(imx320_supply_name), imx320->supplies);
 
 	return ret;
