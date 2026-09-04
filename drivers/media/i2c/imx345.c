@@ -4239,6 +4239,7 @@ static int imx345_init_controls(struct imx345 *imx345)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&imx345->sd);
 	struct v4l2_ctrl_handler *ctrl_hdlr = &imx345->ctrl_handler;
+	struct v4l2_fwnode_device_properties props;
 	const struct imx345_mode *mode = imx345->cur_mode;
 	s64 exposure_max, vblank_def, vblank_min, hblank;
 	int ret;
@@ -4304,6 +4305,15 @@ static int imx345_init_controls(struct imx345 *imx345)
 		dev_err(&client->dev, "control init failed: %d\n", ret);
 		goto error;
 	}
+
+	ret = v4l2_fwnode_device_parse(&client->dev, &props);
+	if (ret)
+		goto error;
+
+	ret = v4l2_ctrl_new_fwnode_properties(ctrl_hdlr, &imx345_ctrl_ops,
+					      &props);
+	if (ret)
+		goto error;
 
 	imx345->sd.ctrl_handler = ctrl_hdlr;
 
