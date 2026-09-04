@@ -3737,10 +3737,12 @@ static const char * const imx345_supply_name[] = {
 };
 
 /*
- * The Bayer order has not been confirmed against hardware. If captured
- * frames come out with red and blue swapped, this is the value to change.
+ * Confirmed against hardware by photographing a colour bar chart: with
+ * SRGGB10 the green and magenta bars swap with each other while greys stay
+ * neutral, which is the signature of the CFA phase being off by one pixel.
+ * If red and blue turn out to be swapped as well, change this to SGBRG10.
  */
-#define IMX345_MBUS_CODE MEDIA_BUS_FMT_SRGGB10_1X10
+#define IMX345_MBUS_CODE MEDIA_BUS_FMT_SGRBG10_1X10
 
 static const struct imx345_mode supported_modes[] = {
 	{
