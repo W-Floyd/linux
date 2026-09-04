@@ -590,6 +590,16 @@ static int bcm_setup(struct hci_uart *hu)
 	hu->hdev->set_diag = bcm_set_diag;
 	hu->hdev->set_bdaddr = btbcm_set_bdaddr;
 
+	/* BCM4347/BCM4361-family controllers answer LE Read Transmit Power with a
+	 * malformed Command Complete ("unexpected cc 0x204b length: 1 < 3"), which
+	 * aborts HCI init. btbcm only sets this quirk from a DMI match, which never
+	 * fires on DT platforms.
+	 *
+	 * TODO upstream: gate this on the chip/compatible rather than applying it to
+	 * every UART-attached BCM controller.
+	 */
+	hci_set_quirk(hu->hdev, HCI_QUIRK_BROKEN_READ_TRANSMIT_POWER);
+
 	err = btbcm_initialize(hu->hdev, &fw_load_done, use_autobaud_mode);
 	if (err)
 		return err;
@@ -1590,6 +1600,7 @@ static const struct of_device_id bcm_bluetooth_of_match[] = {
 	{ .compatible = "brcm,bcm43430a1-bt" },
 	{ .compatible = "brcm,bcm43438-bt", .data = &bcm43438_device_data },
 	{ .compatible = "brcm,bcm4349-bt", .data = &bcm43438_device_data },
+	{ .compatible = "brcm,bcm4361-bt" },
 	{ .compatible = "brcm,bcm43540-bt", .data = &bcm4354_device_data },
 	{ .compatible = "brcm,bcm4335a0" },
 	{ .compatible = "cypress,cyw4373a0-bt", .data = &cyw4373a0_device_data },
