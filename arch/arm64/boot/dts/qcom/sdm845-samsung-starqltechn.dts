@@ -509,6 +509,7 @@
 		vcustom10-supply = <&s2mpb03_l4>;
 
 		reset-gpios = <&tlmm 25 GPIO_ACTIVE_LOW>;
+		lens-focus = <&cam_vcm>;
 
 		pinctrl-0 = <&cam_rear_mclk_active &cam_rear_rst_active>;
 		pinctrl-1 = <&cam_rear_mclk_suspend &cam_rear_rst_suspend>;
@@ -559,6 +560,24 @@
 							      738000000>;
 			};
 		};
+	};
+};
+
+&i2c4 {
+	/*
+	 * Rear camera focus actuator, plus the OIS at 0x48 and the aperture
+	 * motor at 0x4c, neither of which has a mainline driver yet.
+	 */
+	clock-frequency = <400000>;
+
+	status = "okay";
+
+	cam_vcm: camera-actuator@c {
+		compatible = "asahi-kasei,ak7374";
+		reg = <0x0c>;
+
+		vdd-supply = <&s2mpb02_l14>;
+		vio-supply = <&s2mpb02_l10>;
 	};
 };
 
