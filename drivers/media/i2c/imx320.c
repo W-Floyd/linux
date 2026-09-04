@@ -999,6 +999,7 @@ static int imx320_init_controls(struct imx320 *imx320)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&imx320->sd);
 	struct v4l2_ctrl_handler *ctrl_hdlr = &imx320->ctrl_handler;
+	struct v4l2_fwnode_device_properties props;
 	const struct imx320_mode *mode = imx320->cur_mode;
 	s64 exposure_max, vblank_def, vblank_min, hblank;
 	int ret;
@@ -1064,6 +1065,15 @@ static int imx320_init_controls(struct imx320 *imx320)
 		dev_err(&client->dev, "control init failed: %d\n", ret);
 		goto error;
 	}
+
+	ret = v4l2_fwnode_device_parse(&client->dev, &props);
+	if (ret)
+		goto error;
+
+	ret = v4l2_ctrl_new_fwnode_properties(ctrl_hdlr, &imx320_ctrl_ops,
+					      &props);
+	if (ret)
+		goto error;
 
 	imx320->sd.ctrl_handler = ctrl_hdlr;
 
