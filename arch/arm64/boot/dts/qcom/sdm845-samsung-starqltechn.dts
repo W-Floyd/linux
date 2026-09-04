@@ -464,6 +464,16 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 
+		port@0 {
+			reg = <0>;
+
+			csiphy0_ep: endpoint {
+				bus-type = <MEDIA_BUS_TYPE_CSI2_DPHY>;
+				data-lanes = <0 1 2 3>;
+				remote-endpoint = <&imx345_ep>;
+			};
+		};
+
 		port@2 {
 			reg = <2>;
 
@@ -478,6 +488,43 @@
 
 &cci {
 	status = "okay";
+};
+
+&cci_i2c0 {
+	/* Rear camera, Sony IMX345 12MP */
+	camera@1a {
+		compatible = "sony,imx345";
+		reg = <0x1a>;
+
+		clocks = <&clock_camcc CAM_CC_MCLK0_CLK>;
+		assigned-clocks = <&clock_camcc CAM_CC_MCLK0_CLK>;
+		assigned-clock-rates = <24000000>;
+		power-domains = <&clock_camcc TITAN_TOP_GDSC>;
+
+		vio-supply = <&s2mpb03_l3>;
+		vdig-supply = <&s2mpb03_l1>;
+		vcustom1-supply = <&s2mpb03_l6>;
+		vcustom2-supply = <&s2mpb03_l2>;
+		vana-supply = <&s2mpb03_l5>;
+		vcustom10-supply = <&s2mpb03_l4>;
+
+		reset-gpios = <&tlmm 25 GPIO_ACTIVE_LOW>;
+
+		pinctrl-0 = <&cam_rear_mclk_active &cam_rear_rst_active>;
+		pinctrl-1 = <&cam_rear_mclk_suspend &cam_rear_rst_suspend>;
+		pinctrl-names = "default", "sleep";
+
+		orientation = <1>;
+		rotation = <90>;
+
+		port {
+			imx345_ep: endpoint {
+				remote-endpoint = <&csiphy0_ep>;
+				data-lanes = <1 2 3 4>;
+				link-frequencies = /bits/ 64 <675000000 702000000>;
+			};
+		};
+	};
 };
 
 &cci_i2c1 {
@@ -1327,6 +1374,35 @@
 			drive-strength = <2>;
 			bias-pull-down;
 		};
+	};
+
+	cam_rear_mclk_active: cam-rear-mclk-active-state {
+		pins = "gpio13";
+		function = "cam_mclk";
+		drive-strength = <4>;
+		bias-disable;
+	};
+
+	cam_rear_mclk_suspend: cam-rear-mclk-suspend-state {
+		pins = "gpio13";
+		function = "cam_mclk";
+		drive-strength = <4>;
+		bias-pull-down;
+	};
+
+	cam_rear_rst_active: cam-rear-rst-active-state {
+		pins = "gpio25";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	cam_rear_rst_suspend: cam-rear-rst-suspend-state {
+		pins = "gpio25";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+		output-low;
 	};
 
 	cam_front_mclk_active: cam-front-mclk-active-state {
