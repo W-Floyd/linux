@@ -29,6 +29,19 @@ config RADIO_MAXIRADIO
 	  To compile this driver as a module, choose M here: the
 	  module will be called radio-maxiradio.
 
+config RADIO_RTC6213N
+	tristate "Richwave RTC6213N FM Radio Receiver"
+	depends on I2C
+	help
+	  Say Y here if you want to use the Richwave RTC6213N FM radio
+	  receiver. It is an I2C part found in a number of Samsung phones,
+	  where its analog audio output is wired into the codec rather than
+	  carried over a digital link -- so this driver only tunes, and the
+	  audio has to be captured from the codec separately.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called radio-rtc6213n.
+
 config RADIO_SAA7706H
 	tristate "SAA7706H Car Radio DSP"
 	depends on I2C
