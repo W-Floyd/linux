@@ -300,6 +300,54 @@
 			compatible = "samsung,s2mpb02";
 			reg = <0x59>;
 
+			/*
+			 * Both FLED channels are driven over I2C, so hold the
+			 * three external strobe pins low: FLASH_EN1 (gpio22)
+			 * and TORCH_EN1 (gpio21) for the rear flash, and
+			 * IRIS_EN (gpio43) for the illuminator. The vendor
+			 * asserts IRIS_EN for the whole iris session and lets
+			 * the pulse-width registers shape the light, which is
+			 * the fallback if I2C strobing alone does not light it.
+			 */
+			pinctrl-0 = <&cam_fled_strobe_state>;
+			pinctrl-names = "default";
+
+			/*
+			 * Currents and timeouts are the ones the vendor
+			 * programs: 1000mA/500ms flash and 180mA torch on the
+			 * rear LED, 500mA/250ms and 300mA on the illuminator.
+			 */
+			leds {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				s2mpb02_flash: led@0 {
+					reg = <0>;
+					color = <LED_COLOR_ID_WHITE>;
+					function = LED_FUNCTION_FLASH;
+					led-max-microamp = <180000>;
+					flash-max-microamp = <1000000>;
+					flash-max-timeout-us = <500000>;
+				};
+
+				/*
+				 * Deliberately not LED_FUNCTION_FLASH: mobile
+				 * shells look for a flashlight by matching LED
+				 * class names against *:flash* and *:torch*,
+				 * and this one emits infrared. Naming it
+				 * "flash" makes the shell offer an invisible
+				 * torch that only drains the battery.
+				 */
+				s2mpb02_ir: led@1 {
+					reg = <1>;
+					color = <LED_COLOR_ID_IR>;
+					function = "illuminator";
+					led-max-microamp = <300000>;
+					flash-max-microamp = <500000>;
+					flash-max-timeout-us = <250000>;
+				};
+			};
+
 			regulators {
 				s2mpb02_l5: ldo5 {
 					regulator-name = "cam_front_vdig";
@@ -577,6 +625,7 @@
 
 		reset-gpios = <&tlmm 25 GPIO_ACTIVE_LOW>;
 		lens-focus = <&cam_vcm>;
+		flash-leds = <&s2mpb02_flash>;
 
 		pinctrl-0 = <&cam_rear_mclk_active &cam_rear_rst_active>;
 		pinctrl-1 = <&cam_rear_mclk_suspend &cam_rear_rst_suspend>;
@@ -652,6 +701,8 @@
 		vana-supply = <&s2mpb02_l17>;
 
 		reset-gpios = <&tlmm 44 GPIO_ACTIVE_LOW>;
+
+		flash-leds = <&s2mpb02_ir>;
 
 		pinctrl-0 = <&cam_iris_mclk_active &cam_iris_rst_active>;
 		pinctrl-1 = <&cam_iris_mclk_suspend &cam_iris_rst_suspend>;
@@ -1597,6 +1648,14 @@
 
 	cam_iris_rst_suspend: cam-iris-rst-suspend-state {
 		pins = "gpio44";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+		output-low;
+	};
+
+	cam_fled_strobe_state: cam-fled-strobe-state {
+		pins = "gpio21", "gpio22", "gpio43";
 		function = "gpio";
 		drive-strength = <2>;
 		bias-pull-down;
