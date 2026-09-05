@@ -32,6 +32,7 @@
 
 	aliases {
 		serial0 = &uart9;
+		serial1 = &uart6;
 	};
 
 	battery: battery {
@@ -948,6 +949,10 @@
 	status = "okay";
 };
 
+&qupv3_id_0 {
+	status = "okay";
+};
+
 &qupv3_id_1 {
 	status = "okay";
 };
@@ -956,9 +961,8 @@
 	status = "okay";
 };
 
-&uart9 {
-	/* Bluetooth needs a serdev-capable port, not the console compatible */
-	compatible = "qcom,geni-uart";
+&uart6 {
+	pinctrl-0 = <&qup_uart6_4pin>;
 
 	status = "okay";
 
@@ -969,6 +973,10 @@
 		device-wakeup-gpios = <&tlmm 136 GPIO_ACTIVE_HIGH>;
 		host-wakeup-gpios = <&tlmm 108 GPIO_ACTIVE_HIGH>;
 	};
+};
+
+&uart9 {
+	status = "okay";
 };
 
 &i2c14 {
