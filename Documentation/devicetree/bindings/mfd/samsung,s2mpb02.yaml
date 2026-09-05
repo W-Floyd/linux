@@ -12,9 +12,8 @@ maintainers:
 description:
   The S2MPB02 is a companion power management IC for the camera sensors in
   smart phones. It provides eighteen LDO regulators, two bucks and a
-  buck-boost, along with a flash/torch LED controller that is not covered by
-  this binding. It is typically reached over a dedicated I2C bus rather than
-  the main PMIC bus.
+  buck-boost, along with a two-channel flash/torch LED controller. It is
+  typically reached over a dedicated I2C bus rather than the main PMIC bus.
 
 properties:
   compatible:
@@ -36,6 +35,53 @@ properties:
 
     additionalProperties: false
 
+  leds:
+    type: object
+    additionalProperties: false
+
+    description:
+      The two FLED channels. Each drives one LED with an independent
+      current, mode and hardware timeout, and can be strobed either over
+      I2C or through its own pair of FLASH_EN and TORCH_EN pins.
+
+    properties:
+      "#address-cells":
+        const: 1
+
+      "#size-cells":
+        const: 0
+
+    patternProperties:
+      "^led@[01]$":
+        type: object
+        $ref: /schemas/leds/common.yaml#
+        unevaluatedProperties: false
+
+        properties:
+          reg:
+            description: Index of the FLED channel.
+            minimum: 0
+            maximum: 1
+
+          led-max-microamp:
+            minimum: 20000
+            maximum: 300000
+
+          flash-max-microamp:
+            minimum: 100000
+            maximum: 1500000
+
+          flash-max-timeout-us:
+            minimum: 62500
+            maximum: 1000000
+
+        required:
+          - reg
+
+    required:
+      - "#address-cells"
+      - "#size-cells"
+
 required:
   - compatible
   - reg
@@ -45,6 +91,8 @@ additionalProperties: false
 
 examples:
   - |
+    #include <dt-bindings/leds/common.h>
+
     i2c {
         #address-cells = <1>;
         #size-cells = <0>;
@@ -70,6 +118,20 @@ examples:
                     regulator-name = "cam_vana";
                     regulator-min-microvolt = <2800000>;
                     regulator-max-microvolt = <2800000>;
+                };
+            };
+
+            leds {
+                #address-cells = <1>;
+                #size-cells = <0>;
+
+                led@0 {
+                    reg = <0>;
+                    color = <LED_COLOR_ID_WHITE>;
+                    function = LED_FUNCTION_FLASH;
+                    led-max-microamp = <300000>;
+                    flash-max-microamp = <1200000>;
+                    flash-max-timeout-us = <500000>;
                 };
             };
         };
