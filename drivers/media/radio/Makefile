@@ -15,6 +15,7 @@ obj-$(CONFIG_RADIO_MAXIRADIO) += radio-maxiradio.o
 obj-$(CONFIG_RADIO_MIROPCM20) += radio-miropcm20.o
 obj-$(CONFIG_RADIO_RTRACK2) += radio-rtrack2.o
 obj-$(CONFIG_RADIO_RTRACK) += radio-aimslab.o
+obj-$(CONFIG_RADIO_RTC6213N) += radio-rtc6213n.o
 obj-$(CONFIG_RADIO_SAA7706H) += saa7706h.o
 obj-$(CONFIG_RADIO_SF16FMI) += radio-sf16fmi.o
 obj-$(CONFIG_RADIO_SF16FMR2) += radio-sf16fmr2.o

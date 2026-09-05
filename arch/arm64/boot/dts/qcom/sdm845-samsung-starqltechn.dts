@@ -551,6 +551,17 @@
 			interrupts-extended = <&tlmm 145 IRQ_TYPE_EDGE_FALLING>;
 			pinctrl-0 = <&fm_int_state>;
 			pinctrl-names = "default";
+
+			/*
+			 * BRING-UP: which of the three dividers actually lands
+			 * on PMIC GPIO13 is not documented anywhere we have,
+			 * so claim all three and let the driver enable them.
+			 * Narrow this to the one that matters once the core
+			 * comes up.
+			 */
+			clocks = <&pm8998_clkdiv 1>, <&pm8998_clkdiv 2>,
+				 <&pm8998_clkdiv 3>;
+			clock-names = "div1", "div2", "div3";
 		};
 	};
 
@@ -1554,6 +1565,30 @@
 &pm8998_resin {
 	linux,code = <KEY_VOLUMEDOWN>;
 	status = "okay";
+};
+
+/*
+ * The PMIC's clock dividers drive a set of outputs that are wired out through
+ * alternate functions on the PMIC's own GPIOs -- GPIO13 in func1 here, which
+ * feeds the FM tuner's reference. The downstream kernel configures all three
+ * of these blocks at boot via qcom,clkdiv-init-freq, so on a stock kernel the
+ * clock is simply always running; mainline registers them but leaves them off
+ * until a consumer enables one, which is why the tuner claims them below.
+ */
+&pm8998_lsid0 {
+	pm8998_clkdiv: clock-controller@5b00 {
+		compatible = "qcom,spmi-clkdiv";
+		reg = <0x5b00>;
+		clocks = <&xo_board>;
+		clock-names = "xo";
+		#clock-cells = <1>;
+		qcom,num-clkdivs = <3>;
+
+		/* Match the 19.2 MHz the downstream kernel programs. */
+		assigned-clocks = <&pm8998_clkdiv 1>, <&pm8998_clkdiv 2>,
+				  <&pm8998_clkdiv 3>;
+		assigned-clock-rates = <19200000>, <19200000>, <19200000>;
+	};
 };
 
 &pm8998_gpios {
