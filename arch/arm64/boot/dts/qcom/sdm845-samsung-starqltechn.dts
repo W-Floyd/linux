@@ -337,6 +337,12 @@
 					regulator-max-microvolt = <2800000>;
 				};
 
+				s2mpb02_l17: ldo17 {
+					regulator-name = "cam_iris_vana";
+					regulator-min-microvolt = <2800000>;
+					regulator-max-microvolt = <2800000>;
+				};
+
 				/*
 				 * BUCK1, BUCK2 and the buck-boost are the input
 				 * rails the LDOs above regulate down from, so
@@ -534,6 +540,16 @@
 				remote-endpoint = <&imx320_ep>;
 			};
 		};
+
+		port@3 {
+			reg = <3>;
+
+			csiphy3_ep: endpoint {
+				bus-type = <MEDIA_BUS_TYPE_CSI2_DPHY>;
+				data-lanes = <0 1>;
+				remote-endpoint = <&s5k5f1_ep>;
+			};
+		};
 	};
 };
 
@@ -609,6 +625,47 @@
 				data-lanes = <1 2>;
 				link-frequencies = /bits/ 64 <172500000 681000000
 							      738000000>;
+			};
+		};
+	};
+
+	/*
+	 * Iris camera, Samsung S5K5F1 5.7MP monochrome infrared. It shares
+	 * this bus and this I2C address with the front camera above, and the
+	 * vendor stack tells the two apart by only ever powering one of them
+	 * at a time. Linux has no way to express that, so the two nodes
+	 * cannot both be enabled: the second one to be registered is rejected
+	 * with -EBUSY. Disable the front camera to use this one.
+	 */
+	iris_camera: camera-iris@10 {
+		compatible = "samsung,s5k5f1";
+		reg = <0x10>;
+		status = "disabled";
+
+		clocks = <&clock_camcc CAM_CC_MCLK3_CLK>;
+		assigned-clocks = <&clock_camcc CAM_CC_MCLK3_CLK>;
+		assigned-clock-rates = <24000000>;
+		power-domains = <&clock_camcc TITAN_TOP_GDSC>;
+
+		vio-supply = <&vreg_l19a_1p8>;
+		vdig-supply = <&vreg_l17a_1p05>;
+		vana-supply = <&s2mpb02_l17>;
+
+		reset-gpios = <&tlmm 44 GPIO_ACTIVE_LOW>;
+
+		pinctrl-0 = <&cam_iris_mclk_active &cam_iris_rst_active>;
+		pinctrl-1 = <&cam_iris_mclk_suspend &cam_iris_rst_suspend>;
+		pinctrl-names = "default", "sleep";
+
+		orientation = <0>;
+		/* From the stock DT's sensor-position-roll; not verified */
+		rotation = <0>;
+
+		port {
+			s5k5f1_ep: endpoint {
+				remote-endpoint = <&csiphy3_ep>;
+				data-lanes = <1 2>;
+				link-frequencies = /bits/ 64 <768000000>;
 			};
 		};
 	};
@@ -865,9 +922,14 @@
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
-		vreg_l17a_1p3: ldo17 {
-			regulator-min-microvolt = <1304000>;
-			regulator-max-microvolt = <1304000>;
+		/*
+		 * Iris camera digital core. The vendor runs this rail at
+		 * 1.05V, which falls between two steps of the PMIC4 NLDO's
+		 * 8mV grid, so ask for the one below.
+		 */
+		vreg_l17a_1p05: ldo17 {
+			regulator-min-microvolt = <1048000>;
+			regulator-max-microvolt = <1048000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
@@ -877,9 +939,10 @@
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
-		vreg_l19a_3p0: ldo19 {
-			regulator-min-microvolt = <2856000>;
-			regulator-max-microvolt = <3104000>;
+		/* Iris camera interface */
+		vreg_l19a_1p8: ldo19 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
@@ -1505,6 +1568,35 @@
 
 	cam_front_rst_suspend: cam-front-rst-suspend-state {
 		pins = "gpio12";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+		output-low;
+	};
+
+	cam_iris_mclk_active: cam-iris-mclk-active-state {
+		pins = "gpio16";
+		function = "cam_mclk";
+		drive-strength = <4>;
+		bias-disable;
+	};
+
+	cam_iris_mclk_suspend: cam-iris-mclk-suspend-state {
+		pins = "gpio16";
+		function = "cam_mclk";
+		drive-strength = <4>;
+		bias-pull-down;
+	};
+
+	cam_iris_rst_active: cam-iris-rst-active-state {
+		pins = "gpio44";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	cam_iris_rst_suspend: cam-iris-rst-suspend-state {
+		pins = "gpio44";
 		function = "gpio";
 		drive-strength = <2>;
 		bias-pull-down;
