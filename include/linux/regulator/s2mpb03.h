@@ -48,6 +48,27 @@ enum S2MPB03_regulators {
 #define S2MPB03_LDO_VSEL_MASK	0x3F
 #define S2MPB03_LDO_ENABLE_MASK	0x80
 
+/*
+ * LDO_SLEW1 and LDO_SLEW2 hold the per-LDO slew rate and discharge controls:
+ *
+ *	LDO_SLEW1  bit 0     LDO2 remote sense, active high
+ *	LDO_SLEW2  bit 0     LDO1 discharge
+ *	           bit 1     LDO2 discharge
+ *	           bits 3:2  LDO7 slew rate
+ *	           bits 5:4  LDO6 slew rate
+ *	           bits 7:6  LDO5 slew rate
+ *
+ * The slew rate fields select one of four rates. Only the zero encoding is
+ * known -- 10mV/us -- so this driver can ask for that rate and no other.
+ */
+#define S2MPB03_LDO2_REMOTE_SENSE_MASK	0x01
+
+#define S2MPB03_LDO1_DISCHARGE_MASK	0x01
+#define S2MPB03_LDO2_DISCHARGE_MASK	0x02
+#define S2MPB03_LDO7_SOFT_START_MASK	0x0c
+#define S2MPB03_LDO6_SOFT_START_MASK	0x30
+#define S2MPB03_LDO5_SOFT_START_MASK	0xc0
+
 #define S2MPB03_RAMP_DELAY	12000
 
 #define S2MPB03_ENABLE_TIME_LDO	150
