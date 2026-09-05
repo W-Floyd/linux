@@ -438,6 +438,42 @@
 		};
 	};
 
+	/*
+	 * GPIO expander bus. The PCAL6524 carries board control lines that are
+	 * not routed to the SoC: the microSD and NFC enables, wireless charging
+	 * and MST power, the fingerprint sensor's LDO and reset, and the
+	 * heart-rate sensor's boost enable.
+	 */
+	i2c-22 {
+		compatible = "i2c-gpio";
+		sda-gpios = <&tlmm 123 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&tlmm 124 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <2>;
+		pinctrl-0 = <&i2c22_sda_state &i2c22_scl_state>;
+		pinctrl-names = "default";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		gpio_expander: gpio@22 {
+			compatible = "nxp,pcal6524";
+			reg = <0x22>;
+
+			gpio-controller;
+			#gpio-cells = <2>;
+
+			reset-gpios = <&tlmm 69 GPIO_ACTIVE_LOW>;
+			vcc-supply = <&vreg_s4a_1p8>;
+
+			gpio-line-names = "microsd-en", "", "", "wireless-charger-en",
+					  "mst-pwr-en", "", "nfc-en", "nfc-firmware",
+					  "", "", "", "",
+					  "", "", "", "",
+					  "", "", "fingerprint-ldo-en", "",
+					  "fingerprint-reset", "", "fingerprint-vendor-id",
+					  "hrm-boost-en";
+		};
+	};
+
 	gpio-keys {
 		compatible = "gpio-keys";
 		autorepeat;
@@ -1533,6 +1569,20 @@
 
 	i2c21_scl_state: i2c21-scl-state {
 		pins = "gpio128";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	i2c22_sda_state: i2c22-sda-state {
+		pins = "gpio123";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	i2c22_scl_state: i2c22-scl-state {
+		pins = "gpio124";
 		function = "gpio";
 		drive-strength = <2>;
 		bias-disable;
