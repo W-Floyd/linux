@@ -12,6 +12,8 @@
 #include <linux/i2c.h>
 #include <linux/mfd/samsung/core.h>
 #include <linux/mfd/samsung/s2mpa01.h>
+#include <linux/mfd/samsung/s2mpb02.h>
+#include <linux/mfd/samsung/s2mpb03.h>
 #include <linux/mfd/samsung/s2mps11.h>
 #include <linux/mfd/samsung/s2mps13.h>
 #include <linux/mfd/samsung/s2mps14.h>
@@ -23,8 +25,6 @@
 #include <linux/pm.h>
 #include <linux/property.h>
 #include <linux/regmap.h>
-#include <linux/regulator/s2mpb02.h>
-#include <linux/regulator/s2mpb03.h>
 #include "sec-core.h"
 
 struct sec_pmic_i2c_platform_data {
