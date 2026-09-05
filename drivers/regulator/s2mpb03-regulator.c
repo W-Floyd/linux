@@ -8,6 +8,7 @@
 
 #include <linux/err.h>
 #include <linux/mfd/samsung/core.h>
+#include <linux/mfd/samsung/s2mpb03.h>
 #include <linux/mod_devicetable.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -16,7 +17,6 @@
 #include <linux/regulator/driver.h>
 #include <linux/regulator/machine.h>
 #include <linux/regulator/of_regulator.h>
-#include <linux/regulator/s2mpb03.h>
 #include <linux/slab.h>
 
 struct s2mpb03_data {

@@ -5,12 +5,12 @@
 //              http://www.samsung.com
 // Copyright (C) 2026 William Floyd <git@notmy.space>
 
-#ifndef __LINUX_S2MPB03_H
-#define __LINUX_S2MPB03_H
+#ifndef __LINUX_MFD_S2MPB03_H
+#define __LINUX_MFD_S2MPB03_H
 
 // S2MPB03 registers
 // Slave Addr : 0xAC
-enum S2MPB03_reg {
+enum s2mpb03_reg {
 	S2MPB03_REG_PMIC_ID,
 	S2MPB03_REG_STATUS,
 	S2MPB03_REG_CTRL,
@@ -26,7 +26,7 @@ enum S2MPB03_reg {
 };
 
 // S2MPB03 regulator ids
-enum S2MPB03_regulators {
+enum s2mpb03_regulators {
 	S2MPB03_LDO1,
 	S2MPB03_LDO2,
 	S2MPB03_LDO3,
@@ -77,4 +77,4 @@ enum S2MPB03_regulators {
 
 #define S2MPB03_REGULATOR_MAX	(S2MPB03_REG_MAX)
 
-#endif // __LINUX_S2MPB03_H
+#endif // __LINUX_MFD_S2MPB03_H
