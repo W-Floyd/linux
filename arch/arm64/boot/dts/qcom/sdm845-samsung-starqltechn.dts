@@ -388,6 +388,7 @@
 					regulator-name = "cam_v_custom2";
 					regulator-min-microvolt = <1100000>;
 					regulator-max-microvolt = <1100000>;
+					regulator-active-discharge = <1>;
 				};
 
 				s2mpb03_l3: ldo3 {
@@ -406,12 +407,14 @@
 					regulator-name = "cam_vana";
 					regulator-min-microvolt = <3200000>;
 					regulator-max-microvolt = <3200000>;
+					regulator-soft-start;
 				};
 
 				s2mpb03_l6: ldo6 {
 					regulator-name = "cam_v_custom1";
 					regulator-min-microvolt = <2850000>;
 					regulator-max-microvolt = <2850000>;
+					regulator-soft-start;
 				};
 
 				s2mpb03_l7: ldo7 {
