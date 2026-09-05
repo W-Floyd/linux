@@ -528,6 +528,32 @@
 		};
 	};
 
+	/*
+	 * FM tuner bus. The Richwave RTC6213N takes its 32.768 kHz reference
+	 * from pm8998 GPIO13 in func1 (sleep clock) mode, so that state is
+	 * applied here alongside the bus pins -- the tuner does not answer
+	 * without its clock running.
+	 */
+	i2c-20 {
+		compatible = "i2c-gpio";
+		sda-gpios = <&tlmm 103 GPIO_ACTIVE_HIGH>;
+		scl-gpios = <&tlmm 104 GPIO_ACTIVE_HIGH>;
+		i2c-gpio,delay-us = <2>;
+		pinctrl-0 = <&fm_i2c_sda_state &fm_i2c_scl_state &fm_sleep_clk_state>;
+		pinctrl-names = "default";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		tuner@64 {
+			compatible = "richwave,rtc6213n";
+			reg = <0x64>;
+
+			interrupts-extended = <&tlmm 145 IRQ_TYPE_EDGE_FALLING>;
+			pinctrl-0 = <&fm_int_state>;
+			pinctrl-names = "default";
+		};
+	};
+
 	gpio-keys {
 		compatible = "gpio-keys";
 		autorepeat;
@@ -1531,6 +1557,14 @@
 };
 
 &pm8998_gpios {
+	fm_sleep_clk_state: fm-sleep-clk-state {
+		pins = "gpio13";
+		function = "func1";
+		bias-disable;
+		power-source = <0>;
+		output-low;
+	};
+
 	pmic_int_default: pmic-int-default-state {
 		pins = "gpio11";
 		function = "normal";
@@ -1737,6 +1771,27 @@
 		function = "gpio";
 		drive-strength = <2>;
 		bias-disable;
+	};
+
+	fm_i2c_sda_state: fm-i2c-sda-state {
+		pins = "gpio103";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	fm_i2c_scl_state: fm-i2c-scl-state {
+		pins = "gpio104";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	fm_int_state: fm-int-state {
+		pins = "gpio145";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
 	};
 
 	motor_pwm_default_state: motor-pwm-active-state {
