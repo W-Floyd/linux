@@ -567,7 +567,7 @@
 		pinctrl-names = "default", "sleep";
 
 		orientation = <1>;
-		rotation = <90>;
+		rotation = <270>;
 
 		port {
 			imx345_ep: endpoint {
@@ -601,7 +601,7 @@
 		pinctrl-names = "default", "sleep";
 
 		orientation = <0>;
-		rotation = <270>;
+		rotation = <90>;
 
 		port {
 			imx320_ep: endpoint {
