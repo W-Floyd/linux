@@ -39,6 +39,7 @@ static const struct mfd_cell s2dos05_devs[] = {
 
 static const struct mfd_cell s2mpb02_devs[] = {
 	MFD_CELL_NAME("s2mpb02-regulator"),
+	MFD_CELL_NAME("s2mpb02-led"),
 };
 
 static const struct mfd_cell s2mpb03_devs[] = {
