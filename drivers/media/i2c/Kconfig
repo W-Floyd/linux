@@ -853,6 +853,17 @@ config VIDEO_S5K5BAF
 	  This is a V4L2 sensor driver for Samsung S5K5BAF 2M
 	  camera sensor with an embedded SoC image signal processor.
 
+config VIDEO_S5K5F1
+	tristate "Samsung S5K5F1 sensor support"
+	select V4L2_CCI_I2C
+	help
+	  This is a V4L2 sensor driver for the Samsung S5K5F1 monochrome
+	  infrared camera sensor, used as an iris-recognition camera in
+	  mobile devices.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called s5k5f1.
+
 config VIDEO_S5K6A3
 	tristate "Samsung S5K6A3 sensor support"
 	help
