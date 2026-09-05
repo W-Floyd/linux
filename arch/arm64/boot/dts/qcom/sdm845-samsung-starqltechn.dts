@@ -32,6 +32,7 @@
 
 	aliases {
 		serial0 = &uart9;
+		serial1 = &uart6;
 	};
 
 	battery: battery {
@@ -147,6 +148,17 @@
 		 */
 		removed_region: removed-region@88f00000 {
 			reg = <0 0x88f00000 0 0x1c00000>;
+			no-map;
+		};
+
+		/*
+		 * This device gives SLPI 16 MiB rather than the SoC default of
+		 * 20 MiB, and puts SPSS directly after it. Without shrinking
+		 * SLPI to match, the two regions overlap and the kernel says so
+		 * at boot.
+		 */
+		slpi_mem: slpi@96700000 {
+			reg = <0 0x96700000 0 0x1000000>;
 			no-map;
 		};
 
@@ -288,6 +300,54 @@
 			compatible = "samsung,s2mpb02";
 			reg = <0x59>;
 
+			/*
+			 * Both FLED channels are driven over I2C, so hold the
+			 * three external strobe pins low: FLASH_EN1 (gpio22)
+			 * and TORCH_EN1 (gpio21) for the rear flash, and
+			 * IRIS_EN (gpio43) for the illuminator. The vendor
+			 * asserts IRIS_EN for the whole iris session and lets
+			 * the pulse-width registers shape the light, which is
+			 * the fallback if I2C strobing alone does not light it.
+			 */
+			pinctrl-0 = <&cam_fled_strobe_state>;
+			pinctrl-names = "default";
+
+			/*
+			 * Currents and timeouts are the ones the vendor
+			 * programs: 1000mA/500ms flash and 180mA torch on the
+			 * rear LED, 500mA/250ms and 300mA on the illuminator.
+			 */
+			leds {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				s2mpb02_flash: led@0 {
+					reg = <0>;
+					color = <LED_COLOR_ID_WHITE>;
+					function = LED_FUNCTION_FLASH;
+					led-max-microamp = <180000>;
+					flash-max-microamp = <1000000>;
+					flash-max-timeout-us = <500000>;
+				};
+
+				/*
+				 * Deliberately not LED_FUNCTION_FLASH: mobile
+				 * shells look for a flashlight by matching LED
+				 * class names against *:flash* and *:torch*,
+				 * and this one emits infrared. Naming it
+				 * "flash" makes the shell offer an invisible
+				 * torch that only drains the battery.
+				 */
+				s2mpb02_ir: led@1 {
+					reg = <1>;
+					color = <LED_COLOR_ID_IR>;
+					function = "illuminator";
+					led-max-microamp = <300000>;
+					flash-max-microamp = <500000>;
+					flash-max-timeout-us = <250000>;
+				};
+			};
+
 			regulators {
 				s2mpb02_l5: ldo5 {
 					regulator-name = "cam_front_vdig";
@@ -321,6 +381,12 @@
 
 				s2mpb02_l15: ldo15 {
 					regulator-name = "cam_v_custom4";
+					regulator-min-microvolt = <2800000>;
+					regulator-max-microvolt = <2800000>;
+				};
+
+				s2mpb02_l17: ldo17 {
+					regulator-name = "cam_iris_vana";
 					regulator-min-microvolt = <2800000>;
 					regulator-max-microvolt = <2800000>;
 				};
@@ -388,6 +454,7 @@
 					regulator-name = "cam_v_custom2";
 					regulator-min-microvolt = <1100000>;
 					regulator-max-microvolt = <1100000>;
+					regulator-active-discharge = <1>;
 				};
 
 				s2mpb03_l3: ldo3 {
@@ -406,12 +473,14 @@
 					regulator-name = "cam_vana";
 					regulator-min-microvolt = <3200000>;
 					regulator-max-microvolt = <3200000>;
+					regulator-soft-start;
 				};
 
 				s2mpb03_l6: ldo6 {
 					regulator-name = "cam_v_custom1";
 					regulator-min-microvolt = <2850000>;
 					regulator-max-microvolt = <2850000>;
+					regulator-soft-start;
 				};
 
 				s2mpb03_l7: ldo7 {
@@ -420,6 +489,42 @@
 					regulator-max-microvolt = <2800000>;
 				};
 			};
+		};
+	};
+
+	/*
+	 * GPIO expander bus. The PCAL6524 carries board control lines that are
+	 * not routed to the SoC: the microSD and NFC enables, wireless charging
+	 * and MST power, the fingerprint sensor's LDO and reset, and the
+	 * heart-rate sensor's boost enable.
+	 */
+	i2c-22 {
+		compatible = "i2c-gpio";
+		sda-gpios = <&tlmm 123 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&tlmm 124 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <2>;
+		pinctrl-0 = <&i2c22_sda_state &i2c22_scl_state>;
+		pinctrl-names = "default";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		gpio_expander: gpio@22 {
+			compatible = "nxp,pcal6524";
+			reg = <0x22>;
+
+			gpio-controller;
+			#gpio-cells = <2>;
+
+			reset-gpios = <&tlmm 69 GPIO_ACTIVE_LOW>;
+			vcc-supply = <&vreg_s4a_1p8>;
+
+			gpio-line-names = "microsd-en", "", "", "wireless-charger-en",
+					  "mst-pwr-en", "", "nfc-en", "nfc-firmware",
+					  "", "", "", "",
+					  "", "", "", "",
+					  "", "", "fingerprint-ldo-en", "",
+					  "fingerprint-reset", "", "fingerprint-vendor-id",
+					  "hrm-boost-en";
 		};
 	};
 
@@ -483,6 +588,16 @@
 				remote-endpoint = <&imx320_ep>;
 			};
 		};
+
+		port@3 {
+			reg = <3>;
+
+			csiphy3_ep: endpoint {
+				bus-type = <MEDIA_BUS_TYPE_CSI2_DPHY>;
+				data-lanes = <0 1>;
+				remote-endpoint = <&s5k5f1_ep>;
+			};
+		};
 	};
 };
 
@@ -510,13 +625,14 @@
 
 		reset-gpios = <&tlmm 25 GPIO_ACTIVE_LOW>;
 		lens-focus = <&cam_vcm>;
+		flash-leds = <&s2mpb02_flash>;
 
 		pinctrl-0 = <&cam_rear_mclk_active &cam_rear_rst_active>;
 		pinctrl-1 = <&cam_rear_mclk_suspend &cam_rear_rst_suspend>;
 		pinctrl-names = "default", "sleep";
 
 		orientation = <1>;
-		rotation = <90>;
+		rotation = <270>;
 
 		port {
 			imx345_ep: endpoint {
@@ -550,7 +666,7 @@
 		pinctrl-names = "default", "sleep";
 
 		orientation = <0>;
-		rotation = <270>;
+		rotation = <90>;
 
 		port {
 			imx320_ep: endpoint {
@@ -558,6 +674,49 @@
 				data-lanes = <1 2>;
 				link-frequencies = /bits/ 64 <172500000 681000000
 							      738000000>;
+			};
+		};
+	};
+
+	/*
+	 * Iris camera, Samsung S5K5F1 5.7MP monochrome infrared. It shares
+	 * this bus and this I2C address with the front camera above, and the
+	 * vendor stack tells the two apart by only ever powering one of them
+	 * at a time. Linux has no way to express that, so the two nodes
+	 * cannot both be enabled: the second one to be registered is rejected
+	 * with -EBUSY. Disable the front camera to use this one.
+	 */
+	iris_camera: camera-iris@10 {
+		compatible = "samsung,s5k5f1";
+		reg = <0x10>;
+		status = "disabled";
+
+		clocks = <&clock_camcc CAM_CC_MCLK3_CLK>;
+		assigned-clocks = <&clock_camcc CAM_CC_MCLK3_CLK>;
+		assigned-clock-rates = <24000000>;
+		power-domains = <&clock_camcc TITAN_TOP_GDSC>;
+
+		vio-supply = <&vreg_l19a_1p8>;
+		vdig-supply = <&vreg_l17a_1p05>;
+		vana-supply = <&s2mpb02_l17>;
+
+		reset-gpios = <&tlmm 44 GPIO_ACTIVE_LOW>;
+
+		flash-leds = <&s2mpb02_ir>;
+
+		pinctrl-0 = <&cam_iris_mclk_active &cam_iris_rst_active>;
+		pinctrl-1 = <&cam_iris_mclk_suspend &cam_iris_rst_suspend>;
+		pinctrl-names = "default", "sleep";
+
+		orientation = <0>;
+		/* From the stock DT's sensor-position-roll; not verified */
+		rotation = <0>;
+
+		port {
+			s5k5f1_ep: endpoint {
+				remote-endpoint = <&csiphy3_ep>;
+				data-lanes = <1 2>;
+				link-frequencies = /bits/ 64 <768000000>;
 			};
 		};
 	};
@@ -814,9 +973,14 @@
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
-		vreg_l17a_1p3: ldo17 {
-			regulator-min-microvolt = <1304000>;
-			regulator-max-microvolt = <1304000>;
+		/*
+		 * Iris camera digital core. The vendor runs this rail at
+		 * 1.05V, which falls between two steps of the PMIC4 NLDO's
+		 * 8mV grid, so ask for the one below.
+		 */
+		vreg_l17a_1p05: ldo17 {
+			regulator-min-microvolt = <1048000>;
+			regulator-max-microvolt = <1048000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
@@ -826,9 +990,10 @@
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
-		vreg_l19a_3p0: ldo19 {
-			regulator-min-microvolt = <2856000>;
-			regulator-max-microvolt = <3104000>;
+		/* Iris camera interface */
+		vreg_l19a_1p8: ldo19 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
@@ -934,6 +1099,10 @@
 	status = "okay";
 };
 
+&qupv3_id_0 {
+	status = "okay";
+};
+
 &qupv3_id_1 {
 	status = "okay";
 };
@@ -942,9 +1111,8 @@
 	status = "okay";
 };
 
-&uart9 {
-	/* Bluetooth needs a serdev-capable port, not the console compatible */
-	compatible = "qcom,geni-uart";
+&uart6 {
+	pinctrl-0 = <&qup_uart6_4pin>;
 
 	status = "okay";
 
@@ -955,6 +1123,10 @@
 		device-wakeup-gpios = <&tlmm 136 GPIO_ACTIVE_HIGH>;
 		host-wakeup-gpios = <&tlmm 108 GPIO_ACTIVE_HIGH>;
 	};
+};
+
+&uart9 {
+	status = "okay";
 };
 
 &i2c14 {
@@ -1453,6 +1625,43 @@
 		output-low;
 	};
 
+	cam_iris_mclk_active: cam-iris-mclk-active-state {
+		pins = "gpio16";
+		function = "cam_mclk";
+		drive-strength = <4>;
+		bias-disable;
+	};
+
+	cam_iris_mclk_suspend: cam-iris-mclk-suspend-state {
+		pins = "gpio16";
+		function = "cam_mclk";
+		drive-strength = <4>;
+		bias-pull-down;
+	};
+
+	cam_iris_rst_active: cam-iris-rst-active-state {
+		pins = "gpio44";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	cam_iris_rst_suspend: cam-iris-rst-suspend-state {
+		pins = "gpio44";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+		output-low;
+	};
+
+	cam_fled_strobe_state: cam-fled-strobe-state {
+		pins = "gpio21", "gpio22", "gpio43";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+		output-low;
+	};
+
 	dsi_default: dsi-default-state {
 		pins = "gpio6";
 		function = "gpio";
@@ -1511,6 +1720,20 @@
 
 	i2c21_scl_state: i2c21-scl-state {
 		pins = "gpio128";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	i2c22_sda_state: i2c22-sda-state {
+		pins = "gpio123";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	i2c22_scl_state: i2c22-scl-state {
+		pins = "gpio124";
 		function = "gpio";
 		drive-strength = <2>;
 		bias-disable;
