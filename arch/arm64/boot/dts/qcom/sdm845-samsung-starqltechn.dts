@@ -150,6 +150,17 @@
 			no-map;
 		};
 
+		/*
+		 * This device gives SLPI 16 MiB rather than the SoC default of
+		 * 20 MiB, and puts SPSS directly after it. Without shrinking
+		 * SLPI to match, the two regions overlap and the kernel says so
+		 * at boot.
+		 */
+		slpi_mem: slpi@96700000 {
+			reg = <0 0x96700000 0 0x1000000>;
+			no-map;
+		};
+
 		spss_mem: spss@97700000 {
 			reg = <0 0x97700000 0 0x100000>;
 			no-map;
