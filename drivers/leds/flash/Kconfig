@@ -114,6 +114,18 @@ config LEDS_RT8515
 	  To compile this driver as a module, choose M here: the module
 	  will be called leds-rt8515.
 
+config LEDS_S2MPB02
+	tristate "LED support for the Samsung S2MPB02 camera sub-PMIC"
+	depends on MFD_SEC_CORE
+	depends on V4L2_FLASH_LED_CLASS || !V4L2_FLASH_LED_CLASS
+	help
+	  This option enables support for the two flash LED channels of the
+	  Samsung S2MPB02 camera sub-PMIC, each with programmable flash and
+	  torch current and a hardware timeout.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called leds-s2mpb02.
+
 config LEDS_SGM3140
 	tristate "LED support for the SGM3140"
 	depends on V4L2_FLASH_LED_CLASS || !V4L2_FLASH_LED_CLASS
