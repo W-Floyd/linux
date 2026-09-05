@@ -23,6 +23,8 @@
 #include <linux/pm.h>
 #include <linux/property.h>
 #include <linux/regmap.h>
+#include <linux/regulator/s2mpb02.h>
+#include <linux/regulator/s2mpb03.h>
 #include "sec-core.h"
 
 struct sec_pmic_i2c_platform_data {
@@ -83,11 +85,15 @@ static const struct regmap_config s2mpa01_regmap_config = {
 static const struct regmap_config s2mpb02_regmap_config = {
 	.reg_bits = 8,
 	.val_bits = 8,
+
+	.max_register = S2MPB02_REG_LDO_DSCH3,
 };
 
 static const struct regmap_config s2mpb03_regmap_config = {
 	.reg_bits = 8,
 	.val_bits = 8,
+
+	.max_register = S2MPB03_REG_LDO_SLEW2,
 };
 
 static const struct regmap_config s2mps11_regmap_config = {
