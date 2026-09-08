@@ -244,7 +244,7 @@ static int video_start_streaming(struct vb2_queue *q, unsigned int count)
 {
 	struct camss_video *video = vb2_get_drv_priv(q);
 	struct video_device *vdev = &video->vdev;
-	struct media_entity *entity;
+	struct media_entity *entity, *failed = NULL;
 	struct media_pad *pad;
 	struct v4l2_subdev *subdev;
 	int ret;
@@ -273,13 +273,44 @@ static int video_start_streaming(struct vb2_queue *q, unsigned int count)
 		subdev = media_entity_to_v4l2_subdev(entity);
 
 		ret = v4l2_subdev_call(subdev, video, s_stream, 1);
-		if (ret < 0 && ret != -ENOIOCTLCMD)
+		if (ret < 0 && ret != -ENOIOCTLCMD) {
+			failed = entity;
 			goto error;
+		}
 	}
 
 	return 0;
 
 error:
+	/*
+	 * Stop the subdevs that were already started, otherwise they stay
+	 * marked as streaming: the next start then calls .s_stream(1) on an
+	 * already streaming subdev, which v4l2_subdev_call() warns about and
+	 * ignores, leaving the pipeline permanently unable to start.
+	 *
+	 * The walk has to be repeated from the video node because the pipeline
+	 * is only reachable one remote pad at a time, and it stops at the
+	 * subdev that failed as that one never started.
+	 */
+	entity = &vdev->entity;
+	while (1) {
+		pad = &entity->pads[0];
+		if (!(pad->flags & MEDIA_PAD_FL_SINK))
+			break;
+
+		pad = media_pad_remote_pad_first(pad);
+		if (!pad || !is_media_entity_v4l2_subdev(pad->entity))
+			break;
+
+		if (pad->entity == failed)
+			break;
+
+		entity = pad->entity;
+		subdev = media_entity_to_v4l2_subdev(entity);
+
+		v4l2_subdev_call(subdev, video, s_stream, 0);
+	}
+
 	video_device_pipeline_stop(vdev);
 
 flush_buffers:
