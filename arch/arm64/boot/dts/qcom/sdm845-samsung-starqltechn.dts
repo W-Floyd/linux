@@ -714,19 +714,29 @@
 			};
 		};
 	};
+};
+
+&i2c3 {
+	clock-frequency = <400000>;
+	status = "okay";
 
 	/*
-	 * Iris camera, Samsung S5K5F1 5.7MP monochrome infrared. It shares
-	 * this bus and this I2C address with the front camera above, and the
-	 * vendor stack tells the two apart by only ever powering one of them
-	 * at a time. Linux has no way to express that, so the two nodes
-	 * cannot both be enabled: the second one to be registered is rejected
-	 * with -EBUSY. Disable the front camera to use this one.
+	 * Iris camera, Samsung S5K5F1 5.7MP monochrome infrared.
+	 *
+	 * The control bus is QUP SE3, not the CCI: the stock DTB has this
+	 * sensor as a child of i2c@88c000, sharing the bus with the NFC
+	 * controller, while the other three sensors hang off the CCI. Only the
+	 * CSI-2 side is camera hardware - CSIPHY3, wired below. The stock DTB
+	 * spells the address 0x20, which is the 8-bit form of 7-bit 0x10.
+	 *
+	 * Because the control bus is separate there is no address clash with
+	 * the front camera, which answers at the same 0x10 on the CCI, and both
+	 * can be enabled at once. Stock streams the two together for the
+	 * duration of an iris session.
 	 */
 	iris_camera: camera-iris@10 {
 		compatible = "samsung,s5k5f1";
 		reg = <0x10>;
-		status = "disabled";
 
 		clocks = <&clock_camcc CAM_CC_MCLK3_CLK>;
 		assigned-clocks = <&clock_camcc CAM_CC_MCLK3_CLK>;
