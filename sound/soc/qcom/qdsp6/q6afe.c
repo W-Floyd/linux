@@ -1103,7 +1103,15 @@ static int afe_apr_send_pkt(struct q6afe *afe, struct apr_pkt *pkt,
 	} else if (result->status > 0) {
 		dev_err(afe->dev, "DSP returned error[%x]\n",
 			result->status);
-		ret = -EINVAL;
+		/*
+		 * Tell "the port is already running" apart from a genuine
+		 * rejection, so that callers can recover from it. Every other
+		 * status keeps the historical -EINVAL.
+		 */
+		if (result->status == ADSP_EALREADY)
+			ret = -EALREADY;
+		else
+			ret = -EINVAL;
 	} else {
 		ret = 0;
 	}
@@ -1756,6 +1764,26 @@ int q6afe_port_start(struct q6afe_port *port)
 	start->port_id = port_id;
 
 	ret = afe_apr_send_pkt(afe, pkt, port, AFE_PORT_CMD_DEVICE_START);
+	if (ret == -EALREADY) {
+		/*
+		 * The DSP believes this port is already running. That happens
+		 * when firmware claims a port for itself at boot, or when a
+		 * previous owner went away without stopping it -- in both
+		 * cases the port is unusable from here on, because every
+		 * later start is refused the same way. Stop it and start it
+		 * once more before giving up.
+		 */
+		dev_dbg(afe->dev, "port 0x%x already started, restarting it\n",
+			port_id);
+
+		if (q6afe_port_stop(port))
+			dev_dbg(afe->dev, "stopping port 0x%x failed too\n",
+				port_id);
+
+		ret = afe_apr_send_pkt(afe, pkt, port,
+				       AFE_PORT_CMD_DEVICE_START);
+	}
+
 	if (ret)
 		dev_err(afe->dev, "AFE enable for port 0x%x failed %d\n",
 			port_id, ret);
