@@ -442,19 +442,46 @@ u32 vfe_hw_version(struct vfe_device *vfe)
 }
 
 /*
+ * vfe_wm_valid - Check a write master index before it is used
+ * @vfe: VFE Device
+ * @wm: Write master id
+ *
+ * A write master index selects both an entry of wm_output_map[] and a whole
+ * bank of registers, the offset of which it scales. An out of range value
+ * therefore does not merely address the wrong write master: it reads past
+ * wm_output_map[] and writes outside the mapped register window, which faults.
+ * Reject it rather than let it reach the hardware.
+ *
+ * Return true if @wm may be used
+ */
+static bool vfe_wm_valid(struct vfe_device *vfe, unsigned int wm)
+{
+	if (wm < MSM_VFE_IMAGE_MASTERS_NUM)
+		return true;
+
+	dev_err_ratelimited(vfe->camss->dev,
+			    "Invalid write master %u, ignoring\n", wm);
+
+	return false;
+}
+
+/*
  * vfe_buf_done - Process write master done interrupt
  * @vfe: VFE Device
  * @wm: Write master id
  */
 void vfe_buf_done(struct vfe_device *vfe, int wm)
 {
-	struct vfe_line *line = &vfe->line[vfe->wm_output_map[wm]];
 	const struct vfe_hw_ops *ops = vfe->res->hw_ops;
 	struct camss_buffer *ready_buf;
 	struct vfe_output *output;
+	struct vfe_line *line;
 	unsigned long flags;
 	u32 index;
 	u64 ts = ktime_get_ns();
+
+	if (wm < 0 || !vfe_wm_valid(vfe, wm))
+		return;
 
 	spin_lock_irqsave(&vfe->output_lock, flags);
 
@@ -463,7 +490,8 @@ void vfe_buf_done(struct vfe_device *vfe, int wm)
 				    "Received wm done for unmapped index\n");
 		goto out_unlock;
 	}
-	output = &vfe->line[vfe->wm_output_map[wm]].output;
+	line = &vfe->line[vfe->wm_output_map[wm]];
+	output = &line->output;
 
 	ready_buf = output->buf[0];
 	if (!ready_buf) {
@@ -483,10 +511,12 @@ void vfe_buf_done(struct vfe_device *vfe, int wm)
 	output->buf[index] = vfe_buf_get_pending(output);
 
 	if (output->buf[index]) {
-		ops->vfe_wm_update(vfe, output->wm_idx[0],
-				   output->buf[index]->addr[0],
-				   line);
-		ops->reg_update(vfe, line->id);
+		if (vfe_wm_valid(vfe, output->wm_idx[0])) {
+			ops->vfe_wm_update(vfe, output->wm_idx[0],
+					   output->buf[index]->addr[0],
+					   line);
+			ops->reg_update(vfe, line->id);
+		}
 	} else {
 		output->gen2.active_num--;
 	}
@@ -585,9 +615,11 @@ int vfe_queue_buffer_v2(struct camss_video *vid,
 	if (output->state == VFE_OUTPUT_ON &&
 	    output->gen2.active_num < 2) {
 		output->buf[output->gen2.active_num++] = buf;
-		ops->vfe_wm_update(vfe, output->wm_idx[0],
-				   buf->addr[0], line);
-		ops->reg_update(vfe, line->id);
+		if (vfe_wm_valid(vfe, output->wm_idx[0])) {
+			ops->vfe_wm_update(vfe, output->wm_idx[0],
+					   buf->addr[0], line);
+			ops->reg_update(vfe, line->id);
+		}
 	} else {
 		vfe_buf_add_pending(output, buf);
 	}
