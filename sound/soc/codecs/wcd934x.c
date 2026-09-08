@@ -536,7 +536,6 @@ struct wcd934x_codec {
 	int rate;
 	u32 version;
 	u32 hph_mode;
-	u32 tx_port_value[WCD934X_TX_MAX];
 	u32 rx_port_value[WCD934X_RX_MAX];
 	int sido_input_src;
 	int dmic_0_1_clk_cnt;
@@ -3766,17 +3765,29 @@ static const struct snd_kcontrol_new cdc_if_tx13_mux =
 static const struct snd_kcontrol_new cdc_if_tx13_inp1_mux =
 	SOC_DAPM_ENUM("CDC_IF TX13 INP1 MUX Mux", cdc_if_tx13_inp1_mux_enum);
 
+static bool wcd934x_slim_tx_port_enabled(struct wcd934x_codec *wcd, int dai_id,
+					 int port_id)
+{
+	struct wcd934x_slim_ch *ch;
+
+	list_for_each_entry(ch, &wcd->dai[dai_id].slim_ch_list, list)
+		if (ch->port == port_id)
+			return true;
+
+	return false;
+}
+
 static int slim_tx_mixer_get(struct snd_kcontrol *kc,
 			     struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_to_dapm(kc);
-	struct device *dev = snd_soc_dapm_to_dev(dapm);
+	struct snd_soc_dapm_widget *widget = snd_soc_dapm_kcontrol_to_widget(kc);
+	struct device *dev = snd_soc_dapm_to_dev(widget->dapm);
 	struct wcd934x_codec *wcd = dev_get_drvdata(dev);
 	struct soc_mixer_control *mixer =
 			(struct soc_mixer_control *)kc->private_value;
-	int port_id = mixer->shift;
 
-	ucontrol->value.integer.value[0] = wcd->tx_port_value[port_id];
+	ucontrol->value.integer.value[0] =
+		wcd934x_slim_tx_port_enabled(wcd, widget->shift, mixer->shift);
 
 	return 0;
 }
@@ -3791,37 +3802,26 @@ static int slim_tx_mixer_put(struct snd_kcontrol *kc,
 	struct soc_mixer_control *mixer =
 			(struct soc_mixer_control *)kc->private_value;
 	int enable = ucontrol->value.integer.value[0];
-	struct wcd934x_slim_ch *ch, *c;
 	int dai_id = widget->shift;
 	int port_id = mixer->shift;
 
-	/* only add to the list if value not set */
-	if (enable == wcd->tx_port_value[port_id])
+	/* only touch the list if this DAI's state actually changes */
+	if (enable == wcd934x_slim_tx_port_enabled(wcd, dai_id, port_id))
 		return 0;
 
 	if (enable) {
-		if (list_empty(&wcd->tx_chs[port_id].list)) {
-			list_add_tail(&wcd->tx_chs[port_id].list,
-				      &wcd->dai[dai_id].slim_ch_list);
-		} else {
-			dev_err(wcd->dev ,"SLIM_TX%d PORT is busy\n", port_id);
+		/* a non-empty list here means another DAI holds the port */
+		if (!list_empty(&wcd->tx_chs[port_id].list)) {
+			dev_err(wcd->dev, "SLIM_TX%d PORT is busy\n", port_id);
 			return 0;
 		}
-	 } else {
-		bool found = false;
 
-		list_for_each_entry_safe(ch, c, &wcd->dai[dai_id].slim_ch_list, list) {
-			if (ch->port == port_id) {
-				found = true;
-				list_del_init(&wcd->tx_chs[port_id].list);
-				break;
-			}
-		}
-		if (!found)
-			return 0;
-	 }
+		list_add_tail(&wcd->tx_chs[port_id].list,
+			      &wcd->dai[dai_id].slim_ch_list);
+	} else {
+		list_del_init(&wcd->tx_chs[port_id].list);
+	}
 
-	wcd->tx_port_value[port_id] = enable;
 	snd_soc_dapm_mixer_update_power(widget->dapm, kc, enable, update);
 
 	return 1;
