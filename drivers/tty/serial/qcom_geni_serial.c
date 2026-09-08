@@ -1443,6 +1443,30 @@ static void qcom_geni_serial_set_termios(struct uart_port *uport,
 	writel(bits_per_char, uport->membase + SE_UART_TX_WORD_LEN);
 	writel(bits_per_char, uport->membase + SE_UART_RX_WORD_LEN);
 	writel(stop_bit_len, uport->membase + SE_UART_TX_STOP_BIT_LEN);
+
+	/*
+	 * The secondary (RX) sequencer will not go active unless the serial
+	 * engine clock has already been programmed for the requested baud.
+	 *
+	 * On the very first open, uart_port_startup() runs ->startup() -- and
+	 * therefore start_rx() -- before ->set_termios(). At that point
+	 * port->clk_rate is still zero, so the runtime-resume path skips
+	 * dev_pm_opp_set_rate() and RX is armed while the SE is still at the
+	 * default 19.2 MHz. START_READ is silently ignored: SE_GENI_STATUS
+	 * stays 0, RX never starts, and because the sequencer is inactive the
+	 * hardware keeps RFR de-asserted, so a peer using hardware flow
+	 * control never transmits at all.
+	 *
+	 * set_rate() above has now programmed the correct rate, so re-arm RX.
+	 * Subsequent opens happen to work only because port->clk_rate has
+	 * survived from the previous open.
+	 */
+	if (!uart_console(uport) && port->setup &&
+	    !qcom_geni_serial_secondary_active(uport)) {
+		uart_port_lock_irq(uport);
+		qcom_geni_serial_start_rx(uport);
+		uart_port_unlock_irq(uport);
+	}
 }
 
 #ifdef CONFIG_SERIAL_QCOM_GENI_CONSOLE
