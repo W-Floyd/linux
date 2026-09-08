@@ -4824,6 +4824,20 @@ static int camss_subdev_notifier_complete(struct v4l2_async_notifier *async)
 			return -EINVAL;
 		}
 
+		/*
+		 * This runs again every time the notifier completes, which
+		 * happens whenever any sensor is rebound, and it walks every
+		 * registered sensor rather than only the new one. As
+		 * media_create_pad_link() does not check whether the link it is
+		 * asked for already exists, the sensors that stayed bound would
+		 * otherwise collect one duplicate link per rebind of any other
+		 * sensor, until enabling a link fails with -EBUSY and the
+		 * camera can no longer be opened at all.
+		 */
+		if (media_entity_find_link(&sensor->pads[i],
+					   &input->pads[MSM_CSIPHY_PAD_SINK]))
+			continue;
+
 		ret = media_create_pad_link(sensor, i, input,
 					    MSM_CSIPHY_PAD_SINK,
 					    MEDIA_LNK_FL_IMMUTABLE | MEDIA_LNK_FL_ENABLED);
