@@ -480,10 +480,12 @@ static const char * const imx320_supply_name[] = {
 };
 
 /*
- * The Bayer order has not been confirmed against hardware. If captured
- * frames come out with red and blue swapped, this is the value to change.
+ * Confirmed against hardware by binning raw pixel means by (x % 4, y % 4) on a
+ * colour chart: the two equal sites are (0, 0) and (1, 1), so green sits on
+ * that diagonal, and rendering the remaining sites as R = (1, 0), B = (0, 1)
+ * reproduces the chart. The vendor module declares SBGGR10, which is wrong.
  */
-#define IMX320_MBUS_CODE MEDIA_BUS_FMT_SRGGB10_1X10
+#define IMX320_MBUS_CODE MEDIA_BUS_FMT_SGRBG10_1X10
 
 static const struct imx320_mode supported_modes[] = {
 	{
