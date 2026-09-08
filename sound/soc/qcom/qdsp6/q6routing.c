@@ -512,6 +512,33 @@ static int msm_routing_get_audio_mixer(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+/*
+ * A session feeds exactly one backend, tracked in session->port_id, so
+ * switching backends has to drop the previous DAPM path explicitly. Userspace
+ * may never write 0 to the old control, and by the time it does
+ * msm_routing_put_audio_mixer() no longer recognises it as the active backend
+ * and returns early -- leaving the path connected while the control reads off.
+ * Every kcontrol of this mixer widget belongs to the same session and carries
+ * its backend id in mc->reg, so the outgoing one can be found there.
+ */
+static void msm_routing_unmap_be(struct snd_soc_dapm_context *dapm,
+				 struct snd_kcontrol *kcontrol, int be_id)
+{
+	struct snd_soc_dapm_widget *w = snd_soc_dapm_kcontrol_to_widget(kcontrol);
+	int i;
+
+	for (i = 0; i < w->num_kcontrols; i++) {
+		struct soc_mixer_control *mc =
+		    (struct soc_mixer_control *)w->kcontrols[i]->private_value;
+
+		if (mc->reg == be_id) {
+			snd_soc_dapm_mixer_update_power(dapm, w->kcontrols[i],
+							0, NULL);
+			return;
+		}
+	}
+}
+
 static int msm_routing_put_audio_mixer(struct snd_kcontrol *kcontrol,
 				       struct snd_ctl_elem_value *ucontrol)
 {
@@ -529,10 +556,13 @@ static int msm_routing_put_audio_mixer(struct snd_kcontrol *kcontrol,
 		if (session->port_id == be_id)
 			return 0;
 
+		if (session->port_id != -1)
+			msm_routing_unmap_be(dapm, kcontrol, session->port_id);
+
 		session->port_id = be_id;
 		snd_soc_dapm_mixer_update_power(dapm, kcontrol, 1, update);
 	} else {
-		if (session->port_id == -1 || session->port_id != be_id)
+		if (session->port_id != be_id)
 			return 0;
 
 		session->port_id = -1;
