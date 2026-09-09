@@ -11,6 +11,21 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
 
+/*
+ * Registers beyond the position and control pair, used only by the aperture
+ * mechanism. The names are descriptive: no datasheet for this part is public,
+ * and the values come from tracing the vendor camera stack.
+ */
+#define AK7372_IRIS_DRIVE	0xa6	/* energises the blade drive */
+#define AK7372_IRIS_DRIVE_ON	0x7b
+#define AK7372_IRIS_DRIVE_OFF	0x00
+#define AK7372_IRIS_SETUP	0xae	/* written once when the module opens */
+#define AK7372_IRIS_SETUP_VAL	0x3b
+/* Where the vendor leaves the position once the blades have arrived. */
+#define AK7372_IRIS_PARK	0x7fc0
+/* How long the vendor holds the drive before releasing it. */
+#define AK7372_IRIS_TRAVEL_US	11000
+
 struct ak73xx_chipdef {
 	u8 reg_position;
 	u8 reg_cont;
@@ -114,6 +129,9 @@ struct ak7375_device {
 	 * it is here is a property of the board, not of the chip.
 	 */
 	bool is_iris;
+
+	/* Whether the aperture's one-time register setup has been done. */
+	bool iris_setup_done;
 };
 
 static inline struct ak7375_device *to_ak7375_vcm(struct v4l2_ctrl *ctrl)
@@ -148,13 +166,83 @@ static int ak7375_i2c_write(struct ak7375_device *ak7375,
 	return 0;
 }
 
+/*
+ * Take the aperture out of whatever state it powered up in.
+ *
+ * This cannot live in the runtime resume callback: probe marks the device
+ * active with pm_runtime_set_active(), which does not run the callback, and
+ * nothing suspends it afterwards, so resume may never execute at all. A focus
+ * lens does not care, because writing a position is all it ever needs. The
+ * blades do: without this they never move, however the drive is pulsed.
+ */
+static int ak7375_iris_setup(struct ak7375_device *dev_vcm)
+{
+	const struct ak73xx_chipdef *cdef = dev_vcm->cdef;
+	int ret;
+
+	ret = ak7375_i2c_write(dev_vcm, cdef->reg_cont, cdef->mode_active, 1);
+	if (ret)
+		return ret;
+
+	ret = ak7375_i2c_write(dev_vcm, AK7372_IRIS_SETUP,
+			       AK7372_IRIS_SETUP_VAL, 1);
+	if (ret)
+		return ret;
+
+	dev_vcm->iris_setup_done = true;
+
+	return 0;
+}
+
+/*
+ * Move the aperture blades.
+ *
+ * Unlike a focus lens, which simply holds whatever position it is given, the
+ * blade mechanism has to be driven: writing a position alone does nothing at
+ * all. The vendor sequence, read off the i2c bus of a Samsung Galaxy S9,
+ * energises the drive, writes the target, waits, then releases the drive and
+ * parks the position mid-scale so no current is held.
+ */
+static int ak7375_set_iris(struct ak7375_device *dev_vcm, s32 val)
+{
+	const struct ak73xx_chipdef *cdef = dev_vcm->cdef;
+	int ret;
+
+	if (!dev_vcm->iris_setup_done) {
+		ret = ak7375_iris_setup(dev_vcm);
+		if (ret)
+			return ret;
+	}
+
+	ret = ak7375_i2c_write(dev_vcm, AK7372_IRIS_DRIVE, AK7372_IRIS_DRIVE_ON, 1);
+	if (ret)
+		return ret;
+
+	ret = ak7375_i2c_write(dev_vcm, cdef->reg_position,
+			       val << cdef->shift_pos, 2);
+	if (ret)
+		goto release;
+
+	/* The blades need time to travel before the drive is taken away. */
+	usleep_range(AK7372_IRIS_TRAVEL_US, AK7372_IRIS_TRAVEL_US + 1000);
+
+release:
+	ret = ak7375_i2c_write(dev_vcm, AK7372_IRIS_DRIVE, AK7372_IRIS_DRIVE_OFF, 1);
+	if (ret)
+		return ret;
+
+	return ak7375_i2c_write(dev_vcm, cdef->reg_position, AK7372_IRIS_PARK, 2);
+}
+
 static int ak7375_set_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct ak7375_device *dev_vcm = to_ak7375_vcm(ctrl);
 	const struct ak73xx_chipdef *cdef = dev_vcm->cdef;
 
-	if (ctrl->id == V4L2_CID_FOCUS_ABSOLUTE ||
-	    ctrl->id == V4L2_CID_IRIS_ABSOLUTE)
+	if (ctrl->id == V4L2_CID_IRIS_ABSOLUTE)
+		return ak7375_set_iris(dev_vcm, ctrl->val);
+
+	if (ctrl->id == V4L2_CID_FOCUS_ABSOLUTE)
 		return ak7375_i2c_write(dev_vcm, cdef->reg_position,
 					ctrl->val << cdef->shift_pos, 2);
 
@@ -297,6 +385,17 @@ static int ak7375_vcm_suspend(struct device *dev)
 	if (!ak7375_dev->active)
 		return 0;
 
+	/*
+	 * Nothing to wind down for an aperture: the drive is already released
+	 * and the position parked after every move, so the blades hold their
+	 * stop with no current. Walking them to zero would move them.
+	 */
+	if (ak7375_dev->is_iris) {
+		/* The rails are about to go; the setup will not survive them. */
+		ak7375_dev->iris_setup_done = false;
+		goto power_off;
+	}
+
 	for (val = ak7375_dev->focus->val & ~(cdef->ctrl_steps - 1);
 	     val >= 0; val -= cdef->ctrl_steps) {
 		ret = ak7375_i2c_write(ak7375_dev, cdef->reg_position,
@@ -314,6 +413,7 @@ static int ak7375_vcm_suspend(struct device *dev)
 			dev_err(dev, "%s I2C failure: %d\n", __func__, ret);
 	}
 
+power_off:
 	ret = regulator_bulk_disable(ARRAY_SIZE(ak7375_supply_names),
 				     ak7375_dev->supplies);
 	if (ret)
@@ -353,6 +453,22 @@ static int __maybe_unused ak7375_vcm_resume(struct device *dev)
 	if (ret) {
 		dev_err(dev, "%s I2C failure: %d\n", __func__, ret);
 		return ret;
+	}
+
+	if (ak7375_dev->is_iris) {
+		/*
+		 * The blades are not a lens: there is nothing to ease into
+		 * place, and a ramp of positions with the drive off would move
+		 * nothing at all. Drive straight to the wanted stop; the setup
+		 * the part needs after losing power is redone on the way.
+		 */
+		ret = ak7375_set_iris(ak7375_dev, ak7375_dev->focus->val);
+		if (ret)
+			dev_err(dev, "%s I2C failure: %d\n", __func__, ret);
+
+		ak7375_dev->active = true;
+
+		return 0;
 	}
 
 	for (val = ak7375_dev->focus->val % cdef->ctrl_steps;
