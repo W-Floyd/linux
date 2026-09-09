@@ -1,0 +1,301 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/*
+ * Motorola Moto G Play (2024) -- "fogona", XT2413, SM6225 (khaje).
+ *
+ * Copyright (c) 2026 William Floyd
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include "sm6225.dtsi"
+#include "pm6125.dtsi"
+
+/ {
+	model = "Motorola Moto G Play (2024)";
+	compatible = "motorola,fogona", "qcom,sm6225", "qcom,sm6115";
+	chassis-type = "handset";
+
+	/*
+	 * Measured, not inherited: /sys/devices/soc0/soc_id = 518, revision 1.0.
+	 * fogona ships two base DTBs differing only in this property (0x24a and
+	 * 0x206); this unit is 0x206 = 518. board-id is the pair carried by the
+	 * dtbo overlay ABL actually selects at runtime.
+	 */
+	qcom,msm-id = <518 0x10000>;
+	qcom,board-id = <0x41 0xa000>;
+
+	chosen {
+		/*
+		 * *_ignore_unused is load-bearing on this board, not tidiness.
+		 * ABL hands over with the panel lit and its clocks/rails
+		 * running, and simple-framebuffer does not claim any of them --
+		 * so the late-boot "disable everything unclaimed" passes turn
+		 * the display off. Observed exactly that: Tux drawn, then black.
+		 *
+		 * The board makes it worse than usual: LCD_1.8V is VREG_L9A,
+		 * which the PM6225 datasheet says must never be turned off (it
+		 * also carries VDD_PX31..36 and LPDDR4x_VDD1).
+		 */
+		bootargs = "console=tty0 loglevel=7 panic=0 fbcon=map:0 clk_ignore_unused pd_ignore_unused regulator_ignore_unused pmos.nosplash plymouth.enable=0 ignore_loglevel fbcon=font:6x10 rdinit=/init.pmos";
+	};
+
+	/*
+	 * simple-framebuffer at the DT ROOT, not under /chosen.
+	 * of_platform_default_populate() walks the root; a /chosen child relies
+	 * on one special-cased lookup, and on this port that lookup did not
+	 * fire -- the driver never probed and 40 lines of pr_emerg produced
+	 * nothing on the panel. Moved to the root, fbcon came up immediately
+	 * and drew the Tux logo.
+	 *
+	 * ABL leaves its splash lit at the base of cont_splash_mem, confirmed
+	 * from the live tree as splash_region@5c000000 / 0xf00000. The panel is
+	 * 720x1600; the region must stay no-map or simplefb's devm_ioremap_wc()
+	 * refuses it (arm64 ioremap rejects mapped memory).
+	 */
+	framebuffer0: framebuffer@5c000000 {
+		compatible = "simple-framebuffer";
+		reg = <0x0 0x5c000000 0x0 (720 * 1600 * 4)>;
+		width = <720>;
+		height = <1600>;
+		stride = <(720 * 4)>;
+		format = "a8r8g8b8";
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		/*
+		 * Volume-up is on the PMIC, not TLMM. The schematic routes
+		 * KYPD_VOLP_N to PM6225 GPIO_05 (pad 21), and the stock dtbo
+		 * agrees: its vol_up node reads `gpios = <0xffffffff 0x05 0x01>`
+		 * with the fixups block resolving that dangling phandle to
+		 * `pm6125_gpios`. Reading the overlay without applying the
+		 * fixups yields "gpio 5" with no controller, and TLMM 5 is the
+		 * natural wrong guess -- which is exactly the guess this file
+		 * used to make.
+		 *
+		 * All three side keys are on the PMIC: power -> KPD_PWR_N and
+		 * volume-down -> RESIN_N (both via pon, enabled below), and
+		 * volume-up here. There is no TLMM key on this board.
+		 */
+		key-volume-up {
+			label = "Volume Up";
+			gpios = <&pm6125_gpios 5 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEUP>;
+			debounce-interval = <15>;
+		};
+	};
+};
+
+/*
+ * khaje reserves GPIOs 14-17. Straight from Qualcomm's own driver:
+ *
+ *   static const int khaje_reserved_gpios[] = { 14, 15, 16, 17, -1 };
+ *       -- drivers/pinctrl/qcom/pinctrl-khaje.c
+ *
+ * Touching them during gpio init is what crashes TLMM on this SoC.
+ */
+&tlmm {
+	gpio-reserved-ranges = <14 4>;
+};
+
+&pon_pwrkey {
+	status = "okay";
+};
+
+&pon_resin {
+	linux,code = <KEY_VOLUMEDOWN>;
+	status = "okay";
+};
+
+/*
+ * RPM regulators. khaje's rails are pm6125 LDOs behind RPM/SMD (the SoC has an
+ * Arm Cortex-M3 RPM, not RPMh), so they are declared per-board here rather
+ * than in pm6125.dtsi -- which describes only the SPMI side.
+ *
+ * Only the rails this port actually uses are declared. Voltage windows are the
+ * sibling sm6225-lenovo-tb128.dts values, which match the PM6225 datasheet
+ * ranges; L18 carries the note "fixed @ 1.232V for DSIPHY" there and is also
+ * fogona's UFS vdda-pll.
+ */
+&rpm_requests {
+	regulators-0 {
+		compatible = "qcom,rpm-pm6125-regulators";
+
+		pm6125_l4: l4 {
+			regulator-min-microvolt = <720000>;
+			regulator-max-microvolt = <1050000>;
+		};
+
+		pm6125_l11: l11 {
+			regulator-min-microvolt = <1700000>;
+			regulator-max-microvolt = <1950000>;
+		};
+
+		pm6125_l12: l12 {
+			regulator-min-microvolt = <1620000>;
+			regulator-max-microvolt = <1980000>;
+		};
+
+		pm6125_l15: l15 {
+			regulator-min-microvolt = <2700000>;
+			regulator-max-microvolt = <3544000>;
+		};
+
+		pm6125_l18: l18 {
+			regulator-min-microvolt = <1100000>;
+			regulator-max-microvolt = <1300000>;
+		};
+
+		pm6125_l24: l24 {
+			regulator-min-microvolt = <2700000>;
+			regulator-max-microvolt = <3544000>;
+		};
+	};
+};
+
+/*
+ * UFS rails, resolved from the phandles in fogona's own live device tree
+ * (/sys/firmware/fdt on the running stock kernel) and cross-checked against
+ * the PM6225 datasheet's rail table:
+ *
+ *   vcc      -> pm6125_l24   (EMMC1_VCC / UFS_MEM, 2.96 V)
+ *   vccq2    -> pm6125_l11   (eMMC1_VCCQ, 1.8 V)
+ *   vdda-phy -> pm6125_l4    (EBI_PLL / UFS)
+ *   vdda-pll -> pm6125_l18
+ *
+ * vdd-hba is deliberately absent: stock declares it as
+ * `vdd-hba-supply = <&gcc_ufs_phy_gdsc>` with `vdd-hba-fixed-regulator`, i.e.
+ * the GDSC power domain rather than an LDO -- which sm6225.dtsi already
+ * expresses as power-domains = <&gcc GCC_UFS_PHY_GDSC>. The sibling
+ * sm6225-lenovo-tb128.dts points vdd-hba at pm6125_l18 with the comment
+ * "??? sus"; per the datasheet L18 is MIPI_CSI_1P2, so that assignment looks
+ * wrong and is not copied here.
+ */
+&ufs_mem_hc {
+	vcc-supply = <&pm6125_l24>;
+	vcc-max-microamp = <600000>;
+	vccq2-supply = <&pm6125_l11>;
+	vccq2-max-microamp = <600000>;
+	status = "okay";
+};
+
+&ufs_mem_phy {
+	vdda-phy-supply = <&pm6125_l4>;
+	vdda-pll-supply = <&pm6125_l18>;
+	status = "okay";
+};
+
+/*
+ * sm6225.dtsi declares both of these as fixed-clock with NO frequency, leaving
+ * each board to supply it -- and everything derived from the XO is 0 Hz until
+ * it does. That surfaced as ufs-qcom reporting "invalid ref_clk setting = 0",
+ * because its ref_clk is <&rpmcc RPM_SMD_XO_CLK_SRC>.
+ *
+ * 19200000 is what the SoC's CXO input sees, NOT the 38.4 MHz crystal: the
+ * SM6225 datasheet's section 3.11.1.1 is titled "19.2 MHz CXO input", and the
+ * live downstream tree agrees (0x124f800). Do not "correct" this to 38.4 MHz.
+ *
+ * 32764 is the PMIC's generated sleep clock: the PM6225 datasheet describes
+ * "using the 38.4 MHz XO circuit and dividing its output by 1172", and
+ * 38400000/1172 = 32764.5. Both upstream bengal boards use exactly 32764.
+ */
+&xo_board {
+	clock-frequency = <19200000>;
+};
+
+&sleep_clk {
+	clock-frequency = <32764>;
+};
+
+/*
+ * USB, high-speed only. fogona routes no superspeed at all (Motorola's
+ * schematics break USB_CC1/CC2 out to testpoints but carry no SBU, and
+ * USB0_SS_* / USB0_DP_AUX_* have no cross-sheet routing), so dwc3 is pinned to
+ * the HS phy and `qcom,select-utmi-as-pipe-clk` stands in for the absent SS
+ * phy's pipe clock.
+ *
+ * Unlike U-Boot -- which has no SMD/RPM regulator driver and therefore cannot
+ * bring these rails up at all -- Linux can, which is why USB is worth enabling
+ * here: it gives a console channel that does not depend on the panel.
+ *
+ * Rails per the PM6225 datasheet, cross-checked against the board's analog
+ * rail traces (FOGONA-BOARD.md 1): vdda-pll -> L4 (VDD_A_USBHS_0P9),
+ * vdda18 -> L12 (VDD_TXDAC/USB 1.8 V), vdda33 -> L15 (VDD_A_USBHS_3P1,
+ * proven -- only L15A instance on the sheet).
+ *
+ * These property names are correct for THIS node and must not be "corrected"
+ * to j606f's. sm6225.dtsi declares usb_hsphy as "qcom,usb-snps-hs-7nm-phy"
+ * (phy-qcom-snps-femto-v2.c, which asks for vdda-pll/vdda33/vdda18), whereas
+ * mainline sm6115.dtsi declares it as "qcom,sm6115-qusb2-phy"
+ * (phy-qcom-qusb2.c, which asks for vdd/vdda-pll/vdda-phy-dpdm). Different
+ * driver, different names, same three board rails.
+ */
+&usb {
+	qcom,select-utmi-as-pipe-clk;
+	status = "okay";
+};
+
+&usb_dwc3 {
+	/*
+	 * usb-role-switch MUST be deleted, not just overridden by dr_mode.
+	 * sm6225.dtsi sets it on this node, which makes dwc3 wait for a
+	 * role-switch provider to tell it host-or-peripheral. fogona has no such
+	 * provider in any tree we can reach: the Type-C CC controller is an
+	 * SGM7220 on APPS_I2C (FOGONA-BOARD.md 5) with no driver enabled and no
+	 * usb-connector node, so the role never arrives and no UDC is ever
+	 * registered -- /sys/class/udc stays empty even with a working phy.
+	 *
+	 * sm6115p-lenovo-j606f.dts does exactly this for the same reason, and it
+	 * is the upstream bengal board closest to our situation:
+	 *
+	 *     &usb_dwc3 {
+	 *             /delete-property/ usb-role-switch;
+	 *             maximum-speed = "high-speed";
+	 *             dr_mode = "peripheral";
+	 *     };
+	 */
+	/delete-property/ usb-role-switch;
+	maximum-speed = "high-speed";
+	phys = <&usb_hsphy>;
+	phy-names = "usb2-phy";
+	dr_mode = "peripheral";
+};
+
+&usb_hsphy {
+	vdda-pll-supply = <&pm6125_l4>;
+	vdda18-supply = <&pm6125_l12>;
+	vdda33-supply = <&pm6125_l15>;
+	status = "okay";
+};
+
+/*
+ * The whole Adreno block is off for this bringup, and that is a deliberate
+ * noise-reduction measure as much as a scope one.
+ *
+ * gpu / gmu_wrapper / adreno_smmu are the only consumers of &gpucc, and
+ * adreno_smmu@59a0000 is the ONLY iommu in sm6225.dtsi with a clocks property.
+ * Left enabled without gpucc it fails as
+ *   arm-smmu 59a0000.iommu: probe failed -110
+ * and emits "supplier <addr>.clock-controller not ready", which reads exactly
+ * like a storage problem and is not one: ufs_mem_hc's iommu is
+ * apps_smmu@c600000, which has no clocks at all. Disabling these three removes
+ * that entire false trail.
+ *
+ * The GPU is also not reachable yet for an unrelated reason: A610 needs
+ * a610_zap.mdt and a630_sqe.fw, and mainline's A610 speedbin table is
+ * bengal-only with no khaje entry (see SM6225.md).
+ */
+&gpu {
+	status = "disabled";
+};
+
+&gmu_wrapper {
+	status = "disabled";
+};
+
+&adreno_smmu {
+	status = "disabled";
+};
