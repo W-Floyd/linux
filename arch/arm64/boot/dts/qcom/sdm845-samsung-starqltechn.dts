@@ -385,6 +385,12 @@
 					regulator-max-microvolt = <2800000>;
 				};
 
+				s2mpb02_l16: ldo16 {
+					regulator-name = "cam_front_vaf";
+					regulator-min-microvolt = <2800000>;
+					regulator-max-microvolt = <2800000>;
+				};
+
 				s2mpb02_l17: ldo17 {
 					regulator-name = "cam_iris_vana";
 					regulator-min-microvolt = <2800000>;
@@ -697,6 +703,7 @@
 		vcore-supply = <&s2mpb02_l5>;
 
 		reset-gpios = <&tlmm 12 GPIO_ACTIVE_LOW>;
+		lens-focus = <&cam_front_vcm>;
 
 		pinctrl-0 = <&cam_front_mclk_active &cam_front_rst_active>;
 		pinctrl-1 = <&cam_front_mclk_suspend &cam_front_rst_suspend>;
@@ -766,6 +773,24 @@
 				link-frequencies = /bits/ 64 <768000000>;
 			};
 		};
+	};
+};
+
+&i2c7 {
+	/*
+	 * Front camera focus actuator. The stock DT also puts the front
+	 * module's EEPROM at 0x51 on this bus; it has no mainline consumer.
+	 */
+	clock-frequency = <400000>;
+
+	status = "okay";
+
+	cam_front_vcm: camera-actuator@c {
+		compatible = "asahi-kasei,ak7372";
+		reg = <0x0c>;
+
+		vdd-supply = <&s2mpb02_l16>;
+		vio-supply = <&s2mpb02_l6>;
 	};
 };
 
