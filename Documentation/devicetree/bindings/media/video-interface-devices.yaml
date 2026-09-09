@@ -30,6 +30,13 @@ properties:
     description:
       A phandle to the node of the focus lens controller.
 
+  lens-iris:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description:
+      A phandle to the node of the aperture (iris) controller. This is a
+      separate device from the focus lens controller on camera modules that
+      have both.
+
   rotation:
     $ref: /schemas/types.yaml#/definitions/uint32
     enum: [ 0, 90, 180, 270 ]
