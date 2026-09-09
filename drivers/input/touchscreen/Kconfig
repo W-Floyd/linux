@@ -214,9 +214,11 @@ config TOUCHSCREEN_CHIPONE_ICNL9916
 	tristate "chipone icnl9916 touchscreen controller"
 	depends on GPIOLIB || COMPILE_TEST
 	depends on I2C
+	depends on SPI
 	depends on OF
 	help
-	  Say Y here if you have a ChipOne icnl9916 based I2C touchscreen.
+	  Say Y here if you have a ChipOne icnl9916 based touchscreen.
+	  Both the I2C and SPI transports are supported.
 
 	  If unsure, say N.
 
