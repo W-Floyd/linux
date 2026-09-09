@@ -668,6 +668,7 @@
 
 		reset-gpios = <&tlmm 25 GPIO_ACTIVE_LOW>;
 		lens-focus = <&cam_vcm>;
+		lens-iris = <&cam_iris>;
 		flash-leds = <&s2mpb02_flash>;
 
 		pinctrl-0 = <&cam_rear_mclk_active &cam_rear_rst_active>;
@@ -806,6 +807,22 @@
 	cam_vcm: camera-actuator@c {
 		compatible = "asahi-kasei,ak7374";
 		reg = <0x0c>;
+
+		vdd-supply = <&s2mpb02_l14>;
+		vio-supply = <&s2mpb02_l10>;
+	};
+
+	/*
+	 * Samsung's Dual Aperture blades, driven by a second AK7372 sharing
+	 * the focus actuator's rails. The mechanism selects f/1.5 or f/2.4;
+	 * the codes that move it are not known yet, so the blades do not
+	 * actually travel, but the control plumbing is real.
+	 */
+	cam_iris: camera-aperture@4c {
+		compatible = "asahi-kasei,ak7372";
+		reg = <0x4c>;
+
+		asahi-kasei,iris;
 
 		vdd-supply = <&s2mpb02_l14>;
 		vio-supply = <&s2mpb02_l10>;
