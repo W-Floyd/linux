@@ -30,6 +30,15 @@ properties:
   vio-supply:
     description: I/O pull-up supply
 
+  asahi-kasei,iris:
+    type: boolean
+    description:
+      The device drives an aperture (iris) mechanism rather than a focus
+      lens. The same part is used for both on some camera modules, so which
+      one it is cannot be told from the compatible string. When present the
+      driver exposes V4L2_CID_IRIS_ABSOLUTE instead of
+      V4L2_CID_FOCUS_ABSOLUTE.
+
 required:
   - compatible
   - reg

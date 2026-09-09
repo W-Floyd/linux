@@ -6,6 +6,7 @@
 #include <linux/i2c.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
+#include <linux/property.h>
 #include <linux/regulator/consumer.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
@@ -106,6 +107,13 @@ struct ak7375_device {
 
 	/* active or standby mode */
 	bool active;
+
+	/*
+	 * The same part is used both to move a focus lens and, on modules
+	 * with a variable aperture, to drive the aperture blades. Which one
+	 * it is here is a property of the board, not of the chip.
+	 */
+	bool is_iris;
 };
 
 static inline struct ak7375_device *to_ak7375_vcm(struct v4l2_ctrl *ctrl)
@@ -145,7 +153,8 @@ static int ak7375_set_ctrl(struct v4l2_ctrl *ctrl)
 	struct ak7375_device *dev_vcm = to_ak7375_vcm(ctrl);
 	const struct ak73xx_chipdef *cdef = dev_vcm->cdef;
 
-	if (ctrl->id == V4L2_CID_FOCUS_ABSOLUTE)
+	if (ctrl->id == V4L2_CID_FOCUS_ABSOLUTE ||
+	    ctrl->id == V4L2_CID_IRIS_ABSOLUTE)
 		return ak7375_i2c_write(dev_vcm, cdef->reg_position,
 					ctrl->val << cdef->shift_pos, 2);
 
@@ -190,7 +199,9 @@ static int ak7375_init_controls(struct ak7375_device *dev_vcm)
 
 	v4l2_ctrl_handler_init(hdl, 1);
 
-	dev_vcm->focus = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_FOCUS_ABSOLUTE,
+	dev_vcm->focus = v4l2_ctrl_new_std(hdl, ops,
+		dev_vcm->is_iris ? V4L2_CID_IRIS_ABSOLUTE
+				 : V4L2_CID_FOCUS_ABSOLUTE,
 		0, cdef->focus_pos_max, cdef->focus_steps, 0);
 
 	if (hdl->error)
@@ -213,6 +224,8 @@ static int ak7375_probe(struct i2c_client *client)
 		return -ENOMEM;
 
 	ak7375_dev->cdef = device_get_match_data(&client->dev);
+	ak7375_dev->is_iris = device_property_read_bool(&client->dev,
+							"asahi-kasei,iris");
 
 	for (i = 0; i < ARRAY_SIZE(ak7375_supply_names); i++)
 		ak7375_dev->supplies[i].supply = ak7375_supply_names[i];
