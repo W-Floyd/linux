@@ -373,8 +373,20 @@ static int iomap_readpage_iter(struct iomap_iter *iter,
 	size_t poff, plen;
 	sector_t sector;
 
-	if (iomap->type == IOMAP_INLINE)
-		return iomap_read_inline_data(iter, folio);
+	if (iomap->type == IOMAP_INLINE) {
+		int ret = iomap_read_inline_data(iter, folio);
+
+		if (ret)
+			return ret;
+
+		/*
+		 * Inline data covers the whole mapping, and the caller loops
+		 * while iomap_length() is non-zero -- so this has to advance
+		 * the iterator like every other path here, or the loop spins
+		 * forever in kernel with the task unkillable.
+		 */
+		return iomap_iter_advance(iter, &length);
+	}
 
 	/* zero post-eof blocks as the page may be mapped */
 	ifs = ifs_alloc(iter->inode, folio, iter->flags);
