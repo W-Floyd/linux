@@ -11,9 +11,7 @@ Supported chips:
 
     Addresses scanned: none
 
-    Datasheet:
-
-	    https://www.analog.com/media/en/technical-documentation/data-sheets/max77505.pdf
+    Datasheet: Datasheet is not publicly available.
 
 Authors:
       - Dzmitry Sankouski <dsankouski@gmail.com>
