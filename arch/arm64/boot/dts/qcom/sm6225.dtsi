@@ -2047,11 +2047,18 @@
 		dispcc: clock-controller@5f00000 {
 			compatible = "qcom,sm6225-dispcc";
 			reg = <0x0 0x05f00000 0x0 0x20000>;
+			/*
+			 * Order matters: every parent in dispcc-sm6225 is a
+			 * positional .index, none use .fw_name, so clock-names
+			 * would not save a wrong order. The driver takes four --
+			 * XO, GPLL0_DIV, byteclk, dsiclk -- and handles the
+			 * sleep and XO branches with a register poke in probe
+			 * rather than as DT parents.
+			 */
 			clocks = <&rpmcc RPM_SMD_XO_CLK_SRC>,
-				 <&sleep_clk>,
+				 <&gcc GCC_DISP_GPLL0_DIV_CLK_SRC>,
 				 <&mdss_dsi0_phy 0>,
-				 <&mdss_dsi0_phy 1>,
-				 <&gcc GCC_DISP_GPLL0_DIV_CLK_SRC>;
+				 <&mdss_dsi0_phy 1>;
 			#clock-cells = <1>;
 			#reset-cells = <1>;
 			#power-domain-cells = <1>;
