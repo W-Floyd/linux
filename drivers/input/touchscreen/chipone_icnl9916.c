@@ -17,6 +17,7 @@
 #include <linux/i2c.h>
 #include <linux/input.h>
 #include <linux/input/mt.h>
+#include <drm/drm_panel.h>
 #include <linux/input/touchscreen.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -131,6 +132,7 @@ struct icnl9916_data {
 	struct input_dev *input;
 	struct reset_control *chip_reset;
 	struct gpio_desc *reset_gpio;
+	struct drm_panel_follower panel_follower;
 	struct touchscreen_properties prop;
 	u8 *tx_buf;
 	u8 *rx_buf;
@@ -681,20 +683,47 @@ static void icnl9916_drain(struct icnl9916_data *data)
 			      sizeof(touch_data));
 }
 
+/*
+ * The ICNL9916 is a TDDI part: one chip drives the panel over DSI and reports
+ * touch over SPI. So the panel driver's power sequencing is also this device's
+ * power sequencing -- blanking the display cuts the panel supplies and resets
+ * the shared silicon, which drops the firmware downloaded into its SRAM.
+ *
+ * Following the panel is the only way to learn that happened. The input device
+ * stays open across a blank, so open()/close() never run and nothing else
+ * would notice the controller had gone away: touch simply stopped working
+ * after the screen was turned off and on again.
+ */
+static int icnl9916_panel_prepared(struct drm_panel_follower *follower)
+{
+	struct icnl9916_data *data = container_of(follower,
+						  struct icnl9916_data,
+						  panel_follower);
+	int ret;
+
+	ret = icnl9916_init(data);
+	if (ret)
+		return ret;
+
+	/*
+	 * The report line is edge triggered, so anything latched while the
+	 * controller was down is never re-signalled.
+	 */
+	icnl9916_drain(data);
+
+	return 0;
+}
+
+static const struct drm_panel_follower_funcs icnl9916_panel_follower_funcs = {
+	.panel_prepared = icnl9916_panel_prepared,
+};
+
 static int icnl9916_start(struct input_dev *input)
 {
 	struct icnl9916_data *data = input_get_drvdata(input);
 	__le16 fw_id;
 	int ret;
 
-	/*
-	 * Only re-initialise if the controller is not already running. On this
-	 * part icnl9916_init() resets it, and reset drops the firmware -- which
-	 * lives in SRAM -- so an unconditional init turns every open into an
-	 * 81 KB reload taking the best part of a second. Userspace opens and
-	 * closes touchscreens freely, and doing that here starved the device of
-	 * any time in which it could actually report a contact.
-	 */
 	/*
 	 * Only re-initialise when the controller is not already running.
 	 * icnl9916_init() resets it, and reset drops firmware held in SRAM, so
@@ -830,6 +859,15 @@ static int icnl9916_probe(struct icnl9916_data *data)
 	error = input_register_device(input);
 	if (error)
 		return error;
+
+	if (drm_is_panel_follower(dev)) {
+		data->panel_follower.funcs = &icnl9916_panel_follower_funcs;
+		error = devm_drm_panel_add_follower(dev,
+						    &data->panel_follower);
+		if (error)
+			return dev_err_probe(dev, error,
+					     "Failed to follow panel\n");
+	}
 
 	dev_set_drvdata(dev, data);
 
