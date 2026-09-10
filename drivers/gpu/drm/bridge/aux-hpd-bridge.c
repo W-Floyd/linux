@@ -17,6 +17,11 @@ static DEFINE_IDA(drm_aux_hpd_bridge_ida);
 struct drm_aux_hpd_bridge_data {
 	struct drm_bridge bridge;
 	struct device *dev;
+	/*
+	 * The last status reported, so that a connector coming up after the
+	 * event can still be told about it.
+	 */
+	enum drm_connector_status status;
 };
 
 static void drm_aux_hpd_bridge_release(struct device *dev)
@@ -153,6 +158,8 @@ void drm_aux_hpd_bridge_notify(struct device *dev, enum drm_connector_status sta
 	if (!data)
 		return;
 
+	WRITE_ONCE(data->status, status);
+
 	drm_bridge_hpd_notify(&data->bridge, status);
 }
 EXPORT_SYMBOL_GPL(drm_aux_hpd_bridge_notify);
@@ -164,8 +171,27 @@ static int drm_aux_hpd_bridge_attach(struct drm_bridge *bridge,
 	return flags & DRM_BRIDGE_ATTACH_NO_CONNECTOR ? 0 : -EINVAL;
 }
 
+/*
+ * A notification is only delivered to a connector that is already listening,
+ * so an out of band source that reports before the display driver has probed
+ * -- a display already attached when the machine boots -- would otherwise go
+ * unnoticed until something changed. Answering detect from the last reported
+ * status closes that window, because the connector asks once when it comes up.
+ */
+static enum drm_connector_status
+drm_aux_hpd_bridge_detect(struct drm_bridge *bridge,
+			  struct drm_connector *connector)
+{
+	struct drm_aux_hpd_bridge_data *data;
+
+	data = container_of(bridge, struct drm_aux_hpd_bridge_data, bridge);
+
+	return READ_ONCE(data->status);
+}
+
 static const struct drm_bridge_funcs drm_aux_hpd_bridge_funcs = {
 	.attach	= drm_aux_hpd_bridge_attach,
+	.detect = drm_aux_hpd_bridge_detect,
 };
 
 static int drm_aux_hpd_bridge_probe(struct auxiliary_device *auxdev,
@@ -181,7 +207,8 @@ static int drm_aux_hpd_bridge_probe(struct auxiliary_device *auxdev,
 
 	data->dev = &auxdev->dev;
 	data->bridge.of_node = dev_get_platdata(data->dev);
-	data->bridge.ops = DRM_BRIDGE_OP_HPD;
+	data->status = connector_status_disconnected;
+	data->bridge.ops = DRM_BRIDGE_OP_HPD | DRM_BRIDGE_OP_DETECT;
 	data->bridge.type = id->driver_data;
 
 	/* passthrough data, allow everything */
