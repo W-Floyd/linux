@@ -64,16 +64,9 @@
  * chip that is alive but empty from one that is not answering at all.
  */
 #define ICNL9916_SPI_PROG_ADDR		0x60
-#define ICNL9916_HW_REG_HARDWARE_ID	0x30000
 #define ICNL9916_HW_REG_BOOT_MODE	0x30010
-#define ICNL9916_HW_REG_CURRENT_MODE	0x30011
-#define ICNL9916_PROG_READ_OVERHEAD	5
 
-#define ICNL9916_BOOT_MODE_IDLE		0
-#define ICNL9916_BOOT_MODE_FLASH	1
-#define ICNL9916_BOOT_MODE_TCH_PRG	2
 #define ICNL9916_BOOT_MODE_SRAM		3
-#define ICNL9916_BOOT_MODE_MASK		7
 
 /*
  * The controller keeps no persistent firmware: on SPI the vendor driver forces
@@ -325,22 +318,6 @@ static int icnl9916_spi_xfer(struct icnl9916_data *data, u16 txlen, u16 rxlen)
 	return 0;
 }
 
-/* One full-duplex transfer; program mode replies within the same frame. */
-static int icnl9916_spi_xfer_duplex(struct icnl9916_data *data, u16 len)
-{
-	struct spi_transfer xfer = {
-		.tx_buf = data->tx_buf,
-		.rx_buf = data->rx_buf,
-		.len = len,
-	};
-	struct spi_message msg;
-
-	spi_message_init(&msg);
-	spi_message_add_tail(&xfer, &msg);
-
-	return spi_sync(data->spi, &msg);
-}
-
 static int icnl9916_enter_program_mode(struct icnl9916_data *data)
 {
 	static const u8 magic[] = { 0xcc, 0x33, 0x55, 0x5a };
@@ -360,25 +337,6 @@ static int icnl9916_enter_program_mode(struct icnl9916_data *data)
 		return ret;
 
 	mdelay(5);
-
-	return 0;
-}
-
-static int icnl9916_prog_read(struct icnl9916_data *data, u32 reg, void *buf,
-			      u16 rlen)
-{
-	u16 len = rlen + ICNL9916_PROG_READ_OVERHEAD;
-	int ret;
-
-	memset(data->tx_buf, 0, len);
-	data->tx_buf[0] = ICNL9916_SPI_PROG_ADDR | 0x01;
-	put_unaligned_be24(reg, data->tx_buf + 1);
-
-	ret = icnl9916_spi_xfer_duplex(data, len);
-	if (ret)
-		return ret;
-
-	memcpy(buf, data->rx_buf + ICNL9916_PROG_READ_OVERHEAD, rlen);
 
 	return 0;
 }
@@ -447,7 +405,7 @@ static int icnl9916_load_firmware(struct icnl9916_data *data)
 {
 	const struct firmware *fw;
 	__le16 fw_id;
-	u8 *buf, cur;
+	u8 *buf;
 	int ret;
 
 	ret = request_firmware(&fw, ICNL9916_FW_NAME, data->dev);
@@ -456,11 +414,6 @@ static int icnl9916_load_firmware(struct icnl9916_data *data)
 			ICNL9916_FW_NAME, ret);
 		return ret;
 	}
-
-	dev_info(data->dev, "Loading %s, %zu bytes, version %04x, crc %08x\n",
-		 ICNL9916_FW_NAME, fw->size,
-		 fw->size > 0x102 ? get_unaligned_le16(fw->data + 0x100) : 0,
-		 crc32_be(0, fw->data, fw->size));
 
 	buf = kmalloc(ICNL9916_SRAM_CHUNK + 4, GFP_KERNEL);
 	if (!buf) {
@@ -489,10 +442,6 @@ static int icnl9916_load_firmware(struct icnl9916_data *data)
 
 	mdelay(30);
 
-	if (!icnl9916_prog_read(data, ICNL9916_HW_REG_CURRENT_MODE, &cur, 1))
-		dev_info(data->dev, "After firmware load: current_mode %u\n",
-			 cur & ICNL9916_BOOT_MODE_MASK);
-
 	ret = icnl9916_spi_read(data, ICNL9916_READ_FW_ID, &fw_id,
 				sizeof(fw_id));
 	if (ret)
@@ -510,86 +459,17 @@ out:
 }
 
 /*
- * Diagnostic: report whether the part answers on its program-mode interface.
- * A plausible hardware ID here means the SPI wiring and framing are sound and
- * the part simply has no firmware running; nothing at all points further down,
- * at the bus itself.
+ * Read @len bytes of payload for @cmd.  Ordinary replies are followed by a
+ * trailer -- error byte, echoed command and CRC -- which is checked when
+ * @validate is set.  Touch reports carry no trailer at all, so they are read
+ * without one; see icnl9916_spi_read_touch().
  */
-static void icnl9916_report_program_mode_id(struct icnl9916_data *data)
-{
-	static const u8 modes[] = {
-		ICNL9916_BOOT_MODE_FLASH,
-		ICNL9916_BOOT_MODE_SRAM,
-	};
-	__le32 hwid = 0;
-	u8 boot = 0, cur = 0;
-	unsigned int i;
-	int ret;
-
-	ret = icnl9916_enter_program_mode(data);
-	if (ret) {
-		dev_err(data->dev, "Program mode entry failed: %d\n", ret);
-		return;
-	}
-
-	ret = icnl9916_prog_read(data, ICNL9916_HW_REG_HARDWARE_ID, &hwid,
-				 sizeof(hwid));
-	if (ret) {
-		dev_err(data->dev, "Program mode hwid read failed: %d\n", ret);
-		return;
-	}
-
-	dev_info(data->dev, "Program mode hardware id: %06x\n",
-		 le32_to_cpu(hwid) & 0xfffffff0);
-
-	if (!icnl9916_prog_read(data, ICNL9916_HW_REG_BOOT_MODE, &boot, 1) &&
-	    !icnl9916_prog_read(data, ICNL9916_HW_REG_CURRENT_MODE, &cur, 1))
-		dev_info(data->dev,
-			 "Program mode boot_mode %u current_mode %u\n",
-			 boot & ICNL9916_BOOT_MODE_MASK,
-			 cur & ICNL9916_BOOT_MODE_MASK);
-
-	/*
-	 * BOOT_MODE is volatile and reads back IDLE, so the part boots nothing
-	 * until told otherwise.  Try flash first -- if the on-chip flash holds
-	 * good firmware that is all it takes -- then SRAM, which is what the
-	 * vendor sets and which only works once firmware has been downloaded.
-	 */
-	for (i = 0; i < ARRAY_SIZE(modes); i++) {
-		__le16 fw_id;
-
-		ret = icnl9916_prog_writeb(data, ICNL9916_HW_REG_BOOT_MODE,
-					   modes[i]);
-		if (ret) {
-			dev_err(data->dev, "Set boot mode %u failed: %d\n",
-				modes[i], ret);
-			continue;
-		}
-
-		mdelay(30);
-
-		ret = icnl9916_prog_read(data, ICNL9916_HW_REG_CURRENT_MODE,
-					 &cur, 1);
-		dev_info(data->dev, "After boot mode %u: current_mode %u\n",
-			 modes[i], ret ? 0xff : (cur & ICNL9916_BOOT_MODE_MASK));
-
-		ret = icnl9916_spi_read(data, ICNL9916_READ_FW_ID, &fw_id,
-					sizeof(fw_id));
-		if (!ret) {
-			dev_info(data->dev,
-				 "Firmware alive after boot mode %u, id %04x\n",
-				 modes[i], le16_to_cpu(fw_id));
-			return;
-		}
-	}
-}
-
-static int icnl9916_spi_read(struct icnl9916_data *data, u16 cmd, void *buf,
-			     u16 len)
+static int icnl9916_spi_xact(struct icnl9916_data *data, u16 cmd, void *buf,
+			     u16 len, bool validate)
 {
 	struct icnl9916_spi_tx_header *hdr = (void *)data->tx_buf;
 	struct icnl9916_spi_rx_trailer *rsp;
-	u16 rxlen = len + sizeof(*rsp);
+	u16 rxlen = len + (validate ? sizeof(*rsp) : 0);
 	u16 crc;
 	int ret;
 
@@ -611,24 +491,33 @@ static int icnl9916_spi_read(struct icnl9916_data *data, u16 cmd, void *buf,
 	 * CRC itself: payload, error byte and echoed command.  This is the only
 	 * integrity check the vendor driver applies on SPI.
 	 */
-	crc = icnl9916_crc16(data->rx_buf, rxlen - sizeof(__le16));
-	if (crc != get_unaligned_le16(data->rx_buf + rxlen - sizeof(__le16))) {
-		dev_err(data->dev,
-			"Command %04x bad reply CRC (calc %04x): %*ph\n",
-			cmd, crc, rxlen, data->rx_buf);
-		return -EIO;
-	}
+	if (validate) {
+		crc = icnl9916_crc16(data->rx_buf, rxlen - sizeof(__le16));
+		if (crc != get_unaligned_le16(data->rx_buf + rxlen -
+					      sizeof(__le16))) {
+			dev_err(data->dev,
+				"Command %04x bad reply CRC (calc %04x): %*ph\n",
+				cmd, crc, rxlen, data->rx_buf);
+			return -EIO;
+		}
 
-	rsp = (void *)(data->rx_buf + len);
-	if (rsp->error) {
-		dev_err(data->dev, "Command %04x error %02x: %*ph\n", cmd,
-			rsp->error, rxlen, data->rx_buf);
-		return -EIO;
+		rsp = (void *)(data->rx_buf + len);
+		if (rsp->error) {
+			dev_err(data->dev, "Command %04x error %02x: %*ph\n",
+				cmd, rsp->error, rxlen, data->rx_buf);
+			return -EIO;
+		}
 	}
 
 	memcpy(buf, data->rx_buf, len);
 
 	return 0;
+}
+
+static int icnl9916_spi_read(struct icnl9916_data *data, u16 cmd, void *buf,
+			     u16 len)
+{
+	return icnl9916_spi_xact(data, cmd, buf, len, true);
 }
 
 static int icnl9916_spi_write(struct icnl9916_data *data, u16 cmd, void *buf,
@@ -658,58 +547,25 @@ static int icnl9916_spi_write(struct icnl9916_data *data, u16 cmd, void *buf,
 }
 
 /*
- * Touch reports are read within a single chip-select assertion: one
- * full-duplex transfer rather than the command-then-reply pair used for
- * everything else.  Reading them the ordinary way returns a constant idle
- * pattern, because the controller has already dropped the reply by the time
- * chip select is reasserted.
+ * Touch reports are the one reply that arrives without a trailer: the bytes
+ * where the error code, echoed command and CRC belong come back as payload
+ * padding, so the checks that guard every other command cannot pass over a
+ * report.  The vendor driver validates nothing on a touch reply for exactly this
+ * reason.  The payload itself is the only signal available: idle fill means
+ * no contact, anything else is a report.
  */
 static int icnl9916_spi_read_touch(struct icnl9916_data *data, u16 cmd,
 				   void *buf, u16 len)
 {
-	struct icnl9916_spi_tx_header *hdr = (void *)data->tx_buf;
-	u16 rxlen = len + sizeof(struct icnl9916_spi_rx_trailer);
-	u16 xlen = max_t(u16, sizeof(*hdr), rxlen);
 	int ret;
 
-	if (xlen > ICNL9916_SPI_BUF_SIZE)
-		return -EINVAL;
-
-	memset(data->tx_buf, 0, xlen);
-	hdr->addr = ICNL9916_SPI_RD_ADDR;
-	hdr->cmd = cpu_to_le16(cmd & ~BIT(ICNL9916_WRITE_BIT));
-	/*
-	 * Announce the payload length only. The vendor's own single-chip-select
-	 * caller passes payload+trailer here, but on this controller that
-	 * yields nothing but idle fill, whereas asking for the payload returns
-	 * real coordinates.
-	 */
-	hdr->len = cpu_to_le16(len);
-	hdr->crc = cpu_to_le16(icnl9916_crc16(data->tx_buf,
-					      offsetof(struct icnl9916_spi_tx_header, crc)));
-
-	ret = icnl9916_spi_xfer_duplex(data, xlen);
+	ret = icnl9916_spi_xact(data, cmd, buf, len, false);
 	if (ret)
 		return ret;
 
-	/*
-	 * Only the error byte is checked here, matching how this driver treats
-	 * I2C replies.  The CRC that guards other commands does not validate
-	 * over a touch report -- the payload is demonstrably correct while the
-	 * trailing checksum does not cover it the same way -- so enforcing it
-	 * would discard good coordinates.
-	 */
-	/*
-	 * No trailer check here. With the payload-length framing above the
-	 * reply carries coordinates but no trailer that validates, so the
-	 * only usable signal is the payload itself: idle fill means no
-	 * contact, anything else is a report.
-	 */
 	if (data->rx_buf[0] == ICNL9916_IDLE_FILL &&
 	    data->rx_buf[1] == ICNL9916_IDLE_FILL)
 		return -ENODATA;
-
-	memcpy(buf, data->rx_buf, len);
 
 	return 0;
 }
@@ -807,7 +663,6 @@ static int icnl9916_init(struct icnl9916_data *data)
 	if (ret) {
 		dev_err(dev, "Failed to read device ID: %d\n", ret);
 		if (data->spi) {
-			icnl9916_report_program_mode_id(data);
 			ret = icnl9916_load_firmware(data);
 		}
 		return ret;
