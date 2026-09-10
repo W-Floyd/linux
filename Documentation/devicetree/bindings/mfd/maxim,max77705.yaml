@@ -113,6 +113,37 @@ properties:
     required:
       - compatible
 
+  typec:
+    type: object
+    additionalProperties: false
+    description:
+      The USB Type-C and Power Delivery block. The controller runs the Type-C
+      and PD state machines in its own firmware, so the operating system is
+      told the result of a negotiation rather than conducting one.
+
+    properties:
+      compatible:
+        const: maxim,max77705-typec
+
+      interrupts:
+        maxItems: 1
+
+      connector:
+        $ref: /schemas/connector/usb-connector.yaml#
+        unevaluatedProperties: false
+
+      orientation-switch: true
+      mode-switch: true
+
+      port:
+        $ref: /schemas/graph.yaml#/properties/port
+        description:
+          Connection to the USB controller providing the data role switch.
+
+    required:
+      - compatible
+      - interrupts
+
 required:
   - compatible
 
@@ -127,7 +158,7 @@ examples:
         #address-cells = <1>;
         #size-cells = <0>;
 
-        pmic@66 {
+        max77705: pmic@66 {
             compatible = "maxim,max77705";
             reg = <0x66>;
             #interrupt-cells = <1>;
@@ -167,6 +198,25 @@ examples:
                 compatible = "maxim,max77705-haptic";
                 haptic-supply = <&vib_regulator>;
                 pwms = <&vib_pwm 0 50000>;
+            };
+
+            typec {
+                compatible = "maxim,max77705-typec";
+                interrupt-parent = <&max77705>;
+                interrupts = <3>;
+
+                connector {
+                    compatible = "usb-c-connector";
+                    label = "USB-C";
+                    power-role = "dual";
+                    data-role = "dual";
+                };
+
+                port {
+                    max77705_typec_hs: endpoint {
+                        remote-endpoint = <&usb_hsphy_role_switch>;
+                    };
+                };
             };
         };
     };

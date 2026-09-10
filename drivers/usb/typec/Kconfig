@@ -52,6 +52,8 @@ source "drivers/usb/typec/ucsi/Kconfig"
 
 source "drivers/usb/typec/tipd/Kconfig"
 
+source "drivers/usb/typec/maxim/Kconfig"
+
 config TYPEC_ANX7411
 	tristate "Analogix ANX7411 Type-C DRP Port controller driver"
 	depends on I2C

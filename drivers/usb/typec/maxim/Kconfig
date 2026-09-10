@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0
+
+config TYPEC_MAX77705
+	tristate "Maxim MAX77705 USB Type-C port driver"
+	depends on MFD_MAX77705
+	depends on I2C
+	depends on USB_ROLE_SWITCH || !USB_ROLE_SWITCH
+	select REGMAP_I2C
+	help
+	  Say Y or M here to enable the USB Type-C port of the Maxim MAX77705
+	  companion PMIC, found in Samsung Galaxy phones from the S9 onwards.
+
+	  The chip runs the Type-C and USB-PD state machines in firmware, so
+	  this driver reports the connection it establishes and drives the
+	  orientation and USB role switches to match, rather than implementing
+	  power delivery itself.
+
+	  If compiled as a module, the module will be called max77705-typec.
