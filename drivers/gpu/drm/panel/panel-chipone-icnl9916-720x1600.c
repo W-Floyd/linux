@@ -7,7 +7,8 @@
 #include <linux/mod_devicetable.h>
 #include <linux/of.h>
 #include <linux/module.h>
-#include <linux/reset.h>
+#include <linux/gpio/consumer.h>
+#include <linux/regulator/consumer.h>
 
 #include <drm/drm_mipi_dsi.h>
 #include <drm/drm_modes.h>
@@ -27,7 +28,9 @@ struct icnl9916_panel_desc {
 	unsigned long lp_rate;
 	int (*on)(struct mipi_dsi_device *dsi);
 	int (*off)(struct mipi_dsi_device *dsi);
-	void (*reset)(struct reset_control *reset);
+	void (*reset)(struct gpio_desc *reset);
+	const char * const *supplies;
+	unsigned int num_supplies;
 	/* Brightness is set with DCS rather than by a separate backlight. */
 	bool dcs_backlight;
 };
@@ -35,7 +38,8 @@ struct icnl9916_panel_desc {
 struct icnl9916_panel {
 	struct drm_panel panel;
 	struct mipi_dsi_device *dsi;
-	struct reset_control *reset;
+	struct gpio_desc *reset;
+	struct regulator_bulk_data *supplies;
 	const struct icnl9916_panel_desc *desc;
 };
 
@@ -45,22 +49,22 @@ struct icnl9916_panel *to_icnl9916_panel(struct drm_panel *panel)
 	return container_of(panel, struct icnl9916_panel, panel);
 }
 
-static void icnl9916_panel_reset(struct reset_control *reset)
+static void icnl9916_panel_reset(struct gpio_desc *reset)
 {
-	reset_control_deassert(reset);
+	gpiod_set_value_cansleep(reset, 0);
 	usleep_range(10000, 11000);
-	reset_control_assert(reset);
+	gpiod_set_value_cansleep(reset, 1);
 	usleep_range(10000, 11000);
-	reset_control_deassert(reset);
+	gpiod_set_value_cansleep(reset, 0);
 	msleep(120);
 }
 
 /* Vendor reset for the Tianma module: 2 ms asserted, 10 ms to settle. */
-static void icnl9916c_tm_panel_reset(struct reset_control *reset)
+static void icnl9916c_tm_panel_reset(struct gpio_desc *reset)
 {
-	reset_control_assert(reset);
+	gpiod_set_value_cansleep(reset, 1);
 	usleep_range(2000, 3000);
-	reset_control_deassert(reset);
+	gpiod_set_value_cansleep(reset, 0);
 	usleep_range(10000, 11000);
 }
 
@@ -269,12 +273,19 @@ static int icnl9916_panel_prepare(struct drm_panel *panel)
 	struct device *dev = &ctx->dsi->dev;
 	int ret;
 
+	ret = regulator_bulk_enable(ctx->desc->num_supplies, ctx->supplies);
+	if (ret < 0) {
+		dev_err(dev, "Failed to enable regulators: %d\n", ret);
+		return ret;
+	}
+
 	ctx->desc->reset(ctx->reset);
 
 	ret = ctx->desc->on(ctx->dsi);
 	if (ret < 0) {
 		dev_err(dev, "Failed to initialize panel: %d\n", ret);
-		reset_control_assert(ctx->reset);
+		gpiod_set_value_cansleep(ctx->reset, 1);
+		regulator_bulk_disable(ctx->desc->num_supplies, ctx->supplies);
 		return ret;
 	}
 
@@ -291,7 +302,8 @@ static int icnl9916_panel_unprepare(struct drm_panel *panel)
 	if (ret < 0)
 		dev_err(dev, "Failed to un-initialize panel: %d\n", ret);
 
-	reset_control_assert(ctx->reset);
+	gpiod_set_value_cansleep(ctx->reset, 1);
+	regulator_bulk_disable(ctx->desc->num_supplies, ctx->supplies);
 
 	return 0;
 }
@@ -347,12 +359,22 @@ static const struct icnl9916_panel_desc icnl9916_panel_desc = {
  * device tree asks for "non_burst_sync_event" and "bl_ctrl_dcs".  The command
  * sequences run in low-power mode ("dsi_lp_mode").
  */
+/*
+ * vddio is board logic at 1.8 V; avdd/avee are the +/-5.9 V pair from the bias
+ * chip, which the vendor device tree calls "lab" and "ibb".
+ */
+static const char * const icnl9916c_tm_supplies[] = {
+	"vddio", "avdd", "avee",
+};
+
 static const struct icnl9916_panel_desc icnl9916c_tm_panel_desc = {
 	.mode = &icnl9916c_tm_panel_mode,
 	.mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_LPM,
 	.on = icnl9916c_tm_panel_on,
 	.off = icnl9916c_tm_panel_off,
 	.reset = icnl9916c_tm_panel_reset,
+	.supplies = icnl9916c_tm_supplies,
+	.num_supplies = ARRAY_SIZE(icnl9916c_tm_supplies),
 	.dcs_backlight = true,
 };
 
@@ -405,6 +427,26 @@ static const struct drm_panel_funcs icnl9916_panel_panel_funcs = {
 	.get_modes = icnl9916_panel_get_modes,
 };
 
+static int icnl9916_panel_get_supplies(struct icnl9916_panel *ctx)
+{
+	struct device *dev = &ctx->dsi->dev;
+	unsigned int i;
+
+	if (!ctx->desc->num_supplies)
+		return 0;
+
+	ctx->supplies = devm_kcalloc(dev, ctx->desc->num_supplies,
+				     sizeof(*ctx->supplies), GFP_KERNEL);
+	if (!ctx->supplies)
+		return -ENOMEM;
+
+	for (i = 0; i < ctx->desc->num_supplies; i++)
+		ctx->supplies[i].supply = ctx->desc->supplies[i];
+
+	return devm_regulator_bulk_get(dev, ctx->desc->num_supplies,
+				       ctx->supplies);
+}
+
 static int icnl9916_panel_probe(struct mipi_dsi_device *dsi)
 {
 	struct device *dev = &dsi->dev;
@@ -417,17 +459,21 @@ static int icnl9916_panel_probe(struct mipi_dsi_device *dsi)
 	if (IS_ERR(ctx))
 		return PTR_ERR(ctx);
 
-	ctx->reset = devm_reset_control_get_shared(dev, NULL);
-	if (IS_ERR(ctx->reset))
-		return dev_err_probe(dev, PTR_ERR(ctx->reset),
-				     "Failed to get chip reset\n");
-
 	ctx->desc = of_device_get_match_data(dev);
 	if (!ctx->desc)
 		return -ENODEV;
 
 	ctx->dsi = dsi;
 	mipi_dsi_set_drvdata(dsi, ctx);
+
+	ctx->reset = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(ctx->reset))
+		return dev_err_probe(dev, PTR_ERR(ctx->reset),
+				     "Failed to get reset GPIO\n");
+
+	ret = icnl9916_panel_get_supplies(ctx);
+	if (ret)
+		return dev_err_probe(dev, ret, "Failed to get supplies\n");
 
 	dsi->lanes = 4;
 	dsi->format = MIPI_DSI_FMT_RGB888;
