@@ -1795,30 +1795,11 @@ struct drm_crtc *dpu_crtc_init(struct drm_device *dev, struct drm_plane *plane,
 	/* initialize event handling */
 	spin_lock_init(&dpu_crtc->event_lock);
 
-	/*
-	 * EXPERIMENT, not a fix: do not arm the self-refresh helper.
-	 *
-	 * On fogona (DSI video mode) blanking the display deadlocks the whole
-	 * modeset path. The self-refresh entry work is left blocked in
-	 * drm_modeset_lock() via drm_atomic_get_crtc_state(), and so is every
-	 * later reader -- while no task holds the lock in kernel, so it has
-	 * been leaked by a path that returned without dropping it. The screen
-	 * never comes back.
-	 *
-	 * Panel self-refresh only means anything where the sink can hold the
-	 * image itself, which upstream only ever sets for DP/eDP
-	 * (dp->psr_supported); nothing sets self_refresh_aware for DSI. Yet
-	 * this arms the helper for every DPU CRTC regardless. Disarming it
-	 * establishes whether the entry work is the cause of the leak or just
-	 * its first victim -- revert this once that is known.
-	 */
-	if (0) {
-		ret = drm_self_refresh_helper_init(crtc);
-		if (ret) {
-			DPU_ERROR("Failed to initialize %s with self-refresh helpers %d\n",
-				crtc->name, ret);
-			return ERR_PTR(ret);
-		}
+	ret = drm_self_refresh_helper_init(crtc);
+	if (ret) {
+		DPU_ERROR("Failed to initialize %s with self-refresh helpers %d\n",
+			crtc->name, ret);
+		return ERR_PTR(ret);
 	}
 
 	DRM_DEBUG_KMS("%s: successfully initialized crtc\n", dpu_crtc->name);
