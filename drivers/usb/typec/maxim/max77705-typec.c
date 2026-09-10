@@ -80,6 +80,7 @@ struct max77705_typec {
 	u32 dp_status;
 	u32 dp_conf;
 	unsigned int dp_tries;
+	bool hpd;
 
 	enum max77705_cc_state cc_state;
 	enum typec_orientation orientation;
@@ -353,6 +354,19 @@ static int max77705_typec_dp_mux_set(struct max77705_typec *tc, int pin)
  */
 static void max77705_typec_dp_hpd(struct max77705_typec *tc, bool hpd)
 {
+	/*
+	 * Only on a change. The state is re-read on every interrupt, every hot
+	 * plug edge and every retry, and reporting it each time buries the
+	 * display driver in plug events it has already acted on -- hundreds a
+	 * second, measured, with neither the link training nor the sink's EDID
+	 * ever completing in between, leaving a connector that calls itself
+	 * connected and offers no modes. A notification describes an edge.
+	 */
+	if (hpd == tc->hpd)
+		return;
+
+	tc->hpd = hpd;
+
 	drm_aux_hpd_bridge_notify(&tc->hpd_bridge->dev,
 				  hpd ? connector_status_connected :
 					connector_status_disconnected);
@@ -798,8 +812,7 @@ static int max77705_typec_sync_cc(struct max77705_typec *tc)
 	 * Nothing survives a detach: the firmware forgets the stored VDMs, and
 	 * leaving the SBU switch on would hold AUX against the next cable.
 	 */
-	if (tc->dp_status & DP_STATUS_HPD_STATE)
-		max77705_typec_dp_hpd(tc, false);
+	max77705_typec_dp_hpd(tc, false);
 
 	tc->dp_pin_assign = 0;
 	tc->dp_status = 0;
