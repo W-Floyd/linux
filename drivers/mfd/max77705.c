@@ -19,6 +19,7 @@ static struct mfd_cell max77705_devs[] = {
 	MFD_CELL_OF("max77705-rgb", NULL, NULL, 0, 0, "maxim,max77705-rgb"),
 	MFD_CELL_OF("max77705-charger", NULL, NULL, 0, 0, "maxim,max77705-charger"),
 	MFD_CELL_OF("max77705-haptic", NULL, NULL, 0, 0, "maxim,max77705-haptic"),
+	MFD_CELL_OF("max77705-typec", NULL, NULL, 0, 0, "maxim,max77705-typec"),
 };
 
 static const struct regmap_range max77705_readable_ranges[] = {
