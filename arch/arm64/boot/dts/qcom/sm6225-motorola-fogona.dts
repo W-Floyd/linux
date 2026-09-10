@@ -38,8 +38,17 @@
 		 * The board makes it worse than usual: LCD_1.8V is VREG_L9A,
 		 * which the PM6225 datasheet says must never be turned off (it
 		 * also carries VDD_PX31..36 and LPDDR4x_VDD1).
+		 *
+		 * androidboot.slot_suffix is not for Android's benefit: it is
+		 * how msm-firmware-loader finds the slotted partitions. Its
+		 * ab_get_slot() reads this from /proc/cmdline, and booting
+		 * through U-Boot means nothing else sets it -- so without it
+		 * the loader looks for partitions literally named "modem" and
+		 * "vendor", finds only the unslotted "persist", and silently
+		 * provides no firmware at all. Hardcoded because slot A is
+		 * active; installing qbootctl would track the real slot.
 		 */
-		bootargs = "console=tty0 loglevel=7 panic=0 fbcon=map:0 clk_ignore_unused pd_ignore_unused regulator_ignore_unused pmos.nosplash plymouth.enable=0 ignore_loglevel fbcon=font:6x10 rdinit=/init.pmos";
+		bootargs = "console=tty0 loglevel=7 panic=0 fbcon=map:0 clk_ignore_unused pd_ignore_unused regulator_ignore_unused pmos.nosplash plymouth.enable=0 ignore_loglevel fbcon=font:6x10 rdinit=/init.pmos androidboot.slot_suffix=_a";
 	};
 
 	/*
