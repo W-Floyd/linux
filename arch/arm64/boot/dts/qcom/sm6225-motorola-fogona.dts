@@ -625,5 +625,5 @@
 };
 
 &adreno_smmu {
-	status = "disabled";
+	status = "okay";
 };
