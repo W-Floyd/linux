@@ -139,16 +139,16 @@ static int max77705_typec_sync_cc(struct max77705_typec *tc)
 
 	switch (state) {
 	case MAX77705_CC_SINK:
-		/* A sink is attached, so this port is sourcing */
-		ret = max77705_typec_partner_add(tc, TYPEC_SOURCE);
-		role = USB_ROLE_HOST;
-		break;
-	case MAX77705_CC_SOURCE:
+		/* The state names the role this port took, not the partner's */
 		ret = max77705_typec_partner_add(tc, TYPEC_SINK);
 		role = USB_ROLE_DEVICE;
 		if (!ret)
 			typec_set_pwr_opmode(tc->port,
 					     max77705_typec_pwr_opmode(cc_status0));
+		break;
+	case MAX77705_CC_SOURCE:
+		ret = max77705_typec_partner_add(tc, TYPEC_SOURCE);
+		role = USB_ROLE_HOST;
 		break;
 	case MAX77705_CC_NO_CONNECTION:
 	case MAX77705_CC_DISABLED:
@@ -264,6 +264,8 @@ static int max77705_typec_probe(struct platform_device *pdev)
 	tc->cap.type = TYPEC_PORT_DRP;
 	tc->cap.data = TYPEC_PORT_DRD;
 	tc->cap.revision = USB_TYPEC_REV_1_2;
+	/* The CC pin status names the orientation whether or not a mux exists */
+	tc->cap.orientation_aware = true;
 	tc->cap.fwnode = tc->fwnode;
 	tc->cap.driver_data = tc;
 
