@@ -1713,7 +1713,8 @@
 
 			interrupts = <GIC_SPI 177 IRQ_TYPE_LEVEL_HIGH>;
 
-			iommus = <&adreno_smmu 0>;
+			iommus = <&adreno_smmu 0 1>,
+				 <&adreno_smmu 2 0>;
 			operating-points-v2 = <&gpu_opp_table>;
 			power-domains = <&rpmpd SM6115_VDDCX>;
 			qcom,gmu = <&gmu_wrapper>;
@@ -1821,10 +1822,11 @@
 		};
 
 		adreno_smmu: iommu@59a0000 {
-			compatible = "qcom,sm6225-smmu-v2", "qcom,adreno-smmu", "qcom,smmu-v2";
+			compatible = "qcom,sm6225-smmu-500", "qcom,adreno-smmu",
+				     "qcom,smmu-500", "arm,mmu-500";
 			reg = <0x0 0x059a0000 0x0 0x10000>;
-			#iommu-cells = <1>;
-			#global-interrupts = <2>;
+			#iommu-cells = <2>;
+			#global-interrupts = <1>;
 			interrupts = <GIC_SPI 163 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 167 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 168 IRQ_TYPE_LEVEL_HIGH>,
@@ -1835,12 +1837,14 @@
 				     <GIC_SPI 173 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 174 IRQ_TYPE_LEVEL_HIGH>;
 
-			clocks = <&gpucc GPU_CC_AHB_CLK>,
-				 <&gcc GCC_GPU_MEMNOC_GFX_CLK>,
-				 <&gcc GCC_GPU_SNOC_DVM_GFX_CLK>;
-			clock-names = "ahb",
-				      "bus",
-				      "iface";
+			clocks = <&gcc GCC_GPU_MEMNOC_GFX_CLK>,
+				 <&gpucc GPU_CC_HLOS1_VOTE_GPU_SMMU_CLK>,
+				 <&gcc GCC_GPU_SNOC_DVM_GFX_CLK>,
+				 <&gpucc GPU_CC_AHB_CLK>;
+			clock-names = "mem",
+				      "hlos",
+				      "iface",
+				      "ahb";
 
 			power-domains = <&gpucc GPU_CX_GDSC>;
 		};
