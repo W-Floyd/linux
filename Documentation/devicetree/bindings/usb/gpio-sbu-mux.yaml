@@ -24,6 +24,7 @@ properties:
           - onnn,fsusb43l10x
           - pericom,pi3usb102
           - ti,tmuxhs4212
+          - vishay,dg2730
       - const: gpio-sbu-mux
 
   enable-gpios:
