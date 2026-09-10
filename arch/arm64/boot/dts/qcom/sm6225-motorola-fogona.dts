@@ -122,6 +122,27 @@
 &tlmm {
 	gpio-reserved-ranges = <14 4>;
 
+	te_active: te-active-state {
+		pins = "gpio81";
+		function = "mdp_vsync";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	mdss_dsi_active: dsi-active-state {
+		pins = "gpio82";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-disable;
+	};
+
+	panel_avdd_default: panel-avdd-state {
+		pins = "gpio111";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-disable;
+	};
+
 	ts_int_default: ts-int-state {
 		pins = "gpio80";
 		function = "gpio";
@@ -162,6 +183,19 @@
 		pm6125_l4: l4 {
 			regulator-min-microvolt = <720000>;
 			regulator-max-microvolt = <1050000>;
+		};
+
+		/*
+		 * The panel's vddio. Marked always-on deliberately: LCD_1.8V
+		 * is VREG_L9A, which the PM6225 datasheet says must never be
+		 * turned off -- it also carries VDD_PX31..36 and LPDDR4x_VDD1.
+		 * Now that a driver holds a handle on it, always-on is what
+		 * stops a panel unprepare from taking the board down with it.
+		 */
+		pm6125_l9: l9 {
+			regulator-min-microvolt = <1504000>;
+			regulator-max-microvolt = <2000000>;
+			regulator-always-on;
 		};
 
 		pm6125_l11: l11 {
@@ -487,6 +521,93 @@
  * a610_zap.mdt and a630_sqe.fw, and mainline's A610 speedbin table is
  * bengal-only with no khaje entry (see SM6225.md).
  */
+/*
+ * Display. The bootloader lights the panel and simple-framebuffer above shows
+ * it, but that is a static buffer -- no modesetting, no backlight, no power
+ * management. This wires up the real pipeline: MDSS/DPU -> DSI0 -> the panel.
+ *
+ * simple-framebuffer is deliberately left in place. msm_kms calls
+ * aperture_remove_all_conflicting_devices() when KMS comes up, so simpledrm is
+ * evicted automatically once this works, and survives as a usable console if
+ * it does not.
+ *
+ * Panel power. The Tianma module wants three rails, named as its own bindings
+ * name them rather than as the vendor's dsi_panel_pwr_supply does:
+ *
+ *   vddio -> VREG_L9A       (1.8 V logic, always-on -- see above)
+ *   avdd  -> lcd_panel_avdd (vendor "lab",  +5.9 V, gated by TLMM 111)
+ *   avee  -> lcd_panel_avee (vendor "ibb",  -5.9 V, gated by PM6125 GPIO2)
+ *
+ * The two 5.9 V rails are not PMIC LDOs: they come from a bias chip enabled by
+ * a GPIO, so they are fixed regulators here. Both are boot-on because the
+ * bootloader has already brought the panel up.
+ */
+/ {
+	lcd_panel_avdd: regulator-lcd-avdd {
+		compatible = "regulator-fixed";
+		regulator-name = "lcd_panel_avdd";
+		regulator-min-microvolt = <5900000>;
+		regulator-max-microvolt = <5900000>;
+		regulator-enable-ramp-delay = <233>;
+		gpio = <&tlmm 111 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&panel_avdd_default>;
+	};
+
+	lcd_panel_avee: regulator-lcd-avee {
+		compatible = "regulator-fixed";
+		regulator-name = "lcd_panel_avee";
+		regulator-min-microvolt = <5900000>;
+		regulator-max-microvolt = <5900000>;
+		regulator-enable-ramp-delay = <233>;
+		gpio = <&pm6125_gpios 2 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+	};
+};
+
+&mdss {
+	status = "okay";
+};
+
+&mdss_dsi0 {
+	/* L18 is fixed at 1.232 V for the DSI PHY; it is also UFS's vdda-pll. */
+	vdda-supply = <&pm6125_l18>;
+	status = "okay";
+
+	panel: panel@0 {
+		compatible = "tianma,icnl9916c-720x1600";
+		reg = <0>;
+
+		reset-gpios = <&tlmm 82 GPIO_ACTIVE_LOW>;
+
+		vddio-supply = <&pm6125_l9>;
+		avdd-supply = <&lcd_panel_avdd>;
+		avee-supply = <&lcd_panel_avee>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&te_active &mdss_dsi_active>;
+
+		port {
+			panel_in: endpoint {
+				remote-endpoint = <&mdss_dsi0_out>;
+			};
+		};
+	};
+};
+
+&mdss_dsi0_out {
+	data-lanes = <0 1 2 3>;
+	remote-endpoint = <&panel_in>;
+};
+
+&mdss_dsi0_phy {
+	status = "okay";
+};
+
 &gpu {
 	status = "disabled";
 };
