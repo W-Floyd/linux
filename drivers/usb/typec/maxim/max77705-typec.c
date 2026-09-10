@@ -15,6 +15,7 @@
 #include <linux/auxiliary_bus.h>
 #include <linux/bitfield.h>
 #include <linux/delay.h>
+#include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
@@ -47,6 +48,9 @@ struct max77705_typec {
 
 	/* carries HPD to whichever display controller the graph names */
 	struct auxiliary_device *hpd_bridge;
+
+	/* the board's own copy of the sink's hot plug detect, if wired */
+	struct gpio_desc *hpd_gpio;
 
 	/* one command is in flight at a time, answered by an interrupt */
 	struct mutex mailbox_lock;
@@ -517,13 +521,45 @@ static int max77705_typec_altmode_enable(struct max77705_typec *tc)
 					  &on, sizeof(on), NULL, 0);
 }
 
+/**
+ * max77705_typec_dp_supported - does this partner offer DisplayPort
+ * @tc: the port
+ *
+ * Returns 1 when the partner's SVIDs include DisplayPort, 0 when discovery
+ * has run and they do not, and a negative errno when there is no answer to
+ * read yet. The firmware clears this on a detach, so an answer being there at
+ * all is this connection's.
+ *
+ * The SVIDs come packed two to a VDO. Which half holds which is a question
+ * not worth answering, since every half is searched anyway and the unused
+ * ones read as zero.
+ */
+static int max77705_typec_dp_supported(struct max77705_typec *tc)
+{
+	u32 header, vdo[MAX77705_VDM_RESP_NR_VDO];
+	int ret, i;
+
+	ret = max77705_typec_vdm_read(tc, MAX77705_VDM_DISCOVER_SVIDS, &header,
+				      vdo, ARRAY_SIZE(vdo));
+	if (ret)
+		return ret;
+
+	for (i = 0; i < ARRAY_SIZE(vdo) * 2; i++)
+		if ((u16)(vdo[i / 2] >> (16 * (i % 2))) == USB_TYPEC_DP_SID)
+			return 1;
+
+	return 0;
+}
+
 /*
  * How long to keep trying to get DisplayPort going once something is attached,
  * which has to cover a whole connection coming up: the power contract, a data
  * role swap and then the firmware's own mode discovery.
  */
-#define MAX77705_DP_TRIES	40
-#define MAX77705_DP_RETRY_MS	250
+#define MAX77705_DP_TRIES		40
+#define MAX77705_DP_RETRY_MS		250
+/* Retries between repeats of the enable, so it is asked again every 2s */
+#define MAX77705_DP_REENABLE_EVERY	8
 
 /*
  * Work out where the negotiation has got to and push it along, rather than
@@ -552,10 +588,36 @@ static void max77705_typec_dp_sync(struct max77705_typec *tc)
 		return;
 
 	if (!tc->dp_conf) {
-		/* Nothing that speaks DisplayPort, which is the common case */
-		if (!max77705_typec_vdm_read(tc, MAX77705_VDM_DISCOVER_MODES,
-					     &header, &vdo, 1))
-			max77705_typec_dp_discover_modes(tc);
+		int supported = max77705_typec_dp_supported(tc);
+
+		/*
+		 * Discovery has run and this partner has nothing to do with
+		 * DisplayPort, which is the common case: a charger. Stop, so
+		 * that a charge does not carry ten seconds of pointless
+		 * retrying behind it.
+		 */
+		if (supported == 0)
+			return;
+
+		if (supported > 0) {
+			if (!max77705_typec_vdm_read(tc,
+						     MAX77705_VDM_DISCOVER_MODES,
+						     &header, &vdo, 1))
+				max77705_typec_dp_discover_modes(tc);
+		} else if (tc->dp_tries &&
+			   tc->dp_tries % MAX77705_DP_REENABLE_EVERY == 0) {
+			/*
+			 * Still nothing discovered at all. Enabling the
+			 * alternate modes can land before the connection is
+			 * ready to act on it, and then the firmware simply
+			 * never begins discovery; nothing reports that, and
+			 * re-reading a result cannot recover an enable that
+			 * did not take. So ask again, spaced well apart, since
+			 * this must also not interrupt a discovery already
+			 * under way.
+			 */
+			max77705_typec_altmode_enable(tc);
+		}
 
 		/*
 		 * A connection takes a while to reach mode discovery, so keep
@@ -843,6 +905,23 @@ static irqreturn_t max77705_typec_irq(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+/*
+ * An edge on the board's hot plug line is only used as a prompt to go and look
+ * at the chip. The DisplayPort status the firmware holds stays the authority
+ * on what actually happened, and this line's value is not read at all -- what
+ * matters is that it fires when a display is switched on behind an adapter
+ * that has already been negotiated, which is the one thing a single Attention
+ * VDM is relied on for and the one thing this chip loses most readily.
+ */
+static irqreturn_t max77705_typec_hpd_irq(int irq, void *data)
+{
+	struct max77705_typec *tc = data;
+
+	queue_delayed_work(system_wq, &tc->altmode_work, 0);
+
+	return IRQ_HANDLED;
+}
+
 static int max77705_typec_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -898,6 +977,16 @@ static int max77705_typec_probe(struct platform_device *pdev)
 	tc->fwnode = device_get_named_child_node(dev, "connector");
 	if (!tc->fwnode)
 		return dev_err_probe(dev, -EINVAL, "no connector node\n");
+
+	/*
+	 * Optional, and only a prompt to re-read the chip rather than the
+	 * source of truth, so a board without it loses nothing but the
+	 * promptness.
+	 */
+	tc->hpd_gpio = devm_gpiod_get_optional(dev, "hpd", GPIOD_IN);
+	if (IS_ERR(tc->hpd_gpio))
+		return dev_err_probe(dev, PTR_ERR(tc->hpd_gpio),
+				     "failed to acquire the HPD gpio\n");
 
 	/*
 	 * Allocated before anything can report HPD, and only published once
@@ -968,6 +1057,20 @@ static int max77705_typec_probe(struct platform_device *pdev)
 	if (ret) {
 		dev_err_probe(dev, ret, "failed to request the CC interrupt\n");
 		goto err_port_unregister;
+	}
+
+	if (tc->hpd_gpio) {
+		ret = devm_request_threaded_irq(dev, gpiod_to_irq(tc->hpd_gpio),
+						NULL, max77705_typec_hpd_irq,
+						IRQF_ONESHOT |
+						IRQF_TRIGGER_RISING |
+						IRQF_TRIGGER_FALLING,
+						"max77705-typec-hpd", tc);
+		if (ret) {
+			dev_err_probe(dev, ret,
+				      "failed to request the HPD interrupt\n");
+			goto err_port_unregister;
+		}
 	}
 
 	/* Unmask the connection state interrupts we act on */

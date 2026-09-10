@@ -1306,6 +1306,16 @@
 			orientation-switch;
 			mode-switch;
 
+			/*
+			 * The board mirrors the sink's hot plug detect onto a
+			 * GPIO. The DisplayPort state is still read out of the
+			 * MAX77705, but an edge here is a wake-up the chip's
+			 * own interrupt cannot be relied on to deliver.
+			 */
+			hpd-gpios = <&tlmm 80 GPIO_ACTIVE_HIGH>;
+			pinctrl-0 = <&dp_hpd_default>;
+			pinctrl-names = "default";
+
 			connector {
 				compatible = "usb-c-connector";
 				label = "USB-C";
@@ -1759,6 +1769,13 @@
 		function = "gpio";
 		drive-strength = <8>;
 		bias-disable;
+	};
+
+	dp_hpd_default: dp-hpd-default-state {
+		pins = "gpio80";
+		function = "gpio";
+		bias-pull-down;
+		input-enable;
 	};
 
 	pcie0_default_state: pcie0-default-state {
