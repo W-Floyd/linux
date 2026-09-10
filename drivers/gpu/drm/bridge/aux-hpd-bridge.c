@@ -8,6 +8,7 @@
 #include <linux/export.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/workqueue.h>
 
 #include <drm/drm_bridge.h>
 #include <drm/bridge/aux-bridge.h>
@@ -22,6 +23,7 @@ struct drm_aux_hpd_bridge_data {
 	 * event can still be told about it.
 	 */
 	enum drm_connector_status status;
+	struct work_struct replay;
 };
 
 static void drm_aux_hpd_bridge_release(struct device *dev)
@@ -175,29 +177,53 @@ static int drm_aux_hpd_bridge_attach(struct drm_bridge *bridge,
  * A notification is only delivered to a connector that is already listening,
  * so an out of band source that reports before the display driver has probed
  * -- a display already attached when the machine boots -- would otherwise go
- * unnoticed until something changed. Answering detect from the last reported
- * status closes that window, because the connector asks once when it comes up.
+ * unnoticed until something changed, which for a display left plugged in may
+ * be never.
+ *
+ * Replay the last status when a connector starts listening, so it learns what
+ * it missed. This deliberately reports the event rather than answering
+ * detect: hot plug detection says a display is attached, which is not the
+ * same as a display driver having a link and a mode list, and that remains
+ * the display driver's answer to give.
+ *
+ * The replay is deferred because this is called holding the bridge's hot plug
+ * mutex, which delivering a notification also takes.
  */
-static enum drm_connector_status
-drm_aux_hpd_bridge_detect(struct drm_bridge *bridge,
-			  struct drm_connector *connector)
+static void drm_aux_hpd_bridge_replay(struct work_struct *work)
+{
+	struct drm_aux_hpd_bridge_data *data =
+		container_of(work, struct drm_aux_hpd_bridge_data, replay);
+
+	drm_aux_hpd_bridge_notify(data->dev, READ_ONCE(data->status));
+}
+
+static void drm_aux_hpd_bridge_hpd_enable(struct drm_bridge *bridge)
 {
 	struct drm_aux_hpd_bridge_data *data;
 
 	data = container_of(bridge, struct drm_aux_hpd_bridge_data, bridge);
 
-	return READ_ONCE(data->status);
+	if (READ_ONCE(data->status) != connector_status_disconnected)
+		schedule_work(&data->replay);
 }
 
 static const struct drm_bridge_funcs drm_aux_hpd_bridge_funcs = {
 	.attach	= drm_aux_hpd_bridge_attach,
-	.detect = drm_aux_hpd_bridge_detect,
+	.hpd_enable = drm_aux_hpd_bridge_hpd_enable,
 };
+
+static void drm_aux_hpd_bridge_cancel_replay(void *_data)
+{
+	struct drm_aux_hpd_bridge_data *data = _data;
+
+	cancel_work_sync(&data->replay);
+}
 
 static int drm_aux_hpd_bridge_probe(struct auxiliary_device *auxdev,
 				    const struct auxiliary_device_id *id)
 {
 	struct drm_aux_hpd_bridge_data *data;
+	int ret;
 
 	data = devm_drm_bridge_alloc(&auxdev->dev,
 				     struct drm_aux_hpd_bridge_data, bridge,
@@ -208,7 +234,8 @@ static int drm_aux_hpd_bridge_probe(struct auxiliary_device *auxdev,
 	data->dev = &auxdev->dev;
 	data->bridge.of_node = dev_get_platdata(data->dev);
 	data->status = connector_status_disconnected;
-	data->bridge.ops = DRM_BRIDGE_OP_HPD | DRM_BRIDGE_OP_DETECT;
+	INIT_WORK(&data->replay, drm_aux_hpd_bridge_replay);
+	data->bridge.ops = DRM_BRIDGE_OP_HPD;
 	data->bridge.type = id->driver_data;
 
 	/* passthrough data, allow everything */
@@ -216,6 +243,11 @@ static int drm_aux_hpd_bridge_probe(struct auxiliary_device *auxdev,
 	data->bridge.ycbcr_420_allowed = true;
 
 	auxiliary_set_drvdata(auxdev, data);
+
+	ret = devm_add_action_or_reset(data->dev,
+				       drm_aux_hpd_bridge_cancel_replay, data);
+	if (ret)
+		return ret;
 
 	return devm_drm_bridge_add(data->dev, &data->bridge);
 }
