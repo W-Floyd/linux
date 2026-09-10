@@ -167,6 +167,32 @@
 			regulator-min-microvolt = <2700000>;
 			regulator-max-microvolt = <3544000>;
 		};
+
+		/*
+		 * WCN3988 rails. The PM6225 datasheet gives L8 as VDD_WCSS_CX,
+		 * L16 as WCN 1.8 V, L17 as WCN 1.3 V and L23 as WCN 3.3 V, and
+		 * the windows below are the ones the bengal boards use for the
+		 * same four rails feeding the same connectivity part.
+		 */
+		pm6125_l8: l8 {
+			regulator-min-microvolt = <400000>;
+			regulator-max-microvolt = <728000>;
+		};
+
+		pm6125_l16: l16 {
+			regulator-min-microvolt = <1704000>;
+			regulator-max-microvolt = <1904000>;
+		};
+
+		pm6125_l17: l17 {
+			regulator-min-microvolt = <1152000>;
+			regulator-max-microvolt = <1384000>;
+		};
+
+		pm6125_l23: l23 {
+			regulator-min-microvolt = <3200000>;
+			regulator-max-microvolt = <3400000>;
+		};
 	};
 };
 
@@ -222,6 +248,33 @@
 
 &sleep_clk {
 	clock-frequency = <32764>;
+};
+
+/*
+ * WiFi: WCN3988, driven by ath10k over SNOC.
+ *
+ * The WLAN core does not run its own downloaded firmware the way the touch
+ * controller does -- wifi@c800000 carries qcom,msa-fixed-perm, meaning the
+ * modem has already been given access to the shared memory area. So the modem
+ * has to be running first, which is why remoteproc_mpss is enabled below; the
+ * bengal boards do exactly the same pairing.
+ *
+ * Everything needed is on the device rather than redistributable: modem.mdt
+ * and wlanmdsp.mbn live in the modem partition, alongside this handset's own
+ * board data as bdwlan_fogona_ipa.bin / _epa.bin. msm-firmware-loader mounts
+ * that partition and links its image/ directory into the firmware search path.
+ */
+&wifi {
+	vdd-0.8-cx-mx-supply = <&pm6125_l8>;
+	vdd-1.8-xo-supply = <&pm6125_l16>;
+	vdd-1.3-rfa-supply = <&pm6125_l17>;
+	vdd-3.3-ch0-supply = <&pm6125_l23>;
+	status = "okay";
+};
+
+&remoteproc_mpss {
+	firmware-name = "qcom/sm6225/motorola/fogona/modem.mdt";
+	status = "okay";
 };
 
 /*
