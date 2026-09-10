@@ -277,7 +277,8 @@
 	touchscreen@0 {
 		compatible = "chipone,icnl9916";
 		reg = <0>;
-		spi-max-frequency = <6000000>;
+		/* 1 MHz while bringing the link up; stock allows 9.6 MHz. */
+		spi-max-frequency = <1000000>;
 
 		interrupts-extended = <&tlmm 80 IRQ_TYPE_EDGE_FALLING>;
 		touchscreen-reset-gpios = <&tlmm 86 GPIO_ACTIVE_LOW>;
