@@ -64,6 +64,18 @@
 		format = "a8r8g8b8";
 	};
 
+	/*
+	 * The gauge reports state of charge as a percentage and knows nothing
+	 * about pack size, so the design capacity has to come from here.
+	 * 5000 mAh matches stock's fcc_design of 0x1388 for all three packs.
+	 */
+	battery: battery {
+		compatible = "simple-battery";
+		charge-full-design-microamp-hours = <5000000>;
+		voltage-min-design-microvolt = <3400000>;
+		voltage-max-design-microvolt = <4400000>;
+	};
+
 	gpio-keys {
 		compatible = "gpio-keys";
 
@@ -248,6 +260,53 @@
 
 &sleep_clk {
 	clock-frequency = <32764>;
+};
+
+/*
+ * Fuel gauge: CellWise CW2217 on SE2 I2C, the bus Motorola calls SAR_I2C.
+ *
+ * Stock declares three gauges on this bus -- cw2217@64, sm5602@71 and
+ * rt9426a@55 -- and picks one at runtime, because the part is second sourced.
+ * This unit has the CW2217: its stock kernel loads cw2217b_fg_mmi and logs
+ * from FG_CW2217, and the schematic's 5 mohm sense resistor (R1809) matches a
+ * coulomb counter rather than the voltage-only alternatives.
+ *
+ * cw,user_rsense is in milliohms scaled by 1000, not plain milliohms -- the
+ * driver's own default is 1500 for a 1.5 mohm shunt. This board's R1809 is
+ * 5 mohm, so 5000. Getting the scale wrong does not fail visibly: the gauge
+ * still reports a plausible-looking current, just off by a factor of 1000.
+ *
+ * The battery profile is the 80-byte table stock ships for the SUNWODA 5000 mAh
+ * pack, transcribed from its config_profile_info. Stock carries three, keyed by
+ * pack serial; this handset reports SB18D96854, which selects that one. A pack
+ * from another vendor would need the SCUD table instead -- the gauge would still
+ * work, but its capacity curve would be wrong rather than obviously broken.
+ *
+ * No thermistor is wired to the gauge: stock sets factory_mode_ntc_exist = 0
+ * and the running driver agrees, so temperature comes from elsewhere.
+ */
+&i2c2 {
+	status = "okay";
+
+	fuel-gauge@64 {
+		compatible = "cellwise,cw221X";
+		reg = <0x64>;
+
+		monitored-battery = <&battery>;
+
+		cw,user_rsense = <5000>;
+
+		cellwise,battery-profile = [
+			5a 00 00 00 00 00 00 00 a8 ba
+			ad bf a5 a0 de c9 bb ff e6 bc
+			8b 75 61 55 4f 4e 4d c1 a3 e2
+			dd ff fa cb d2 d8 d9 d8 d4 cf
+			ca c7 ce ca a4 93 8b 81 73 6e
+			7e 97 ac 8f 7e 64 20 00 ab 10
+			02 a0 5f 00 00 00 64 23 c3 55
+			00 00 00 00 00 00 00 00 00 c6
+		];
+	};
 };
 
 /*
