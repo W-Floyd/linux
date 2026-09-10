@@ -431,6 +431,14 @@
 
 	touchscreen@0 {
 		compatible = "chipone,icnl9916";
+
+		/*
+		 * TDDI: this is the same chip as the panel, so its power
+		 * sequencing is the panel's. Following the panel is what tells
+		 * the touch half to reload its SRAM firmware after a blank
+		 * has reset the shared silicon.
+		 */
+		panel = <&panel>;
 		reg = <0>;
 		/* 1 MHz while bringing the link up; stock allows 9.6 MHz. */
 		spi-max-frequency = <1000000>;
