@@ -489,6 +489,34 @@ static bool max77705_typec_dp_attached(struct max77705_typec *tc)
 	       tc->cc_state == MAX77705_CC_SOURCE;
 }
 
+/**
+ * max77705_typec_altmode_enable - turn the alternate modes on for a connection
+ * @tc: the port
+ *
+ * Turning them off first is what makes this work on a reattach. The setting
+ * survives a detach, so asking for something the chip believes it is already
+ * doing achieves nothing at all -- and with it already on from the previous
+ * cable, the firmware runs no discovery for the new one, which leaves the
+ * driver waiting for a result that is never going to come. Measured on
+ * hardware: a bare enable left the progress register on the data role swap it
+ * had reached, while turning it off and on again walked it all the way to a
+ * configured DisplayPort link.
+ */
+static int max77705_typec_altmode_enable(struct max77705_typec *tc)
+{
+	u8 off = 0;
+	u8 on = MAX77705_ALTMODE_SRCCAP | MAX77705_ALTMODE_VDM;
+	int ret;
+
+	ret = max77705_typec_opcode_xfer(tc, MAX77705_OPCODE_SET_ALTMODE,
+					 &off, sizeof(off), NULL, 0);
+	if (ret)
+		return ret;
+
+	return max77705_typec_opcode_xfer(tc, MAX77705_OPCODE_SET_ALTMODE,
+					  &on, sizeof(on), NULL, 0);
+}
+
 /*
  * How long to keep trying to get DisplayPort going once something is attached,
  * which has to cover a whole connection coming up: the power contract, a data
@@ -560,7 +588,6 @@ static void max77705_typec_altmode_work(struct work_struct *work)
 	struct max77705_typec *tc = container_of(to_delayed_work(work),
 						 struct max77705_typec,
 						 altmode_work);
-	u8 mode = MAX77705_ALTMODE_SRCCAP | MAX77705_ALTMODE_VDM;
 	bool enable;
 	int ret;
 
@@ -576,8 +603,7 @@ static void max77705_typec_altmode_work(struct work_struct *work)
 	}
 
 	if (enable) {
-		ret = max77705_typec_opcode_xfer(tc, MAX77705_OPCODE_SET_ALTMODE,
-						 &mode, sizeof(mode), NULL, 0);
+		ret = max77705_typec_altmode_enable(tc);
 		if (ret) {
 			dev_warn(tc->dev, "failed to enable alternate mode: %d\n",
 				 ret);
