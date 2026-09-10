@@ -74,6 +74,9 @@ MODULE_PARM_DESC(debug, "Set to one to enable debugging messages.");
 #define USER_RSENSE			1500
 
 #define queue_delayed_work_time		5000
+
+/* Fallback when the board declares no monitored-battery. */
+#define CW_DEFAULT_CHARGE_FULL_UAH	(10 * 1000 * 1000)
 #define queue_start_work_time		50
 
 #define CW_SLEEP_20MS			20
@@ -117,6 +120,7 @@ struct cw_battery {
 
 	struct power_supply *cw_bat;
 	int user_rsense;
+	int charge_full_design_uah;
 	u8 *bat_profile;
 	int chip_id;
 	int voltage;
@@ -793,7 +797,7 @@ static int cw_battery_get_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_FULL:
 	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
-		val->intval = 10 * 1000 * 1000;/* uAh */
+		val->intval = cw_bat->charge_full_design_uah;
 		break;
 	case POWER_SUPPLY_PROP_HEALTH:
 		val->intval = POWER_SUPPLY_HEALTH_GOOD;
@@ -839,6 +843,7 @@ static enum power_supply_property cw_battery_properties[] = {
 
 static int cw221X_probe(struct i2c_client *client)
 {
+	struct power_supply_battery_info *bat_info;
 	struct power_supply_config psy_cfg = {0};
 	struct power_supply_desc *psy_desc;
 	struct cw_battery *cw_bat;
@@ -886,6 +891,20 @@ static int cw221X_probe(struct i2c_client *client)
 		ret = PTR_ERR(cw_bat->cw_bat);
 		dev_err(cw_bat->dev, "failed to register battery: %d\n", ret);
 		return ret;
+	}
+
+	/*
+	 * Take the pack's design capacity from a monitored-battery node when
+	 * the board supplies one. The gauge reports state of charge as a
+	 * percentage and has no idea how large the cell is, so without this
+	 * charge_full is a compiled-in guess that is wrong on most boards.
+	 */
+	cw_bat->charge_full_design_uah = CW_DEFAULT_CHARGE_FULL_UAH;
+	if (!power_supply_get_battery_info(cw_bat->cw_bat, &bat_info)) {
+		if (bat_info->charge_full_design_uah > 0)
+			cw_bat->charge_full_design_uah =
+				bat_info->charge_full_design_uah;
+		power_supply_put_battery_info(cw_bat->cw_bat, bat_info);
 	}
 
 	cw_bat->cwfg_workqueue = create_singlethread_workqueue("cwfg_gauge");
