@@ -386,6 +386,13 @@ static int icnl9916_panel_get_modes(struct drm_panel *panel,
 	return drm_connector_helper_get_modes_fixed(connector, ctx->desc->mode);
 }
 
+/*
+ * Brightness is a 16-bit DCS value, not 8-bit: the vendor device tree gives
+ * this module bl-min-level 9 and bl-max-level 1637, so the 8-bit helper would
+ * reach only the bottom sixth of the range.
+ */
+#define ICNL9916C_TM_MAX_BRIGHTNESS	1637
+
 static int icnl9916_panel_bl_update_status(struct backlight_device *bl)
 {
 	struct mipi_dsi_device *dsi = bl_get_data(bl);
@@ -393,7 +400,7 @@ static int icnl9916_panel_bl_update_status(struct backlight_device *bl)
 	int ret;
 
 	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
-	ret = mipi_dsi_dcs_set_display_brightness(dsi, brightness);
+	ret = mipi_dsi_dcs_set_display_brightness_large(dsi, brightness);
 	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
 
 	return ret < 0 ? ret : 0;
@@ -408,8 +415,8 @@ static int icnl9916_panel_dcs_backlight(struct icnl9916_panel *ctx)
 	struct device *dev = &ctx->dsi->dev;
 	const struct backlight_properties props = {
 		.type = BACKLIGHT_RAW,
-		.brightness = 255,
-		.max_brightness = 255,
+		.brightness = ICNL9916C_TM_MAX_BRIGHTNESS,
+		.max_brightness = ICNL9916C_TM_MAX_BRIGHTNESS,
 	};
 
 	ctx->panel.backlight = devm_backlight_device_register(dev,
