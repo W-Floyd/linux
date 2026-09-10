@@ -192,7 +192,15 @@ static int max77705_typec_sync_cc(struct max77705_typec *tc)
 		return ret;
 
 	state = FIELD_GET(MAX77705_CC_STATUS0_CCSTAT, cc_status0);
-	orientation = max77705_typec_orientation(cc_status0);
+
+	/*
+	 * The CC pin status keeps naming the pin it last saw, so it only
+	 * describes an orientation while something is attached.
+	 */
+	if (state == MAX77705_CC_NO_CONNECTION || state == MAX77705_CC_DISABLED)
+		orientation = TYPEC_ORIENTATION_NONE;
+	else
+		orientation = max77705_typec_orientation(cc_status0);
 
 	if (orientation != tc->orientation) {
 		ret = typec_switch_set(tc->sw, orientation);
@@ -202,6 +210,14 @@ static int max77705_typec_sync_cc(struct max77705_typec *tc)
 		typec_set_orientation(tc->port, orientation);
 		tc->orientation = orientation;
 	}
+
+	/*
+	 * A source settles its advertised current after the attach, so take
+	 * the value on every pass rather than once when the partner appears.
+	 */
+	if (state == MAX77705_CC_SINK)
+		typec_set_pwr_opmode(tc->port,
+				     max77705_typec_pwr_opmode(cc_status0));
 
 	if (state == tc->cc_state)
 		return 0;
@@ -213,9 +229,6 @@ static int max77705_typec_sync_cc(struct max77705_typec *tc)
 		/* The state names the role this port took, not the partner's */
 		ret = max77705_typec_partner_add(tc, TYPEC_SINK);
 		role = USB_ROLE_DEVICE;
-		if (!ret)
-			typec_set_pwr_opmode(tc->port,
-					     max77705_typec_pwr_opmode(cc_status0));
 		break;
 	case MAX77705_CC_SOURCE:
 		ret = max77705_typec_partner_add(tc, TYPEC_SOURCE);
@@ -263,7 +276,8 @@ static irqreturn_t max77705_typec_irq(int irq, void *data)
 		return IRQ_NONE;
 
 	if (status[MAX77705_INT_CC] & (MAX77705_CC_INT_CCSTAT |
-				       MAX77705_CC_INT_CCPINSTAT)) {
+				       MAX77705_CC_INT_CCPINSTAT |
+				       MAX77705_CC_INT_CCISTAT)) {
 		ret = max77705_typec_sync_cc(tc);
 		if (ret)
 			dev_err_ratelimited(tc->dev,
@@ -401,7 +415,8 @@ static int max77705_typec_probe(struct platform_device *pdev)
 	/* Unmask the connection state interrupts we act on */
 	ret = regmap_write(tc->regmap, MAX77705_REG_CC_INT_M,
 			   (u8)~(MAX77705_CC_INT_CCSTAT |
-				 MAX77705_CC_INT_CCPINSTAT));
+				 MAX77705_CC_INT_CCPINSTAT |
+				 MAX77705_CC_INT_CCISTAT));
 	if (ret) {
 		dev_err_probe(dev, ret, "failed to unmask CC interrupts\n");
 		goto err_port_unregister;
