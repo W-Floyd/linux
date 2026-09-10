@@ -14,6 +14,7 @@
 #include <drm/bridge/aux-bridge.h>
 #include <linux/auxiliary_bus.h>
 #include <linux/bitfield.h>
+#include <linux/delay.h>
 #include <linux/i2c.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
@@ -243,6 +244,38 @@ static int max77705_typec_vdm_read(struct max77705_typec *tc,
 }
 
 /*
+ * How long to wait for the firmware to produce a result of its own. Discovery
+ * takes a few tens of milliseconds in practice, and there is nothing to lose
+ * by allowing well over that.
+ */
+#define MAX77705_VDM_WAIT_TRIES		25
+#define MAX77705_VDM_WAIT_POLL_MS	20
+
+/**
+ * max77705_typec_vdm_present - wait until the firmware has a VDM stored
+ * @tc: the port
+ * @id: which VDM to wait for
+ *
+ * The firmware clears the later VDMs on a detach, so one being readable again
+ * means this connection produced it.
+ */
+static bool max77705_typec_vdm_present(struct max77705_typec *tc,
+				       enum max77705_vdm id)
+{
+	u32 header, vdo;
+	int i;
+
+	for (i = 0; i < MAX77705_VDM_WAIT_TRIES; i++) {
+		if (!max77705_typec_vdm_read(tc, id, &header, &vdo, 1))
+			return true;
+
+		msleep(MAX77705_VDM_WAIT_POLL_MS);
+	}
+
+	return false;
+}
+
+/*
  * Pin assignment preference, taken from the vendor driver because it is what
  * this firmware has been tested against. A partner that wants to keep USB
  * alongside DisplayPort gets a two lane assignment, and anything else gets
@@ -350,6 +383,9 @@ static int max77705_typec_dp_configure(struct max77705_typec *tc)
 	return 0;
 }
 
+static void max77705_typec_dp_status(struct max77705_typec *tc,
+				     enum max77705_vdm id);
+
 /*
  * Discover Modes is the point the firmware stops on its own, because entering
  * a mode is the AP's decision.
@@ -383,8 +419,19 @@ static void max77705_typec_dp_discover_modes(struct max77705_typec *tc)
 	header = VDO(USB_TYPEC_DP_SID, 1, 0,
 		     VDO_OPOS(USB_TYPEC_DP_MODE) | CMD_ENTER_MODE);
 	ret = max77705_typec_vdm_write(tc, header, NULL, 0);
-	if (ret)
+	if (ret) {
 		dev_warn(tc->dev, "DP Enter Mode failed: %d\n", ret);
+		return;
+	}
+
+	/*
+	 * Entering the mode makes the partner report its DisplayPort status.
+	 * That arrives as an interrupt too, but for the same reasons as the
+	 * discovery above it is better read than waited for; handling it twice
+	 * is harmless, since it only ever restates the status.
+	 */
+	if (max77705_typec_vdm_present(tc, MAX77705_VDM_DP_STATUS))
+		max77705_typec_dp_status(tc, MAX77705_VDM_DP_STATUS);
 }
 
 /*
@@ -435,6 +482,31 @@ static void max77705_typec_dp_status(struct max77705_typec *tc,
 	max77705_typec_dp_hpd(tc, status & DP_STATUS_HPD_STATE);
 }
 
+/*
+ * Pick the negotiation up from wherever the chip has got to, rather than
+ * waiting to be told.
+ *
+ * Waiting for the Discover Modes interrupt is not dependable. It arrives
+ * within a few milliseconds of alternate mode being enabled, mixed in with the
+ * two discovery steps before it and with whatever else the connection is
+ * doing, and on a reattach it has been seen not to arrive at all -- the chip
+ * had run discovery and was sitting at Discover Modes with nothing further
+ * happening. A warm boot is the same problem from the other end: the chip may
+ * still be in the mode it negotiated before the reboot, in which case there is
+ * no discovery to interrupt anybody about.
+ *
+ * Reading the result instead covers all of it. Enter Mode may be sent to a
+ * partner that has already entered the mode, which it answers the same way.
+ */
+static void max77705_typec_dp_start(struct max77705_typec *tc)
+{
+	/* Nothing that speaks DisplayPort, which is the common case */
+	if (!max77705_typec_vdm_present(tc, MAX77705_VDM_DISCOVER_MODES))
+		return;
+
+	max77705_typec_dp_discover_modes(tc);
+}
+
 static void max77705_typec_altmode_work(struct work_struct *work)
 {
 	struct max77705_typec *tc = container_of(work, struct max77705_typec,
@@ -459,6 +531,8 @@ static void max77705_typec_altmode_work(struct work_struct *work)
 		if (ret)
 			dev_warn(tc->dev, "failed to enable alternate mode: %d\n",
 				 ret);
+		else
+			max77705_typec_dp_start(tc);
 	}
 
 	/*
