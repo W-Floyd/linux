@@ -33,12 +33,10 @@
 #define ICNL9916_READ_RESOLUTION	ICNL9916_READ_CMD(0, 7)
 #define ICNL9916_READ_TOUCH_DATA	ICNL9916_READ_CMD(1, 3)
 #define ICNL9916_WRITE_POWER_MODE	ICNL9916_WRITE_CMD(2, 4)
-/* Read-write command: the write path clears the read bit, giving 0x2203. */
-#define ICNL9916_CLR_DATA_READY		0x6203
-
 /* Byte the controller clocks out when it has nothing to report. */
 #define ICNL9916_IDLE_FILL		0x7f
 
+#define ICNL9916_POWER_NORMAL		0
 #define ICNL9916_POWER_SUSPEND		2
 
 #define ICNL9916_MAX_TOUCHES		10
@@ -670,8 +668,7 @@ static int icnl9916_spi_read_touch(struct icnl9916_data *data, u16 cmd,
 				   void *buf, u16 len)
 {
 	struct icnl9916_spi_tx_header *hdr = (void *)data->tx_buf;
-	struct icnl9916_spi_rx_trailer *rsp;
-	u16 rxlen = len + sizeof(*rsp);
+	u16 rxlen = len + sizeof(struct icnl9916_spi_rx_trailer);
 	u16 xlen = max_t(u16, sizeof(*hdr), rxlen);
 	int ret;
 
@@ -682,11 +679,12 @@ static int icnl9916_spi_read_touch(struct icnl9916_data *data, u16 cmd,
 	hdr->addr = ICNL9916_SPI_RD_ADDR;
 	hdr->cmd = cpu_to_le16(cmd & ~BIT(ICNL9916_WRITE_BIT));
 	/*
-	 * Unlike the two-message read, the length announced here covers the
-	 * trailer as well as the payload -- the whole reply arrives in one
-	 * frame, so that is what the controller is being asked for.
+	 * Announce the payload length only. The vendor's own single-chip-select
+	 * caller passes payload+trailer here, but on this controller that
+	 * yields nothing but idle fill, whereas asking for the payload returns
+	 * real coordinates.
 	 */
-	hdr->len = cpu_to_le16(rxlen);
+	hdr->len = cpu_to_le16(len);
 	hdr->crc = cpu_to_le16(icnl9916_crc16(data->tx_buf,
 					      offsetof(struct icnl9916_spi_tx_header, crc)));
 
@@ -701,20 +699,15 @@ static int icnl9916_spi_read_touch(struct icnl9916_data *data, u16 cmd,
 	 * trailing checksum does not cover it the same way -- so enforcing it
 	 * would discard good coordinates.
 	 */
-	rsp = (void *)(data->rx_buf + len);
-
 	/*
-	 * With no finger down the controller clocks out its idle fill rather
-	 * than a report.  That is not an error, just nothing to do.
+	 * No trailer check here. With the payload-length framing above the
+	 * reply carries coordinates but no trailer that validates, so the
+	 * only usable signal is the payload itself: idle fill means no
+	 * contact, anything else is a report.
 	 */
-	if (rsp->error == ICNL9916_IDLE_FILL)
+	if (data->rx_buf[0] == ICNL9916_IDLE_FILL &&
+	    data->rx_buf[1] == ICNL9916_IDLE_FILL)
 		return -ENODATA;
-
-	if (rsp->error) {
-		dev_err_ratelimited(data->dev, "Touch reply error %02x\n",
-				    rsp->error);
-		return -EIO;
-	}
 
 	memcpy(buf, data->rx_buf, len);
 
@@ -743,18 +736,6 @@ static irqreturn_t icnl9916_irq(int irq, void *dev_id)
 
 	ret = data->bus->read_touch(data, ICNL9916_READ_TOUCH_DATA,
 				    &touch_data, sizeof(touch_data));
-
-	/*
-	 * Acknowledge the report either way: the data-ready flag keeps the
-	 * interrupt asserted until it is cleared, so skipping this on a failed
-	 * read turns one bad report into an interrupt storm.
-	 */
-	if (data->spi) {
-		u8 ready = 0;
-
-		data->bus->write(data, ICNL9916_CLR_DATA_READY, &ready,
-				 sizeof(ready));
-	}
 
 	if (ret) {
 		if (ret != -ENODATA)
@@ -837,16 +818,51 @@ static int icnl9916_init(struct icnl9916_data *data)
 	return 0;
 }
 
+static void icnl9916_drain(struct icnl9916_data *data)
+{
+	struct icnl9916_touch_data touch_data;
+
+	data->bus->read_touch(data, ICNL9916_READ_TOUCH_DATA, &touch_data,
+			      sizeof(touch_data));
+}
+
 static int icnl9916_start(struct input_dev *input)
 {
 	struct icnl9916_data *data = input_get_drvdata(input);
+	__le16 fw_id;
 	int ret;
 
-	ret = icnl9916_init(data);
-	if (ret)
-		return ret;
+	/*
+	 * Only re-initialise if the controller is not already running. On this
+	 * part icnl9916_init() resets it, and reset drops the firmware -- which
+	 * lives in SRAM -- so an unconditional init turns every open into an
+	 * 81 KB reload taking the best part of a second. Userspace opens and
+	 * closes touchscreens freely, and doing that here starved the device of
+	 * any time in which it could actually report a contact.
+	 */
+	/*
+	 * Only re-initialise when the controller is not already running.
+	 * icnl9916_init() resets it, and reset drops firmware held in SRAM, so
+	 * an unconditional init makes every open an 81 KB reload of nearly a
+	 * second. Userspace opens and closes touchscreens freely; doing that
+	 * here left the device permanently reloading.
+	 */
+	ret = data->bus->read(data, ICNL9916_READ_FW_ID, &fw_id, sizeof(fw_id));
+	if (ret) {
+		ret = icnl9916_init(data);
+		if (ret)
+			return ret;
+	}
 
 	enable_irq(data->irq);
+
+	/*
+	 * Drain whatever the controller latched while the interrupt was off.
+	 * The report line is edge triggered, so a report that went ready while
+	 * masked is never re-signalled: without this the device sits with one
+	 * stale report pending and never interrupts again.
+	 */
+	icnl9916_drain(data);
 
 	return 0;
 }
@@ -854,12 +870,17 @@ static int icnl9916_start(struct input_dev *input)
 static void icnl9916_stop(struct input_dev *input)
 {
 	struct icnl9916_data *data = input_get_drvdata(input);
-	u8 pwr_mode = ICNL9916_POWER_SUSPEND;
 
 	disable_irq(data->irq);
-	data->bus->write(data, ICNL9916_WRITE_POWER_MODE,
-			 &pwr_mode, sizeof(pwr_mode));
 
+	/*
+	 * Deliberately left running rather than suspended. Suspending stops it
+	 * answering, so the next open cannot tell a suspended controller from
+	 * one with no firmware and reloads all 81 KB -- and userspace opens and
+	 * closes touchscreens often enough that the device spent its whole life
+	 * reloading. Idle power is a fair trade for a device that works; proper
+	 * suspend needs a wake path that does not look like a dead controller.
+	 */
 	reset_control_assert(data->chip_reset);
 }
 
