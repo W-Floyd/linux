@@ -126,6 +126,16 @@ config DRM_PANEL_CHIPONE_ICNA35XX
 	  around the Chipone ICNA3512 and ICNA3520 display controllers,
 	  such as some Tianma panels used in AYN Odin2 Portal and Thor.
 
+config DRM_PANEL_CHIPONE_ICNL9916_720_1600
+	tristate "Chipone ICNL9916 720x1600 panel"
+	depends on OF
+	depends on DRM_MIPI_DSI
+	depends on BACKLIGHT_CLASS_DEVICE
+	help
+	  Say Y here if you want to enable support for the Chipone ICNL9916
+	  MIPI-DSI video mode panel with a resolution of 720x1600.
+	  This type of panel is mainly found on mobile phones.
+
 config DRM_PANEL_CHIPWEALTH_CH13726A
 	tristate "CHIPWEALTH CH13726A-based DSI panel"
 	depends on OF
