@@ -9,6 +9,7 @@
 
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
+#include <dt-bindings/interrupt-controller/irq.h>
 #include "sm6225.dtsi"
 #include "pm6125.dtsi"
 
@@ -99,6 +100,19 @@
  */
 &tlmm {
 	gpio-reserved-ranges = <14 4>;
+
+	ts_int_default: ts-int-state {
+		pins = "gpio80";
+		function = "gpio";
+		bias-pull-up;
+	};
+
+	ts_reset_default: ts-reset-state {
+		pins = "gpio86";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-disable;
+	};
 };
 
 &pon_pwrkey {
@@ -208,6 +222,69 @@
 
 &sleep_clk {
 	clock-frequency = <32764>;
+};
+
+/*
+ * Touchscreen: ChipOne ICNL9916C, a TDDI part that drives the panel and the
+ * digitizer from one package. The touch half is on SPI SE0, which is how stock
+ * has it -- its overlay's fixups resolve fragment@60's target to
+ * `qupv3_se0_spi`, and the node carries spi-max-frequency = 9.6 MHz with the
+ * interrupt on TLMM 80 and reset on TLMM 86.
+ *
+ * reg = <0>, NOT <1>, even though stock names the node chipone_tddi@1. Stock
+ * declares three touch nodes on this one bus -- novatek@0, chipone_tddi@1 and
+ * ilitek@2 -- for the three panel variants fogona shipped, selected at runtime
+ * by matching mmi,panel_name. They cannot be three chip selects: qup_spi0's
+ * pinctrl muxes a single CS (gpio3). Motorola's own driver settles it by
+ * overriding whatever DT said:
+ *
+ *     pdata->spi_client->chip_select = 0;
+ *         -- cts_platform.c, cts_plat_spi_setup()
+ *
+ * So the @N suffixes are variant slots, and the real chip select is 0.
+ *
+ * 6 MHz rather than the 9.6 MHz stock allows: that is what the vendor driver
+ * actually clocks (CFG_CTS_SPI_SPEED_KHZ 6000), so it is the rate the part is
+ * known to work at. Raise it once the controller is talking.
+ *
+ * Falling-edge interrupt matches the vendor's IRQF_TRIGGER_FALLING. The reset
+ * line is active low: the driver pulses the logical line high then low, which
+ * for a RESET_N pin has to invert.
+ */
+/*
+ * The QUP wrapper gates every serial engine under it, so enabling spi0 alone
+ * does nothing: geniqup@4ac0000 ships disabled, and a disabled parent means
+ * of_platform never populates its children. Symptom is not a probe failure but
+ * total absence -- no 4a80000.spi platform device, nothing in
+ * /sys/bus/spi/devices, and not one geni line in dmesg.
+ *
+ * Note i2c0 and spi0 share address 0x4a80000: SE0 is one engine that is either
+ * an I2C or a SPI port, never both. i2c0 must stay disabled.
+ */
+&qupv3_id_0 {
+	status = "okay";
+};
+
+/*
+ * gpi_dma0 is deliberately left disabled. spi0 lists it in `dmas`, but
+ * spi-geni-qcom falls back to PIO when the channels cannot be obtained, and
+ * PIO is more than enough for a touch controller whose largest transfer is a
+ * 77-byte report.
+ */
+&spi0 {
+	status = "okay";
+
+	touchscreen@0 {
+		compatible = "chipone,icnl9916";
+		reg = <0>;
+		spi-max-frequency = <6000000>;
+
+		interrupts-extended = <&tlmm 80 IRQ_TYPE_EDGE_FALLING>;
+		touchscreen-reset-gpios = <&tlmm 86 GPIO_ACTIVE_LOW>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&ts_int_default>, <&ts_reset_default>;
+	};
 };
 
 /*
