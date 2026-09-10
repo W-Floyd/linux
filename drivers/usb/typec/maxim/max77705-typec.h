@@ -20,10 +20,19 @@
 #define MAX77705_REG_UIC_HW_REV		0x00
 #define MAX77705_REG_UIC_FW_REV		0x01
 
+/* The four interrupt registers are contiguous, so they can be read at once */
 #define MAX77705_REG_UIC_INT		0x02
 #define MAX77705_REG_CC_INT		0x03
 #define MAX77705_REG_PD_INT		0x04
 #define MAX77705_REG_VDM_INT		0x05
+
+enum max77705_int_index {
+	MAX77705_INT_UIC = 0,
+	MAX77705_INT_CC,
+	MAX77705_INT_PD,
+	MAX77705_INT_VDM,
+	MAX77705_INT_COUNT,
+};
 
 #define MAX77705_REG_USBC_STATUS1	0x06
 #define MAX77705_REG_USBC_STATUS2	0x07
@@ -55,6 +64,9 @@
 
 #define MAX77705_OPCODE_DATA_LEN	32
 #define MAX77705_OPCODE_TIMEOUT_MS	3000
+
+/* Reads the third control register, and takes no payload */
+#define MAX77705_OPCODE_CTRL3_R		0x09
 
 /* MAX77705_REG_UIC_INT */
 #define MAX77705_UIC_INT_APCMDRES	BIT(7)

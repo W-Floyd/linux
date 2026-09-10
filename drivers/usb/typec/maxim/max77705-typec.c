@@ -38,6 +38,10 @@ struct max77705_typec {
 	/* the "connector" child, which owns the port graph */
 	struct fwnode_handle *fwnode;
 
+	/* one command is in flight at a time, answered by an interrupt */
+	struct mutex mailbox_lock;
+	struct completion cmd_done;
+
 	enum max77705_cc_state cc_state;
 	enum typec_orientation orientation;
 };
@@ -47,6 +51,73 @@ static const struct regmap_config max77705_typec_regmap_config = {
 	.val_bits = 8,
 	.max_register = MAX77705_REG_OPCODE_RES + MAX77705_OPCODE_DATA_LEN,
 };
+
+/**
+ * max77705_typec_opcode_xfer - run one command through the opcode mailbox
+ * @tc: the port
+ * @opcode: command selector
+ * @tx: payload to send, may be NULL when @tx_len is zero
+ * @tx_len: payload length, at most MAX77705_OPCODE_DATA_LEN
+ * @rx: where to put the response, may be NULL when @rx_len is zero
+ * @rx_len: expected response length, at most MAX77705_OPCODE_DATA_LEN
+ *
+ * The opcode and its payload go out as one burst, and a command shorter than
+ * the full payload is terminated by the end register. The firmware answers by
+ * raising its command-response interrupt, and the response begins with the
+ * opcode it is answering.
+ */
+static int max77705_typec_opcode_xfer(struct max77705_typec *tc, u8 opcode,
+				      const u8 *tx, size_t tx_len,
+				      u8 *rx, size_t rx_len)
+{
+	u8 buf[MAX77705_OPCODE_DATA_LEN + 1];
+	unsigned long left;
+	int ret;
+
+	if (tx_len > MAX77705_OPCODE_DATA_LEN ||
+	    rx_len > MAX77705_OPCODE_DATA_LEN)
+		return -EINVAL;
+
+	guard(mutex)(&tc->mailbox_lock);
+
+	buf[0] = opcode;
+	if (tx_len)
+		memcpy(&buf[1], tx, tx_len);
+
+	reinit_completion(&tc->cmd_done);
+
+	ret = regmap_bulk_write(tc->regmap, MAX77705_REG_OPCODE, buf,
+				tx_len + 1);
+	if (ret)
+		return ret;
+
+	if (tx_len < MAX77705_OPCODE_DATA_LEN) {
+		ret = regmap_write(tc->regmap, MAX77705_REG_OPCODE_END, 0);
+		if (ret)
+			return ret;
+	}
+
+	left = wait_for_completion_timeout(&tc->cmd_done,
+					   msecs_to_jiffies(MAX77705_OPCODE_TIMEOUT_MS));
+	if (!left)
+		return -ETIMEDOUT;
+
+	ret = regmap_bulk_read(tc->regmap, MAX77705_REG_OPCODE_RES, buf,
+			       rx_len + 1);
+	if (ret)
+		return ret;
+
+	if (buf[0] != opcode) {
+		dev_err(tc->dev, "answer to 0x%02x carries opcode 0x%02x\n",
+			opcode, buf[0]);
+		return -EPROTO;
+	}
+
+	if (rx_len)
+		memcpy(rx, &buf[1], rx_len);
+
+	return 0;
+}
 
 static enum typec_orientation
 max77705_typec_orientation(unsigned int cc_status0)
@@ -170,25 +241,47 @@ static int max77705_typec_sync_cc(struct max77705_typec *tc)
 static irqreturn_t max77705_typec_irq(int irq, void *data)
 {
 	struct max77705_typec *tc = data;
-	unsigned int cc_int;
+	u8 status[MAX77705_INT_COUNT];
 	int ret;
 
-	/* The interrupt registers are clear-on-read */
-	ret = regmap_read(tc->regmap, MAX77705_REG_CC_INT, &cc_int);
+	/*
+	 * The four interrupt registers are contiguous and clear on read, so
+	 * take them in one burst. Leaving any of them unread would strand the
+	 * event it describes, since the chip only reports each one once.
+	 */
+	ret = regmap_bulk_read(tc->regmap, MAX77705_REG_UIC_INT, status,
+			       sizeof(status));
 	if (ret) {
-		dev_err_ratelimited(tc->dev, "failed to read CC_INT: %d\n", ret);
+		dev_err_ratelimited(tc->dev,
+				    "failed to read the interrupt status: %d\n",
+				    ret);
 		return IRQ_NONE;
 	}
 
-	if (!cc_int)
+	if (!status[MAX77705_INT_UIC] && !status[MAX77705_INT_CC] &&
+	    !status[MAX77705_INT_PD] && !status[MAX77705_INT_VDM])
 		return IRQ_NONE;
 
-	if (cc_int & (MAX77705_CC_INT_CCSTAT | MAX77705_CC_INT_CCPINSTAT)) {
+	if (status[MAX77705_INT_CC] & (MAX77705_CC_INT_CCSTAT |
+				       MAX77705_CC_INT_CCPINSTAT)) {
 		ret = max77705_typec_sync_cc(tc);
 		if (ret)
 			dev_err_ratelimited(tc->dev,
 					    "failed to sync CC state: %d\n", ret);
 	}
+
+	if (status[MAX77705_INT_UIC] & MAX77705_UIC_INT_APCMDRES)
+		complete(&tc->cmd_done);
+
+	/*
+	 * Power delivery and the alternate modes are not driven yet. Report
+	 * what arrives so the events are visible while that is built.
+	 */
+	if (status[MAX77705_INT_UIC] || status[MAX77705_INT_PD] ||
+	    status[MAX77705_INT_VDM])
+		dev_dbg(tc->dev, "uic 0x%02x pd 0x%02x vdm 0x%02x\n",
+			status[MAX77705_INT_UIC], status[MAX77705_INT_PD],
+			status[MAX77705_INT_VDM]);
 
 	return IRQ_HANDLED;
 }
@@ -200,6 +293,7 @@ static int max77705_typec_probe(struct platform_device *pdev)
 	struct max77705_typec *tc;
 	struct i2c_client *i2c;
 	unsigned int rev;
+	u8 ctrl3;
 	int irq, ret;
 
 	tc = devm_kzalloc(dev, sizeof(*tc), GFP_KERNEL);
@@ -209,6 +303,12 @@ static int max77705_typec_probe(struct platform_device *pdev)
 	tc->dev = dev;
 	tc->cc_state = MAX77705_CC_NO_CONNECTION;
 	tc->orientation = TYPEC_ORIENTATION_NONE;
+
+	ret = devm_mutex_init(dev, &tc->mailbox_lock);
+	if (ret)
+		return ret;
+
+	init_completion(&tc->cmd_done);
 
 	/*
 	 * The Type-C block answers on its own address rather than the one the
@@ -306,6 +406,25 @@ static int max77705_typec_probe(struct platform_device *pdev)
 		dev_err_probe(dev, ret, "failed to unmask CC interrupts\n");
 		goto err_port_unregister;
 	}
+
+	/* The mailbox is answered by the command-response interrupt */
+	ret = regmap_write(tc->regmap, MAX77705_REG_UIC_INT_M,
+			   (u8)~MAX77705_UIC_INT_APCMDRES);
+	if (ret) {
+		dev_err_probe(dev, ret, "failed to unmask the command response\n");
+		goto err_port_unregister;
+	}
+
+	/*
+	 * Exercise the mailbox once, so that a firmware which does not answer
+	 * is apparent here rather than when an alternate mode depends on it.
+	 */
+	ret = max77705_typec_opcode_xfer(tc, MAX77705_OPCODE_CTRL3_R,
+					 NULL, 0, &ctrl3, sizeof(ctrl3));
+	if (ret)
+		dev_warn(dev, "the opcode mailbox did not answer: %d\n", ret);
+	else
+		dev_dbg(dev, "opcode mailbox ready, ctrl3 0x%02x\n", ctrl3);
 
 	return 0;
 
