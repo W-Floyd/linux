@@ -58,7 +58,7 @@ struct max77705_typec {
 	 * handler: it would wait for a completion only it could deliver.
 	 * Events are collected here and answered from a work item instead.
 	 */
-	struct work_struct altmode_work;
+	struct delayed_work altmode_work;
 	spinlock_t event_lock;	/* protects the three fields below */
 	u8 vdm_events;
 	u8 pd_events;
@@ -75,6 +75,7 @@ struct max77705_typec {
 	u8 dp_pin_assign;
 	u32 dp_status;
 	u32 dp_conf;
+	unsigned int dp_tries;
 
 	enum max77705_cc_state cc_state;
 	enum typec_orientation orientation;
@@ -420,7 +421,7 @@ static void max77705_typec_dp_discover_modes(struct max77705_typec *tc)
 		     VDO_OPOS(USB_TYPEC_DP_MODE) | CMD_ENTER_MODE);
 	ret = max77705_typec_vdm_write(tc, header, NULL, 0);
 	if (ret) {
-		dev_warn(tc->dev, "DP Enter Mode failed: %d\n", ret);
+		dev_warn_ratelimited(tc->dev, "DP Enter Mode failed: %d\n", ret);
 		return;
 	}
 
@@ -482,44 +483,93 @@ static void max77705_typec_dp_status(struct max77705_typec *tc,
 	max77705_typec_dp_hpd(tc, status & DP_STATUS_HPD_STATE);
 }
 
-/*
- * Pick the negotiation up from wherever the chip has got to, rather than
- * waiting to be told.
- *
- * Waiting for the Discover Modes interrupt is not dependable. It arrives
- * within a few milliseconds of alternate mode being enabled, mixed in with the
- * two discovery steps before it and with whatever else the connection is
- * doing, and on a reattach it has been seen not to arrive at all -- the chip
- * had run discovery and was sitting at Discover Modes with nothing further
- * happening. A warm boot is the same problem from the other end: the chip may
- * still be in the mode it negotiated before the reboot, in which case there is
- * no discovery to interrupt anybody about.
- *
- * Reading the result instead covers all of it. Enter Mode may be sent to a
- * partner that has already entered the mode, which it answers the same way.
- */
-static void max77705_typec_dp_start(struct max77705_typec *tc)
+static bool max77705_typec_dp_attached(struct max77705_typec *tc)
 {
-	/* Nothing that speaks DisplayPort, which is the common case */
-	if (!max77705_typec_vdm_present(tc, MAX77705_VDM_DISCOVER_MODES))
+	return tc->cc_state == MAX77705_CC_SINK ||
+	       tc->cc_state == MAX77705_CC_SOURCE;
+}
+
+/*
+ * How long to keep trying to get DisplayPort going once something is attached,
+ * which has to cover a whole connection coming up: the power contract, a data
+ * role swap and then the firmware's own mode discovery.
+ */
+#define MAX77705_DP_TRIES	40
+#define MAX77705_DP_RETRY_MS	250
+
+/*
+ * Work out where the negotiation has got to and push it along, rather than
+ * acting on whichever interrupt happened to arrive.
+ *
+ * The events this chip reports are not reliably delivered. Its interrupt
+ * registers clear on read and the PMIC summarises them in one latched source
+ * bit, so two events close together collapse into a single interrupt and the
+ * later one is left sitting in a register nobody comes back to read. That has
+ * been seen at every step: a reattach where Discover Modes never arrived and
+ * the chip sat there with nothing further happening, and a connection that
+ * negotiated perfectly and then stranded the Attention carrying HPD, so the
+ * display was ready and nothing was told about it.
+ *
+ * None of that matters if the state is read rather than awaited, because
+ * everything needed is readable at any time. So this is called from every
+ * interrupt and from a retry, and each time it takes the negotiation as far as
+ * it can. Enter Mode may be sent to a partner that has already entered the
+ * mode, and a status may be read twice; both are harmless.
+ */
+static void max77705_typec_dp_sync(struct max77705_typec *tc)
+{
+	u32 header, vdo;
+
+	if (!max77705_typec_dp_attached(tc))
 		return;
 
-	max77705_typec_dp_discover_modes(tc);
+	if (!tc->dp_conf) {
+		/* Nothing that speaks DisplayPort, which is the common case */
+		if (!max77705_typec_vdm_read(tc, MAX77705_VDM_DISCOVER_MODES,
+					     &header, &vdo, 1))
+			max77705_typec_dp_discover_modes(tc);
+
+		/*
+		 * A connection takes a while to reach mode discovery, so keep
+		 * looking for a bounded time rather than deciding on the one
+		 * glance taken when it attached.
+		 */
+		if (!tc->dp_conf && tc->dp_tries++ < MAX77705_DP_TRIES) {
+			queue_delayed_work(system_wq, &tc->altmode_work,
+					   msecs_to_jiffies(MAX77705_DP_RETRY_MS));
+			return;
+		}
+	}
+
+	if (!tc->dp_conf)
+		return;
+
+	/*
+	 * Configured, so the only thing left to follow is HPD. An Attention is
+	 * the newest word on it, and the status update stands in until one
+	 * arrives.
+	 */
+	if (!max77705_typec_vdm_read(tc, MAX77705_VDM_ATTENTION, &header, &vdo, 1))
+		max77705_typec_dp_status(tc, MAX77705_VDM_ATTENTION);
+	else
+		max77705_typec_dp_status(tc, MAX77705_VDM_DP_STATUS);
 }
 
 static void max77705_typec_altmode_work(struct work_struct *work)
 {
-	struct max77705_typec *tc = container_of(work, struct max77705_typec,
+	struct max77705_typec *tc = container_of(to_delayed_work(work),
+						 struct max77705_typec,
 						 altmode_work);
 	u8 mode = MAX77705_ALTMODE_SRCCAP | MAX77705_ALTMODE_VDM;
 	bool enable;
-	u8 vdm, pd;
 	int ret;
 
+	/*
+	 * Which events arrived does not matter, only that something did: the
+	 * state is read rather than inferred from the bits.
+	 */
 	scoped_guard(spinlock_irq, &tc->event_lock) {
 		enable = tc->altmode_enable;
-		vdm = tc->vdm_events;
-		pd = tc->pd_events;
 		tc->altmode_enable = false;
 		tc->vdm_events = 0;
 		tc->pd_events = 0;
@@ -528,26 +578,14 @@ static void max77705_typec_altmode_work(struct work_struct *work)
 	if (enable) {
 		ret = max77705_typec_opcode_xfer(tc, MAX77705_OPCODE_SET_ALTMODE,
 						 &mode, sizeof(mode), NULL, 0);
-		if (ret)
+		if (ret) {
 			dev_warn(tc->dev, "failed to enable alternate mode: %d\n",
 				 ret);
-		else
-			max77705_typec_dp_start(tc);
+			return;
+		}
 	}
 
-	/*
-	 * Each step arrives as its own interrupt, but taking them in
-	 * negotiation order means a run that collected several still answers
-	 * them in the order the partner expects.
-	 */
-	if (vdm & MAX77705_VDM_INT_DISCOVER_MODES)
-		max77705_typec_dp_discover_modes(tc);
-
-	if (pd & MAX77705_PD_INT_DP_STATUS)
-		max77705_typec_dp_status(tc, MAX77705_VDM_DP_STATUS);
-
-	if (pd & MAX77705_PD_INT_ATTENTION)
-		max77705_typec_dp_status(tc, MAX77705_VDM_ATTENTION);
+	max77705_typec_dp_sync(tc);
 }
 
 static enum typec_orientation
@@ -665,6 +703,7 @@ static int max77705_typec_sync_cc(struct max77705_typec *tc)
 	tc->dp_pin_assign = 0;
 	tc->dp_status = 0;
 	tc->dp_conf = 0;
+	tc->dp_tries = 0;
 
 	switch (state) {
 	case MAX77705_CC_SINK:
@@ -699,7 +738,7 @@ static int max77705_typec_sync_cc(struct max77705_typec *tc)
 		scoped_guard(spinlock_irq, &tc->event_lock)
 			tc->altmode_enable = true;
 		if (tc->irq_ready)
-			queue_work(system_wq, &tc->altmode_work);
+			queue_delayed_work(system_wq, &tc->altmode_work, 0);
 	} else {
 		struct typec_mux_state safe = { .mode = TYPEC_STATE_SAFE };
 
@@ -751,15 +790,24 @@ static irqreturn_t max77705_typec_irq(int irq, void *data)
 	 * The alternate mode steps need the mailbox to answer them, which this
 	 * handler cannot use: it is the one thread that delivers the command
 	 * response. Hand them to the work item.
+	 *
+	 * Any interrupt at all is worth handing over, not only the ones naming
+	 * a DisplayPort event. Two events arriving together are reported once,
+	 * so a bit that matters can be missing from the very interrupt it was
+	 * meant to travel in, and looking at the state on every interrupt is
+	 * what makes that survivable.
+	 *
+	 * Queueing must not disturb a run that is already scheduled. Bringing
+	 * one forward instead would let a burst of interrupts cancel the retry
+	 * backoff over and over, which turns the retry into a tight loop
+	 * hammering the chip.
 	 */
-	if ((status[MAX77705_INT_VDM] & MAX77705_VDM_INT_DISCOVER_MODES) ||
-	    (status[MAX77705_INT_PD] & (MAX77705_PD_INT_DP_STATUS |
-					MAX77705_PD_INT_ATTENTION))) {
+	if (max77705_typec_dp_attached(tc)) {
 		scoped_guard(spinlock, &tc->event_lock) {
 			tc->vdm_events |= status[MAX77705_INT_VDM];
 			tc->pd_events |= status[MAX77705_INT_PD];
 		}
-		queue_work(system_wq, &tc->altmode_work);
+		queue_delayed_work(system_wq, &tc->altmode_work, 0);
 	}
 
 	dev_dbg(tc->dev, "uic 0x%02x cc 0x%02x pd 0x%02x vdm 0x%02x\n",
@@ -793,7 +841,7 @@ static int max77705_typec_probe(struct platform_device *pdev)
 
 	init_completion(&tc->cmd_done);
 	spin_lock_init(&tc->event_lock);
-	INIT_WORK(&tc->altmode_work, max77705_typec_altmode_work);
+	INIT_DELAYED_WORK(&tc->altmode_work, max77705_typec_altmode_work);
 
 	/*
 	 * The Type-C block answers on its own address rather than the one the
@@ -963,14 +1011,14 @@ static int max77705_typec_probe(struct platform_device *pdev)
 	    tc->cc_state == MAX77705_CC_SOURCE) {
 		scoped_guard(spinlock_irq, &tc->event_lock)
 			tc->altmode_enable = true;
-		queue_work(system_wq, &tc->altmode_work);
+		queue_delayed_work(system_wq, &tc->altmode_work, 0);
 	}
 
 	return 0;
 
 err_port_unregister:
 	tc->irq_ready = false;
-	cancel_work_sync(&tc->altmode_work);
+	cancel_delayed_work_sync(&tc->altmode_work);
 	max77705_typec_partner_remove(tc);
 	typec_unregister_port(tc->port);
 err_role_put:
@@ -995,7 +1043,7 @@ static void max77705_typec_remove(struct platform_device *pdev)
 
 	/* Masked above, so the interrupt can no longer queue this again */
 	tc->irq_ready = false;
-	cancel_work_sync(&tc->altmode_work);
+	cancel_delayed_work_sync(&tc->altmode_work);
 
 	max77705_typec_partner_remove(tc);
 	typec_unregister_port(tc->port);
