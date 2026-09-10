@@ -111,6 +111,30 @@
 	};
 
 	/*
+	 * Steers the SBU pair onto the DisplayPort AUX lines, so that AUX
+	 * follows the cable orientation. The vendor kernel calls this the EDP
+	 * AUX switch and drives the enable low to connect it.
+	 */
+	sbu-mux {
+		compatible = "vishay,dg2730", "gpio-sbu-mux";
+
+		enable-gpios = <&tlmm 7 GPIO_ACTIVE_LOW>;
+		select-gpios = <&tlmm 100 GPIO_ACTIVE_HIGH>;
+
+		pinctrl-0 = <&dp_aux_default>;
+		pinctrl-names = "default";
+
+		mode-switch;
+		orientation-switch;
+
+		port {
+			sbu_mux_in: endpoint {
+				remote-endpoint = <&max77705_typec_sbu>;
+			};
+		};
+	};
+
+	/*
 	 * Apparently RPMh does not provide support for PM8998 S4 because it
 	 * is always-on; model it as a fixed regulator.
 	 */
@@ -1262,6 +1286,43 @@
 			haptic-supply = <&vib_regulator>;
 			pwms = <&vib_pwm 0 52084>;
 		};
+
+		typec {
+			compatible = "maxim,max77705-typec";
+			interrupt-parent = <&max77705>;
+			interrupts = <3>;
+			orientation-switch;
+			mode-switch;
+
+			connector {
+				compatible = "usb-c-connector";
+				label = "USB-C";
+				power-role = "dual";
+				data-role = "dual";
+				try-power-role = "sink";
+
+				ports {
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					port@0 {
+						reg = <0>;
+
+						max77705_typec_hs: endpoint {
+							remote-endpoint = <&usb_1_dwc3_hs>;
+						};
+					};
+
+					port@2 {
+						reg = <2>;
+
+						max77705_typec_sbu: endpoint {
+							remote-endpoint = <&sbu_mux_in>;
+						};
+					};
+				};
+			};
+		};
 	};
 
 	max77705_charger: charger@69 {
@@ -1592,8 +1653,12 @@
 };
 
 &usb_1_dwc3 {
-	/* Until we have Type C hooked up we'll force this as peripheral. */
-	dr_mode = "peripheral";
+	dr_mode = "otg";
+	usb-role-switch;
+};
+
+&usb_1_dwc3_hs {
+	remote-endpoint = <&max77705_typec_hs>;
 };
 
 &usb_1_hsphy {
@@ -1664,6 +1729,13 @@
 &tlmm {
 	gpio-reserved-ranges = <27 4>, /* SPI (eSE - embedded Secure Element) */
 			       <85 4>; /* SPI (fingerprint reader) */
+
+	dp_aux_default: dp-aux-default-state {
+		pins = "gpio7", "gpio100";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-disable;
+	};
 
 	pcie0_default_state: pcie0-default-state {
 		clkreq-pins {
