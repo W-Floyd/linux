@@ -133,6 +133,7 @@ struct icnl9916_data {
 	struct reset_control *chip_reset;
 	struct gpio_desc *reset_gpio;
 	struct drm_panel_follower panel_follower;
+	bool panel_irq_off;
 	struct touchscreen_properties prop;
 	u8 *tx_buf;
 	u8 *rx_buf;
@@ -705,6 +706,11 @@ static int icnl9916_panel_prepared(struct drm_panel_follower *follower)
 	if (ret)
 		return ret;
 
+	if (data->panel_irq_off) {
+		enable_irq(data->irq);
+		data->panel_irq_off = false;
+	}
+
 	/*
 	 * The report line is edge triggered, so anything latched while the
 	 * controller was down is never re-signalled.
@@ -714,8 +720,40 @@ static int icnl9916_panel_prepared(struct drm_panel_follower *follower)
 	return 0;
 }
 
+/*
+ * Both callbacks are mandatory: drm_panel_unprepare() and
+ * drm_panel_remove_follower() call panel_unpreparing() with no NULL check.
+ */
+static int icnl9916_panel_unpreparing(struct drm_panel_follower *follower)
+{
+	struct icnl9916_data *data = container_of(follower,
+						  struct icnl9916_data,
+						  panel_follower);
+
+	/*
+	 * The panel is about to lose power, which takes the touch half of this
+	 * TDDI chip with it. Stop taking reports now rather than letting the
+	 * handler talk to a controller that is going away.
+	 */
+	/*
+	 * Balance matters here. disable_irq()/enable_irq() nest, and
+	 * drm_panel_add_follower() calls panel_prepared() immediately when the
+	 * panel is already up -- which happens before userspace has opened the
+	 * input device. Enabling unconditionally there would then double-enable
+	 * on open and trip "Unbalanced enable for IRQ". Only undo what this
+	 * callback actually did.
+	 */
+	if (!data->panel_irq_off) {
+		disable_irq(data->irq);
+		data->panel_irq_off = true;
+	}
+
+	return 0;
+}
+
 static const struct drm_panel_follower_funcs icnl9916_panel_follower_funcs = {
 	.panel_prepared = icnl9916_panel_prepared,
+	.panel_unpreparing = icnl9916_panel_unpreparing,
 };
 
 static int icnl9916_start(struct input_dev *input)
