@@ -11,6 +11,8 @@
  * through the VDM/PD interrupts.
  */
 
+#include <drm/bridge/aux-bridge.h>
+#include <linux/auxiliary_bus.h>
 #include <linux/bitfield.h>
 #include <linux/i2c.h>
 #include <linux/interrupt.h>
@@ -41,6 +43,9 @@ struct max77705_typec {
 
 	/* the "connector" child, which owns the port graph */
 	struct fwnode_handle *fwnode;
+
+	/* carries HPD to whichever display controller the graph names */
+	struct auxiliary_device *hpd_bridge;
 
 	/* one command is in flight at a time, answered by an interrupt */
 	struct mutex mailbox_lock;
@@ -290,7 +295,19 @@ static int max77705_typec_dp_mux_set(struct max77705_typec *tc, int pin)
 	return typec_mux_set(tc->mux, &state);
 }
 
-static void max77705_typec_dp_configure(struct max77705_typec *tc)
+/*
+ * HPD is the sink saying a display is there and the link may be trained. The
+ * DisplayPort controller is reached through the connector graph rather than
+ * directly, so it is told over the HPD bridge.
+ */
+static void max77705_typec_dp_hpd(struct max77705_typec *tc, bool hpd)
+{
+	drm_aux_hpd_bridge_notify(&tc->hpd_bridge->dev,
+				  hpd ? connector_status_connected :
+					connector_status_disconnected);
+}
+
+static int max77705_typec_dp_configure(struct max77705_typec *tc)
 {
 	u32 header = VDO(USB_TYPEC_DP_SID, 1, 0,
 			 VDO_OPOS(USB_TYPEC_DP_MODE) | DP_CMD_CONFIGURE);
@@ -302,7 +319,7 @@ static void max77705_typec_dp_configure(struct max77705_typec *tc)
 		dev_warn(tc->dev,
 			 "no pin assignment in common, partner offers 0x%02x\n",
 			 tc->dp_pin_assign);
-		return;
+		return pin;
 	}
 
 	/*
@@ -316,17 +333,21 @@ static void max77705_typec_dp_configure(struct max77705_typec *tc)
 	ret = max77705_typec_vdm_write(tc, header, &conf, 1);
 	if (ret) {
 		dev_warn(tc->dev, "DP Configure failed: %d\n", ret);
-		return;
+		return ret;
 	}
 
 	tc->dp_conf = conf;
 
 	ret = max77705_typec_dp_mux_set(tc, pin);
-	if (ret)
+	if (ret) {
 		dev_warn(tc->dev, "failed to switch the mux to DP: %d\n", ret);
-	else
-		dev_dbg(tc->dev, "DisplayPort configured, pin assignment %c\n",
-			'A' + pin);
+		return ret;
+	}
+
+	dev_dbg(tc->dev, "DisplayPort configured, pin assignment %c\n",
+		'A' + pin);
+
+	return 0;
 }
 
 /*
@@ -395,18 +416,23 @@ static void max77705_typec_dp_status(struct max77705_typec *tc,
 		return;
 
 	if (!tc->dp_conf) {
-		max77705_typec_dp_configure(tc);
-		return;
+		if (max77705_typec_dp_configure(tc))
+			return;
+	} else {
+		/* Already configured, so this only carries a new HPD state */
+		pin = max77705_typec_dp_pick_pin(tc);
+		if (pin < 0)
+			return;
+
+		ret = max77705_typec_dp_mux_set(tc, pin);
+		if (ret) {
+			dev_warn(tc->dev, "failed to update the mux: %d\n", ret);
+			return;
+		}
 	}
 
-	/* Already configured, so this only carries a new HPD state */
-	pin = max77705_typec_dp_pick_pin(tc);
-	if (pin < 0)
-		return;
-
-	ret = max77705_typec_dp_mux_set(tc, pin);
-	if (ret)
-		dev_warn(tc->dev, "failed to report HPD to the mux: %d\n", ret);
+	/* Only once the lanes are configured is HPD worth acting on */
+	max77705_typec_dp_hpd(tc, status & DP_STATUS_HPD_STATE);
 }
 
 static void max77705_typec_altmode_work(struct work_struct *work)
@@ -559,6 +585,9 @@ static int max77705_typec_sync_cc(struct max77705_typec *tc)
 	 * Nothing survives a detach: the firmware forgets the stored VDMs, and
 	 * leaving the SBU switch on would hold AUX against the next cable.
 	 */
+	if (tc->dp_status & DP_STATUS_HPD_STATE)
+		max77705_typec_dp_hpd(tc, false);
+
 	tc->dp_pin_assign = 0;
 	tc->dp_status = 0;
 	tc->dp_conf = 0;
@@ -722,6 +751,19 @@ static int max77705_typec_probe(struct platform_device *pdev)
 	if (!tc->fwnode)
 		return dev_err_probe(dev, -EINVAL, "no connector node\n");
 
+	/*
+	 * Allocated before anything can report HPD, and only published once
+	 * the port is up, so a display controller never sees a half built
+	 * connector.
+	 */
+	tc->hpd_bridge = devm_drm_dp_hpd_bridge_alloc(dev,
+						      to_of_node(tc->fwnode));
+	if (IS_ERR(tc->hpd_bridge)) {
+		ret = dev_err_probe(dev, PTR_ERR(tc->hpd_bridge),
+				    "failed to allocate the HPD bridge\n");
+		goto err_fwnode_put;
+	}
+
 	tc->sw = fwnode_typec_switch_get(tc->fwnode);
 	if (IS_ERR(tc->sw)) {
 		ret = dev_err_probe(dev, PTR_ERR(tc->sw),
@@ -816,6 +858,12 @@ static int max77705_typec_probe(struct platform_device *pdev)
 				 MAX77705_PD_INT_DP_STATUS));
 	if (ret) {
 		dev_err_probe(dev, ret, "failed to unmask PD interrupts\n");
+		goto err_port_unregister;
+	}
+
+	ret = devm_drm_dp_hpd_bridge_add(dev, tc->hpd_bridge);
+	if (ret) {
+		dev_err_probe(dev, ret, "failed to add the HPD bridge\n");
 		goto err_port_unregister;
 	}
 

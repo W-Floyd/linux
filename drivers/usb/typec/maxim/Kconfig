@@ -5,6 +5,7 @@ config TYPEC_MAX77705
 	depends on MFD_MAX77705
 	depends on I2C
 	depends on USB_ROLE_SWITCH || !USB_ROLE_SWITCH
+	select DRM_AUX_HPD_BRIDGE if DRM_BRIDGE && OF
 	select REGMAP_I2C
 	help
 	  Say Y or M here to enable the USB Type-C port of the Maxim MAX77705
