@@ -242,6 +242,19 @@ static int max77705_typec_vdm_read(struct max77705_typec *tc,
 	}
 
 	*header = get_unaligned_le32(&rx[MAX77705_VDM_RESP_VDM_HDR]);
+
+	/*
+	 * Holding nothing is answered by echoing the requested VDM back with
+	 * the rest of the response zeroed, so the name matching above says
+	 * only that the firmware understood the question. A real VDM header
+	 * always carries an SVID and a command, so an empty one is the way to
+	 * tell "there is no answer yet" from "here is the answer" -- and
+	 * mistaking the two reads a fresh connection as one that has already
+	 * been discovered and found to offer nothing.
+	 */
+	if (!*header)
+		return -ENODATA;
+
 	for (i = 0; i < nr_vdo; i++)
 		vdo[i] = get_unaligned_le32(&rx[MAX77705_VDM_RESP_VDO + i * 4]);
 
