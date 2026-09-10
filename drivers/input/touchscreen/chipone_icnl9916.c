@@ -292,6 +292,7 @@ static int icnl9916_spi_read(struct icnl9916_data *data, u16 cmd, void *buf,
 	struct icnl9916_spi_tx_header *hdr = (void *)data->tx_buf;
 	struct icnl9916_spi_rx_trailer *rsp;
 	u16 rxlen = len + sizeof(*rsp);
+	u16 crc;
 	int ret;
 
 	if (rxlen > ICNL9916_SPI_BUF_SIZE)
@@ -307,10 +308,23 @@ static int icnl9916_spi_read(struct icnl9916_data *data, u16 cmd, void *buf,
 	if (ret)
 		return ret;
 
+	/*
+	 * The reply is validated by its CRC, which covers everything up to the
+	 * CRC itself: payload, error byte and echoed command.  This is the only
+	 * integrity check the vendor driver applies on SPI.
+	 */
+	crc = icnl9916_crc16(data->rx_buf, rxlen - sizeof(__le16));
+	if (crc != get_unaligned_le16(data->rx_buf + rxlen - sizeof(__le16))) {
+		dev_err(data->dev,
+			"Command %04x bad reply CRC (calc %04x): %*ph\n",
+			cmd, crc, rxlen, data->rx_buf);
+		return -EIO;
+	}
+
 	rsp = (void *)(data->rx_buf + len);
 	if (rsp->error) {
-		dev_err(data->dev, "Command %04x error %02x\n", cmd,
-			rsp->error);
+		dev_err(data->dev, "Command %04x error %02x: %*ph\n", cmd,
+			rsp->error, rxlen, data->rx_buf);
 		return -EIO;
 	}
 
@@ -415,6 +429,15 @@ static int icnl9916_init(struct icnl9916_data *data)
 
 	reset_control_deassert(data->chip_reset);
 
+	/*
+	 * The controller needs a clean deasserted-to-asserted edge, not merely
+	 * an asserted level: hold reset released for 1 ms before pulsing it.
+	 * Vendor code marks this sequence "can not be modified", and on fogona
+	 * skipping the leading release leaves the part unresponsive -- it never
+	 * drives MISO, so reads come back as the bus idle level.
+	 */
+	gpiod_set_value_cansleep(data->reset_gpio, 0);
+	mdelay(1);
 	gpiod_set_value_cansleep(data->reset_gpio, 1);
 	mdelay(10);
 	gpiod_set_value_cansleep(data->reset_gpio, 0);
@@ -572,7 +595,7 @@ static struct icnl9916_data *icnl9916_alloc(struct device *dev,
 		return ERR_CAST(data->chip_reset);
 
 	data->reset_gpio = devm_gpiod_get(dev, "touchscreen-reset",
-					  GPIOD_OUT_HIGH);
+					  GPIOD_OUT_LOW);
 	if (IS_ERR(data->reset_gpio))
 		return ERR_CAST(data->reset_gpio);
 
