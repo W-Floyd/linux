@@ -68,6 +68,66 @@ enum max77705_int_index {
 /* Reads the third control register, and takes no payload */
 #define MAX77705_OPCODE_CTRL3_R		0x09
 
+/*
+ * Sends one VDM to the partner. The answer carries the VDM header the partner
+ * replied with, so it says whether the command was ACKed.
+ */
+#define MAX77705_OPCODE_VDM_REQ		0x48
+
+/*
+ * Reads back the VDM named by the single payload byte, an enum max77705_vdm.
+ * The firmware keeps the last of each, so a result stays readable until the
+ * same VDM arrives again.
+ */
+#define MAX77705_OPCODE_VDM_RESP	0x4b
+
+/*
+ * Enables the alternate modes, and the reason the chip otherwise looks like it
+ * never begins discovery: until this is posted it answers nothing. Once it is
+ * enabled the firmware runs Discover Identity, Discover SVIDs and Discover
+ * Modes on its own, and the AP only has to answer with Enter Mode and DP
+ * Configure.
+ */
+#define MAX77705_OPCODE_SET_ALTMODE	0x55
+#define MAX77705_ALTMODE_SRCCAP		BIT(0)
+#define MAX77705_ALTMODE_VDM		BIT(1)
+
+/*
+ * Payload of MAX77705_OPCODE_VDM_REQ: a descriptor byte, then the VDM header,
+ * then the VDOs. The object count includes the header itself, and the
+ * firmware wants the command type to read as an ACK even though what is being
+ * sent is a request.
+ */
+#define MAX77705_VDM_REQ_NR_OBJ		GENMASK(2, 0)
+#define MAX77705_VDM_REQ_CMD_TYPE	GENMASK(4, 3)
+#define MAX77705_VDM_REQ_MAX_OBJ	2
+
+/*
+ * A MAX77705_OPCODE_VDM_RESP answer, with the echoed opcode already taken off
+ * the front: which VDM this is, the PD message header, the VDM header, and
+ * then the VDOs the partner sent.
+ */
+#define MAX77705_VDM_RESP_ID		0
+#define MAX77705_VDM_RESP_MSG_HDR	1
+#define MAX77705_VDM_RESP_VDM_HDR	3
+#define MAX77705_VDM_RESP_VDO		7
+#define MAX77705_VDM_RESP_NR_VDO	6
+
+/* A MAX77705_OPCODE_VDM_REQ answer reports this when it holds nothing */
+#define MAX77705_VDM_NO_RESPONSE	0xff
+
+/* Selects one stored VDM for MAX77705_OPCODE_VDM_RESP */
+enum max77705_vdm {
+	MAX77705_VDM_DISCOVER_ID = 0x01,
+	MAX77705_VDM_DISCOVER_SVIDS,
+	MAX77705_VDM_DISCOVER_MODES,
+	MAX77705_VDM_ENTER_MODE,
+	MAX77705_VDM_EXIT_MODE,
+	MAX77705_VDM_ATTENTION,
+	MAX77705_VDM_DP_STATUS = 0x10,
+	MAX77705_VDM_DP_CONFIGURE,
+};
+
 /* MAX77705_REG_UIC_INT */
 #define MAX77705_UIC_INT_APCMDRES	BIT(7)
 #define MAX77705_UIC_INT_SYSMSG		BIT(6)
@@ -86,6 +146,27 @@ enum max77705_int_index {
 #define MAX77705_CC_INT_CCISTAT		BIT(2)
 #define MAX77705_CC_INT_CCVCNSTAT	BIT(1)
 #define MAX77705_CC_INT_CCSTAT		BIT(0)
+
+/*
+ * MAX77705_REG_PD_INT
+ *
+ * The DisplayPort events arrive here rather than in the VDM register, which
+ * only carries the four discovery steps.
+ */
+#define MAX77705_PD_INT_PDMSG		BIT(7)
+#define MAX77705_PD_INT_PS_RDY		BIT(6)
+#define MAX77705_PD_INT_DATAROLE	BIT(5)
+#define MAX77705_PD_INT_ATTENTION	BIT(4)
+#define MAX77705_PD_INT_DP_CONFIGURE	BIT(3)
+#define MAX77705_PD_INT_DP_STATUS	BIT(2)
+#define MAX77705_PD_INT_SSACC		BIT(1)
+#define MAX77705_PD_INT_FCTID		BIT(0)
+
+/* MAX77705_REG_VDM_INT: the upper four bits are unused */
+#define MAX77705_VDM_INT_ENTER_MODE	BIT(3)
+#define MAX77705_VDM_INT_DISCOVER_MODES	BIT(2)
+#define MAX77705_VDM_INT_DISCOVER_SVIDS	BIT(1)
+#define MAX77705_VDM_INT_DISCOVER_ID	BIT(0)
 
 /* MAX77705_REG_CC_STATUS0 */
 #define MAX77705_CC_STATUS0_PINSTAT	GENMASK(7, 6)
