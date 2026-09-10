@@ -48,7 +48,7 @@
 		 * provides no firmware at all. Hardcoded because slot A is
 		 * active; installing qbootctl would track the real slot.
 		 */
-		bootargs = "console=tty0 loglevel=7 panic=0 fbcon=map:0 clk_ignore_unused pd_ignore_unused regulator_ignore_unused pmos.nosplash plymouth.enable=0 ignore_loglevel fbcon=font:6x10 rdinit=/init.pmos androidboot.slot_suffix=_a";
+		bootargs = "console=tty0 loglevel=7 panic=0 fbcon=map:0,font:6x10 clk_ignore_unused pd_ignore_unused regulator_ignore_unused pmos.nosplash plymouth.enable=0 ignore_loglevel rdinit=/init.pmos androidboot.slot_suffix=_a";
 	};
 
 	/*
