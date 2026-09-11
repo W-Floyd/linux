@@ -2667,6 +2667,21 @@ irqreturn_t msm_dp_ctrl_isr(struct msm_dp_ctrl *msm_dp_ctrl)
 
 	/* DP aux isr */
 	isr = msm_dp_ctrl_get_aux_interrupt(ctrl);
+
+	/*
+	 * The PLL losing lock is reported in the same status word as the AUX
+	 * transfer results, but it is not an AUX event and the AUX handler has
+	 * no case for it: it would be reported as an unexpected AUX interrupt,
+	 * naming the wrong block entirely. Report it for what it is, rate
+	 * limited because a link that has started losing lock says so
+	 * repeatedly.
+	 */
+	if (isr & DP_INTR_PLL_UNLOCKED) {
+		DRM_ERROR_RATELIMITED("PLL unlocked\n");
+		isr &= ~DP_INTR_PLL_UNLOCKED;
+		ret = IRQ_HANDLED;
+	}
+
 	if (isr)
 		ret |= msm_dp_aux_isr(ctrl->aux, isr);
 
