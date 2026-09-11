@@ -1706,6 +1706,35 @@
 &usb_1_qmpphy {
 	vdda-phy-supply = <&vdda_usb1_ss_1p2>;
 	vdda-pll-supply = <&vdda_usb1_ss_core>;
+
+	/*
+	 * sdm845.dtsi declares only "orientation-switch" on this PHY, so
+	 * fwnode_typec_mux_get() does not match it and typec_mux_set() never
+	 * reaches it: the driver registers a mux that nothing is connected to,
+	 * and qmpphy_mode stays at its probe default, QMPPHY_MODE_USB3DP, for
+	 * the life of the boot.
+	 *
+	 * Pin assignment C gives DisplayPort all four lanes and leaves USB3
+	 * nothing, but in USB3DP mode qmp_combo_com_init() writes
+	 * USB3_MODE | DP_MODE and brings the USB3 PCS block out of reset
+	 * alongside the DP one, leaving it powered on the lanes DisplayPort is
+	 * training. Measured on hardware, the sink then asks the upper lane
+	 * pair for more drive than the lower one -- v3 against v2 -- and the
+	 * link trains at the top of the swing table with nothing in reserve,
+	 * so roughly a third of boots fail with "max v_level reached" and
+	 * lane 3 never achieving clock recovery.
+	 *
+	 * Declaring the mux lets the Type-C driver select
+	 * QMPPHY_MODE_DP_ONLY, which writes DP_MODE alone and holds USB3 in
+	 * reset. Both lane pairs then ask for the same drive and the link
+	 * trains a step below maximum: ten boots out of ten, against a third
+	 * failing before.
+	 *
+	 * This belongs in sdm845.dtsi, and applies to any sdm845 board wiring
+	 * DisplayPort through the combo PHY.
+	 */
+	mode-switch;
+
 	status = "okay";
 };
 
