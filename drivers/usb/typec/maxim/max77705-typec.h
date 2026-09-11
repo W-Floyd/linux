@@ -168,6 +168,25 @@ enum max77705_vdm {
 #define MAX77705_VDM_INT_DISCOVER_SVIDS	BIT(1)
 #define MAX77705_VDM_INT_DISCOVER_ID	BIT(0)
 
+/*
+ * MAX77705_REG_PD_STATUS1
+ *
+ * The data role is the one that matters for DisplayPort: this port drives the
+ * display, so it has to be the DFP, and a UFP may not begin the mode discovery
+ * the firmware runs.
+ */
+#define MAX77705_PD_STATUS1_DATAROLE	BIT(7)	/* set while this port is DFP */
+#define MAX77705_PD_STATUS1_PSRDY	BIT(4)
+
+/*
+ * Swaps a role. The payload selects which, and it is a toggle rather than a
+ * request for a particular role: asking while already the DFP gives the role
+ * away again.
+ */
+#define MAX77705_OPCODE_SWAP_REQUEST	0x37
+#define MAX77705_SWAP_DATA_ROLE		0x01
+#define MAX77705_SWAP_POWER_ROLE	0x02
+
 /* MAX77705_REG_CC_STATUS0 */
 #define MAX77705_CC_STATUS0_PINSTAT	GENMASK(7, 6)
 #define MAX77705_CC_STATUS0_ISTAT	GENMASK(5, 4)

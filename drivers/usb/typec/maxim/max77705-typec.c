@@ -63,6 +63,13 @@ struct max77705_typec {
 	 * Events are collected here and answered from a work item instead.
 	 */
 	struct delayed_work altmode_work;
+	/*
+	 * Its own queue, because this work waits on the chip a command at a
+	 * time and retries for as long as a connection takes to settle. On the
+	 * shared queue that starves everything else -- tried, and the machine
+	 * reached the network and never finished booting.
+	 */
+	struct workqueue_struct *wq;
 	spinlock_t event_lock;	/* protects the three fields below */
 	u8 vdm_events;
 	u8 pd_events;
@@ -585,21 +592,63 @@ static int max77705_typec_dp_supported(struct max77705_typec *tc)
  */
 /*
  * How long to keep trying to get DisplayPort going once something is attached,
- * which has to cover a whole connection coming up: the power contract, a data
- * role swap and then the firmware's own mode discovery.
- *
- * Ten seconds is known to be too short for a replug, where the data role swap
- * has been measured taking the best part of a minute, and DisplayPort cannot
- * start until the port is the DFP. Extending it is not simply a matter of a
- * bigger number, though: this work blocks for up to a mailbox timeout at a
- * time and runs on the shared system workqueue, so retrying for much longer
- * needs a workqueue of its own first. Tried without one, the phone reached the
- * network and never finished booting.
+ * which has to cover a whole connection coming up: the power contract, the
+ * data role swap and then the firmware's own mode discovery. Quickly at first,
+ * then slowly, because the interesting part is over in a moment when it works
+ * at all and the rest is waiting on the partner.
  */
-#define MAX77705_DP_TRIES		40
+#define MAX77705_DP_FAST_TRIES		40	/* 10s at the fast interval */
+#define MAX77705_DP_TRIES		120	/* then 80s at the slow one */
 #define MAX77705_DP_RETRY_MS		250
+#define MAX77705_DP_SLOW_RETRY_MS	1000
 /* Retries between repeats of the enable, so it is asked again every 2s */
 #define MAX77705_DP_REENABLE_EVERY	8
+
+/*
+ * DisplayPort makes this port the source of the stream, which requires it to
+ * be the DFP, and a UFP may not begin the mode discovery the firmware has to
+ * run. So there is no point doing anything until the data role has settled the
+ * right way up.
+ */
+static bool max77705_typec_is_dfp(struct max77705_typec *tc)
+{
+	unsigned int pd_status1;
+
+	if (regmap_read(tc->regmap, MAX77705_REG_PD_STATUS1, &pd_status1))
+		return false;
+
+	return pd_status1 & MAX77705_PD_STATUS1_DATAROLE;
+}
+
+/**
+ * max77705_typec_want_dfp - ask the partner for the data role
+ * @tc: the port
+ *
+ * A partner that wants to drive a display usually asks for this swap itself,
+ * but takes its time over it: the best part of a minute, measured on a
+ * reattach, during which DisplayPort cannot start. Asking first turns that
+ * into the round trip it should be.
+ *
+ * Only ever asked while this port is the UFP, because the opcode is a toggle
+ * rather than a request for a particular role and would otherwise give the
+ * role away again. And only when the board's hot plug line says a display is
+ * really there, so that plugging in a charger or a USB host never has its data
+ * role meddled with -- that line is the one piece of evidence available before
+ * any of the discovery that would otherwise have to come first.
+ */
+static void max77705_typec_want_dfp(struct max77705_typec *tc)
+{
+	u8 what = MAX77705_SWAP_DATA_ROLE;
+	int ret;
+
+	if (!tc->hpd_gpio || !gpiod_get_value_cansleep(tc->hpd_gpio))
+		return;
+
+	ret = max77705_typec_opcode_xfer(tc, MAX77705_OPCODE_SWAP_REQUEST,
+					 &what, sizeof(what), NULL, 0);
+	if (ret)
+		dev_dbg(tc->dev, "asking for the data role failed: %d\n", ret);
+}
 
 /*
  * Work out where the negotiation has got to and push it along, rather than
@@ -628,13 +677,25 @@ static void max77705_typec_dp_sync(struct max77705_typec *tc)
 		return;
 
 	if (!tc->dp_conf) {
-		int supported = max77705_typec_dp_supported(tc);
+		int supported;
+
+		/*
+		 * Nothing can start until this port is the DFP, so ask for the
+		 * role and come back rather than reading results that cannot
+		 * exist yet.
+		 */
+		if (!max77705_typec_is_dfp(tc)) {
+			max77705_typec_want_dfp(tc);
+			goto retry;
+		}
+
+		supported = max77705_typec_dp_supported(tc);
 
 		/*
 		 * Discovery has run and this partner has nothing to do with
 		 * DisplayPort, which is the common case: a charger. Stop, so
-		 * that a charge does not carry ten seconds of pointless
-		 * retrying behind it.
+		 * that a charge does not carry a minute of pointless retrying
+		 * behind it.
 		 */
 		if (supported == 0)
 			return;
@@ -647,32 +708,20 @@ static void max77705_typec_dp_sync(struct max77705_typec *tc)
 		} else if (tc->dp_tries &&
 			   tc->dp_tries % MAX77705_DP_REENABLE_EVERY == 0) {
 			/*
-			 * Still nothing discovered at all. Enabling the
-			 * alternate modes can land before the connection is
-			 * ready to act on it, and then the firmware simply
-			 * never begins discovery; nothing reports that, and
-			 * re-reading a result cannot recover an enable that
-			 * did not take. So ask again, spaced well apart, since
-			 * this must also not interrupt a discovery already
-			 * under way.
+			 * The role is right and still nothing has been
+			 * discovered, so the enable may have landed before the
+			 * connection was ready to act on it -- nothing reports
+			 * that, and re-reading a result cannot recover an
+			 * enable that did not take. Ask again, spaced well
+			 * apart, since this must also not interrupt a discovery
+			 * already under way.
 			 */
 			max77705_typec_altmode_enable(tc);
 		}
 
-		/*
-		 * A connection takes a while to reach mode discovery, so keep
-		 * looking rather than deciding on the one glance taken when it
-		 * attached.
-		 */
-		if (!tc->dp_conf && tc->dp_tries++ < MAX77705_DP_TRIES) {
-			queue_delayed_work(system_wq, &tc->altmode_work,
-					   msecs_to_jiffies(MAX77705_DP_RETRY_MS));
-			return;
-		}
+		if (!tc->dp_conf)
+			goto retry;
 	}
-
-	if (!tc->dp_conf)
-		return;
 
 	/*
 	 * Configured, so the only thing left to follow is HPD. An Attention is
@@ -683,6 +732,21 @@ static void max77705_typec_dp_sync(struct max77705_typec *tc)
 		max77705_typec_dp_status(tc, MAX77705_VDM_ATTENTION);
 	else
 		max77705_typec_dp_status(tc, MAX77705_VDM_DP_STATUS);
+
+	return;
+
+retry:
+	/*
+	 * A connection takes a while to reach mode discovery, so keep looking
+	 * rather than deciding on the one glance taken when it attached.
+	 */
+	if (tc->dp_tries++ >= MAX77705_DP_TRIES)
+		return;
+
+	queue_delayed_work(tc->wq, &tc->altmode_work,
+			   msecs_to_jiffies(tc->dp_tries < MAX77705_DP_FAST_TRIES ?
+					    MAX77705_DP_RETRY_MS :
+					    MAX77705_DP_SLOW_RETRY_MS));
 }
 
 static void max77705_typec_altmode_work(struct work_struct *work)
@@ -865,7 +929,7 @@ static int max77705_typec_sync_cc(struct max77705_typec *tc)
 		scoped_guard(spinlock_irq, &tc->event_lock)
 			tc->altmode_enable = true;
 		if (tc->irq_ready)
-			queue_delayed_work(system_wq, &tc->altmode_work, 0);
+			queue_delayed_work(tc->wq, &tc->altmode_work, 0);
 	} else {
 		struct typec_mux_state safe = { .mode = TYPEC_STATE_SAFE };
 
@@ -960,7 +1024,7 @@ static irqreturn_t max77705_typec_irq(int irq, void *data)
 			tc->vdm_events |= status[MAX77705_INT_VDM];
 			tc->pd_events |= status[MAX77705_INT_PD];
 		}
-		queue_delayed_work(system_wq, &tc->altmode_work, 0);
+		queue_delayed_work(tc->wq, &tc->altmode_work, 0);
 	}
 
 	dev_dbg(tc->dev, "uic 0x%02x cc 0x%02x pd 0x%02x vdm 0x%02x\n",
@@ -982,7 +1046,7 @@ static irqreturn_t max77705_typec_hpd_irq(int irq, void *data)
 {
 	struct max77705_typec *tc = data;
 
-	queue_delayed_work(system_wq, &tc->altmode_work, 0);
+	queue_delayed_work(tc->wq, &tc->altmode_work, 0);
 
 	return IRQ_HANDLED;
 }
@@ -1012,6 +1076,11 @@ static int max77705_typec_probe(struct platform_device *pdev)
 	init_completion(&tc->cmd_done);
 	spin_lock_init(&tc->event_lock);
 	INIT_DELAYED_WORK(&tc->altmode_work, max77705_typec_altmode_work);
+
+	/* Ordered, since the work relies on never running beside itself */
+	tc->wq = devm_alloc_ordered_workqueue(dev, "%s", 0, dev_name(dev));
+	if (!tc->wq)
+		return -ENOMEM;
 
 	/*
 	 * The Type-C block answers on its own address rather than the one the
@@ -1205,7 +1274,7 @@ static int max77705_typec_probe(struct platform_device *pdev)
 	    tc->cc_state == MAX77705_CC_SOURCE) {
 		scoped_guard(spinlock_irq, &tc->event_lock)
 			tc->altmode_enable = true;
-		queue_delayed_work(system_wq, &tc->altmode_work, 0);
+		queue_delayed_work(tc->wq, &tc->altmode_work, 0);
 	}
 
 	return 0;
