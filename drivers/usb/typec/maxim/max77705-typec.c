@@ -84,6 +84,8 @@ struct max77705_typec {
 
 	/* only touched by the work item, which is never concurrent with itself */
 	u8 dp_pin_assign;
+	u32 dp_mode_vdo;
+	struct typec_altmode *dp_altmode;
 	u32 dp_status;
 	u32 dp_conf;
 	unsigned int dp_tries;
@@ -340,6 +342,50 @@ static int max77705_typec_dp_pick_pin(struct max77705_typec *tc)
  * The mux carries both the pin assignment, as a connector state, and the DP
  * specific VDOs, which is where a consumer finds HPD.
  */
+/*
+ * The mode alone does not say which alternate mode a state belongs to, so a
+ * consumer identifies DisplayPort by the SVID it reads back through
+ * state->alt. Leaving that NULL is not a cosmetic omission: the QMP combo PHY
+ * reads it in qmp_combo_typec_mux_set(), finds no DisplayPort SVID, concludes
+ * the connection is plain USB and puts itself in QMPPHY_MODE_USB3_ONLY, which
+ * holds the DisplayPort block in reset. AUX then times out and nothing trains.
+ *
+ * Registering the mode on the partner is what gives us something to point at,
+ * and it describes the connection in sysfs while it is at it.
+ */
+static int max77705_typec_dp_altmode_add(struct max77705_typec *tc)
+{
+	struct typec_altmode_desc desc = {
+		.svid = USB_TYPEC_DP_SID,
+		.mode = USB_TYPEC_DP_MODE,
+		.vdo = tc->dp_mode_vdo,
+	};
+	struct typec_altmode *alt;
+
+	if (tc->dp_altmode)
+		return 0;
+
+	if (!tc->partner)
+		return -ENODEV;
+
+	alt = typec_partner_register_altmode(tc->partner, &desc);
+	if (IS_ERR(alt))
+		return PTR_ERR(alt);
+
+	tc->dp_altmode = alt;
+
+	return 0;
+}
+
+static void max77705_typec_dp_altmode_remove(struct max77705_typec *tc)
+{
+	if (!tc->dp_altmode)
+		return;
+
+	typec_unregister_altmode(tc->dp_altmode);
+	tc->dp_altmode = NULL;
+}
+
 static int max77705_typec_dp_mux_set(struct max77705_typec *tc, int pin)
 {
 	struct typec_displayport_data dp = {
@@ -350,6 +396,14 @@ static int max77705_typec_dp_mux_set(struct max77705_typec *tc, int pin)
 		.mode = TYPEC_DP_STATE_A + pin,
 		.data = &dp,
 	};
+	int ret;
+
+	/* Registered on first use, so state.alt is set below, not above. */
+	ret = max77705_typec_dp_altmode_add(tc);
+	if (ret)
+		return ret;
+
+	state.alt = tc->dp_altmode;
 
 	return typec_mux_set(tc->mux, &state);
 }
@@ -448,6 +502,7 @@ static void max77705_typec_dp_discover_modes(struct max77705_typec *tc)
 	 * assignments the partner can take as the sink. Which field holds
 	 * them depends on whether the partner is a plug or a receptacle.
 	 */
+	tc->dp_mode_vdo = cap;
 	tc->dp_pin_assign = DP_CAP_PIN_ASSIGN_UFP_D(cap);
 	if (!tc->dp_pin_assign) {
 		dev_warn(tc->dev, "partner offers no DP pin assignment (0x%08x)\n",
@@ -816,6 +871,9 @@ static void max77705_typec_partner_remove(struct max77705_typec *tc)
 	if (!tc->partner)
 		return;
 
+	/* The mode hangs off the partner, so it has to go first. */
+	max77705_typec_dp_altmode_remove(tc);
+
 	typec_unregister_partner(tc->partner);
 	tc->partner = NULL;
 }
@@ -892,6 +950,7 @@ static int max77705_typec_sync_cc(struct max77705_typec *tc)
 	max77705_typec_dp_hpd(tc, false);
 
 	tc->dp_pin_assign = 0;
+	tc->dp_mode_vdo = 0;
 	tc->dp_status = 0;
 	tc->dp_conf = 0;
 	tc->dp_tries = 0;
