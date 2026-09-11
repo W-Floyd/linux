@@ -2046,8 +2046,8 @@ static int a6xx_pm_resume(struct msm_gpu *gpu)
 	struct adreno_gpu *adreno_gpu = to_adreno_gpu(gpu);
 	struct a6xx_gpu *a6xx_gpu = to_a6xx_gpu(adreno_gpu);
 	struct a6xx_gmu *gmu = &a6xx_gpu->gmu;
-	unsigned long freq = gpu->fast_rate;
 	struct dev_pm_opp *opp;
+	unsigned long freq;
 	int ret;
 
 	gpu->needs_hw_init = true;
@@ -2056,15 +2056,19 @@ static int a6xx_pm_resume(struct msm_gpu *gpu)
 
 	mutex_lock(&a6xx_gpu->gmu.lock);
 
+	/* Zero until devfreq's first request, i.e. on the very first resume */
+	freq = a6xx_gpu->resume_freq ?: gpu->fast_rate;
+
 	opp = dev_pm_opp_find_freq_ceil(&gpu->pdev->dev, &freq);
 	if (IS_ERR(opp)) {
 		ret = PTR_ERR(opp);
 		goto err_set_opp;
 	}
-	dev_pm_opp_put(opp);
 
 	/* Set the core clock and bus bw, having VDD scaling in mind */
 	dev_pm_opp_set_opp(&gpu->pdev->dev, opp);
+
+	dev_pm_opp_put(opp);
 
 	pm_runtime_resume_and_get(gmu->dev);
 	pm_runtime_resume_and_get(gmu->gxpd);
@@ -2236,6 +2240,28 @@ static void a6xx_gpu_set_freq(struct msm_gpu *gpu, struct dev_pm_opp *opp,
 
 	mutex_lock(&a6xx_gpu->gmu.lock);
 	a6xx_gmu_set_freq(gpu, opp, suspended);
+	mutex_unlock(&a6xx_gpu->gmu.lock);
+}
+
+static void a6xx_gmu_wrapper_set_freq(struct msm_gpu *gpu, struct dev_pm_opp *opp,
+				      bool suspended)
+{
+	struct adreno_gpu *adreno_gpu = to_adreno_gpu(gpu);
+	struct a6xx_gpu *a6xx_gpu = to_a6xx_gpu(adreno_gpu);
+
+	mutex_lock(&a6xx_gpu->gmu.lock);
+
+	/*
+	 * Record the request even while suspended, so that a6xx_pm_resume()
+	 * brings the GPU back at the rate devfreq wants rather than at the top
+	 * of the OPP table. This mirrors a6xx_gmu_set_freq(), which keeps
+	 * gmu->current_perf_index up to date for exactly the same reason.
+	 */
+	a6xx_gpu->resume_freq = dev_pm_opp_get_freq(opp);
+
+	if (!suspended)
+		dev_pm_opp_set_opp(&gpu->pdev->dev, opp);
+
 	mutex_unlock(&a6xx_gpu->gmu.lock);
 }
 
@@ -2411,6 +2437,7 @@ static const struct adreno_gpu_funcs funcs_gmuwrapper = {
 		.show = a6xx_show,
 #endif
 		.gpu_busy = a6xx_gpu_busy,
+		.gpu_set_freq = a6xx_gmu_wrapper_set_freq,
 #if defined(CONFIG_DRM_MSM_GPU_STATE)
 		.gpu_state_get = a6xx_gpu_state_get,
 		.gpu_state_put = a6xx_gpu_state_put,
