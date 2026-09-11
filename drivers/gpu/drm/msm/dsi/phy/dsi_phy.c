@@ -696,7 +696,22 @@ static int dsi_phy_driver_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, ret, "Unable to get iface clk\n");
 
 	if (phy->cfg->ops.pll_init) {
+		/*
+		 * PLL init registers the PLL clocks -- which recalculate their
+		 * rates from the hardware -- and caches the state the
+		 * bootloader left the PHY in, so it needs the iface clock
+		 * running. pm_clk only enables that from the runtime-resume
+		 * callback, and nothing has resumed the device yet, so resume
+		 * it explicitly across the call.
+		 */
+		ret = pm_runtime_resume_and_get(dev);
+		if (ret)
+			return ret;
+
 		ret = phy->cfg->ops.pll_init(phy);
+
+		pm_runtime_put_sync(dev);
+
 		if (ret)
 			return dev_err_probe(dev, ret,
 					     "PLL init failed; need separate clk driver\n");
