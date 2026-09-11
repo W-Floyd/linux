@@ -2299,6 +2299,7 @@ struct qmp_combo {
 	struct phy *usb_phy;
 	enum phy_mode phy_mode;
 	unsigned int usb_init_count;
+	bool usb_powered_on;
 
 	struct phy *dp_phy;
 	unsigned int dp_aux_cfg;
@@ -3909,6 +3910,8 @@ static int qmp_combo_usb_power_on(struct phy *phy)
 		goto err_disable_pipe_clk;
 	}
 
+	qmp->usb_powered_on = true;
+
 	return 0;
 
 err_disable_pipe_clk:
@@ -3921,6 +3924,17 @@ static int qmp_combo_usb_power_off(struct phy *phy)
 {
 	struct qmp_combo *qmp = phy_get_drvdata(phy);
 	const struct qmp_phy_cfg *cfg = qmp->cfg;
+
+	/*
+	 * The USB half is powered down on its own when an alternate mode takes
+	 * the lanes, so by the time the USB driver gets round to exiting the
+	 * PHY it may already be off. Doing it twice disables the pipe clock
+	 * one time too many.
+	 */
+	if (!qmp->usb_powered_on)
+		return 0;
+
+	qmp->usb_powered_on = false;
 
 	clk_disable_unprepare(qmp->pipe_clk);
 
@@ -3948,6 +3962,13 @@ static int qmp_combo_usb_init(struct phy *phy)
 	if (ret)
 		goto out_unlock;
 
+	/*
+	 * Powered on even when DisplayPort holds the lanes, because powering
+	 * off is what puts the USB block into reset and powers it down, and
+	 * skipping the on leaves nothing for the off to do. A USB block left
+	 * running on the lanes DisplayPort is training is what unlocks its
+	 * PLL, which is the fault this whole file used to be blamed for.
+	 */
 	ret = qmp_combo_usb_power_on(phy);
 	if (ret) {
 		qmp_combo_com_exit(qmp, false);
@@ -4434,12 +4455,11 @@ static int qmp_combo_typec_switch_set(struct typec_switch_dev *sw,
 	qmp->orientation = orientation;
 
 	if (qmp->init_count) {
-		if (qmp->usb_init_count)
-			qmp_combo_usb_power_off(qmp->usb_phy);
+		qmp_combo_usb_power_off(qmp->usb_phy);
 		qmp_combo_com_exit(qmp, true);
 
 		qmp_combo_com_init(qmp, true);
-		if (qmp->usb_init_count)
+		if (qmp->qmpphy_mode != QMPPHY_MODE_DP_ONLY && qmp->usb_init_count)
 			qmp_combo_usb_power_on(qmp->usb_phy);
 		if (qmp->dp_init_count)
 			cfg->dp_aux_init(qmp);
@@ -4502,8 +4522,7 @@ static int qmp_combo_typec_mux_set(struct typec_mux_dev *mux, struct typec_mux_s
 	qmp->qmpphy_mode = new_mode;
 
 	if (qmp->init_count) {
-		if (qmp->usb_init_count)
-			qmp_combo_usb_power_off(qmp->usb_phy);
+		qmp_combo_usb_power_off(qmp->usb_phy);
 
 		if (qmp->dp_init_count)
 			writel(DP_PHY_PD_CTL_PSR_PWRDN, qmp->dp_dp_phy + QSERDES_DP_PHY_PD_CTL);
@@ -4513,21 +4532,20 @@ static int qmp_combo_typec_mux_set(struct typec_mux_dev *mux, struct typec_mux_s
 		/* Now everything's powered down, power up the right PHYs */
 		qmp_combo_com_init(qmp, true);
 
-		if (new_mode == QMPPHY_MODE_DP_ONLY) {
-			if (qmp->usb_init_count)
-				qmp->usb_init_count--;
-		}
-
-		if (new_mode == QMPPHY_MODE_USB3DP || new_mode == QMPPHY_MODE_USB3_ONLY) {
+		/*
+		 * usb_init_count says whether the USB driver holds this PHY
+		 * initialised, so only it may change the count. Leaving the USB
+		 * half powered down for DisplayPort is a power state, not an
+		 * init state, and confusing the two used to drop the count on
+		 * the way into DisplayPort: the USB driver then exited a PHY
+		 * the count no longer knew about, powering it off a second time
+		 * and taking the count below zero.
+		 */
+		if (new_mode != QMPPHY_MODE_DP_ONLY && qmp->usb_init_count)
 			qmp_combo_usb_power_on(qmp->usb_phy);
-			if (!qmp->usb_init_count)
-				qmp->usb_init_count++;
-		}
 
-		if (new_mode == QMPPHY_MODE_DP_ONLY || new_mode == QMPPHY_MODE_USB3DP) {
-			if (qmp->dp_init_count)
-				cfg->dp_aux_init(qmp);
-		}
+		if (new_mode != QMPPHY_MODE_USB3_ONLY && qmp->dp_init_count)
+			cfg->dp_aux_init(qmp);
 	}
 
 	return 0;
