@@ -93,6 +93,15 @@ struct a6xx_gpu {
 
 	struct a6xx_gmu gmu;
 
+	/*
+	 * The frequency devfreq last asked for, remembered across runtime
+	 * suspend so the GMU-wrapper resume path can come back at the rate
+	 * devfreq actually wants. Zero until devfreq's first request, where
+	 * the resume path falls back to the fastest OPP.
+	 * Guarded by gmu.lock.
+	 */
+	unsigned long resume_freq;
+
 	struct drm_gem_object *shadow_bo;
 	uint64_t shadow_iova;
 	uint32_t *shadow;
