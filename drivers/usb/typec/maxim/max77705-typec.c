@@ -583,6 +583,19 @@ static int max77705_typec_dp_supported(struct max77705_typec *tc)
  * which has to cover a whole connection coming up: the power contract, a data
  * role swap and then the firmware's own mode discovery.
  */
+/*
+ * How long to keep trying to get DisplayPort going once something is attached,
+ * which has to cover a whole connection coming up: the power contract, a data
+ * role swap and then the firmware's own mode discovery.
+ *
+ * Ten seconds is known to be too short for a replug, where the data role swap
+ * has been measured taking the best part of a minute, and DisplayPort cannot
+ * start until the port is the DFP. Extending it is not simply a matter of a
+ * bigger number, though: this work blocks for up to a mailbox timeout at a
+ * time and runs on the shared system workqueue, so retrying for much longer
+ * needs a workqueue of its own first. Tried without one, the phone reached the
+ * network and never finished booting.
+ */
 #define MAX77705_DP_TRIES		40
 #define MAX77705_DP_RETRY_MS		250
 /* Retries between repeats of the enable, so it is asked again every 2s */
@@ -648,8 +661,8 @@ static void max77705_typec_dp_sync(struct max77705_typec *tc)
 
 		/*
 		 * A connection takes a while to reach mode discovery, so keep
-		 * looking for a bounded time rather than deciding on the one
-		 * glance taken when it attached.
+		 * looking rather than deciding on the one glance taken when it
+		 * attached.
 		 */
 		if (!tc->dp_conf && tc->dp_tries++ < MAX77705_DP_TRIES) {
 			queue_delayed_work(system_wq, &tc->altmode_work,
@@ -868,6 +881,7 @@ static irqreturn_t max77705_typec_irq(int irq, void *data)
 {
 	struct max77705_typec *tc = data;
 	u8 status[MAX77705_INT_COUNT];
+	u8 news;
 	int ret;
 
 	/*
@@ -915,8 +929,33 @@ static irqreturn_t max77705_typec_irq(int irq, void *data)
 	 * one forward instead would let a burst of interrupts cancel the retry
 	 * backoff over and over, which turns the retry into a tight loop
 	 * hammering the chip.
+	 *
+	 * Only the bits actually asked for count as news, and the command
+	 * response is not among them however it arrives: it is this driver's
+	 * own doing, it is answered above, and it says nothing about the
+	 * connection. Treating it as a reason to go and look closes a loop --
+	 * reading the state posts a command, the command answers with this
+	 * interrupt, and that sends us back to read the state. Measured, that
+	 * ran about once every fifteen milliseconds for as long as a display
+	 * was attached.
+	 *
+	 * Masking each register down to those bits also matters, because a
+	 * masked bit still latches here even though it raised nothing. The
+	 * chip sets a spurious VBUS bit constantly, so anything looking at
+	 * whole registers sees news on every single interrupt.
 	 */
-	if (max77705_typec_dp_attached(tc)) {
+	news = (status[MAX77705_INT_CC] & (MAX77705_CC_INT_CCSTAT |
+					   MAX77705_CC_INT_CCPINSTAT |
+					   MAX77705_CC_INT_CCISTAT)) |
+	       (status[MAX77705_INT_PD] & (MAX77705_PD_INT_ATTENTION |
+					   MAX77705_PD_INT_DP_CONFIGURE |
+					   MAX77705_PD_INT_DP_STATUS)) |
+	       (status[MAX77705_INT_VDM] & (MAX77705_VDM_INT_DISCOVER_ID |
+					    MAX77705_VDM_INT_DISCOVER_SVIDS |
+					    MAX77705_VDM_INT_DISCOVER_MODES |
+					    MAX77705_VDM_INT_ENTER_MODE));
+
+	if (news && max77705_typec_dp_attached(tc)) {
 		scoped_guard(spinlock, &tc->event_lock) {
 			tc->vdm_events |= status[MAX77705_INT_VDM];
 			tc->pd_events |= status[MAX77705_INT_PD];
