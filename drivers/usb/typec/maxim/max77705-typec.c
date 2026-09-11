@@ -24,6 +24,7 @@
 #include <linux/unaligned.h>
 #include <linux/usb/pd_vdo.h>
 #include <linux/usb/role.h>
+#include <linux/power_supply.h>
 #include <linux/usb/typec.h>
 #include <linux/usb/typec_dp.h>
 #include <linux/usb/typec_mux.h>
@@ -42,6 +43,14 @@ struct max77705_typec {
 	struct typec_switch *sw;
 	struct typec_mux *mux;
 	struct usb_role_switch *role_sw;
+
+	/*
+	 * What this port is entitled to draw, published for a charger to read
+	 * rather than pushed at one, the way tcpm does it.
+	 */
+	struct power_supply *psy;
+	unsigned int psy_current_max;
+	bool psy_online;
 
 	/* the "connector" child, which owns the port graph */
 	struct fwnode_handle *fwnode;
@@ -866,6 +875,80 @@ max77705_typec_pwr_opmode(unsigned int cc_status0)
 	}
 }
 
+/*
+ * A charger has no way of its own to learn what the cable is good for, and the
+ * chip's own current limit comes up at a default far below what a Type-C
+ * source advertises -- low enough that a busy system drains the battery while
+ * plugged in. Publish the entitlement as a power supply and let the charger
+ * read it, which is how tcpm feeds max77759 and the pattern a charger driver
+ * already knows to look for.
+ */
+static enum power_supply_property max77705_typec_psy_props[] = {
+	POWER_SUPPLY_PROP_ONLINE,
+	POWER_SUPPLY_PROP_CURRENT_MAX,
+};
+
+static int max77705_typec_psy_get_prop(struct power_supply *psy,
+				       enum power_supply_property psp,
+				       union power_supply_propval *val)
+{
+	struct max77705_typec *tc = power_supply_get_drvdata(psy);
+
+	switch (psp) {
+	case POWER_SUPPLY_PROP_ONLINE:
+		val->intval = tc->psy_online;
+		break;
+	case POWER_SUPPLY_PROP_CURRENT_MAX:
+		val->intval = tc->psy_current_max;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static const struct power_supply_desc max77705_typec_psy_desc = {
+	.name		= "max77705-typec-source",
+	.type		= POWER_SUPPLY_TYPE_USB,
+	.properties	= max77705_typec_psy_props,
+	.num_properties	= ARRAY_SIZE(max77705_typec_psy_props),
+	.get_property	= max77705_typec_psy_get_prop,
+};
+
+static void max77705_typec_psy_update(struct max77705_typec *tc, bool online,
+				      enum typec_pwr_opmode mode)
+{
+	unsigned int current_max;
+
+	switch (mode) {
+	case TYPEC_PWR_MODE_3_0A:
+		current_max = 3000000;
+		break;
+	case TYPEC_PWR_MODE_1_5A:
+		current_max = 1500000;
+		break;
+	default:
+		current_max = 500000;
+		break;
+	}
+
+	if (!online)
+		current_max = 0;
+
+	/*
+	 * The CC status is re-read on every interrupt, so only an actual
+	 * change is worth waking a consumer for.
+	 */
+	if (tc->psy_online == online && tc->psy_current_max == current_max)
+		return;
+
+	tc->psy_online = online;
+	tc->psy_current_max = current_max;
+
+	power_supply_changed(tc->psy);
+}
+
 static void max77705_typec_partner_remove(struct max77705_typec *tc)
 {
 	if (!tc->partner)
@@ -934,9 +1017,15 @@ static int max77705_typec_sync_cc(struct max77705_typec *tc)
 	 * A source settles its advertised current after the attach, so take
 	 * the value on every pass rather than once when the partner appears.
 	 */
-	if (state == MAX77705_CC_SINK)
-		typec_set_pwr_opmode(tc->port,
-				     max77705_typec_pwr_opmode(cc_status0));
+	if (state == MAX77705_CC_SINK) {
+		enum typec_pwr_opmode mode =
+			max77705_typec_pwr_opmode(cc_status0);
+
+		typec_set_pwr_opmode(tc->port, mode);
+		max77705_typec_psy_update(tc, true, mode);
+	} else {
+		max77705_typec_psy_update(tc, false, TYPEC_PWR_MODE_USB);
+	}
 
 	if (state == tc->cc_state)
 		return 0;
@@ -1114,6 +1203,7 @@ static int max77705_typec_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct i2c_client *parent = to_i2c_client(dev->parent);
+	struct power_supply_config psy_cfg = {};
 	struct max77705_typec *tc;
 	struct i2c_client *i2c;
 	unsigned int rev;
@@ -1180,6 +1270,16 @@ static int max77705_typec_probe(struct platform_device *pdev)
 	if (IS_ERR(tc->hpd_gpio))
 		return dev_err_probe(dev, PTR_ERR(tc->hpd_gpio),
 				     "failed to acquire the HPD gpio\n");
+
+	psy_cfg.drv_data = tc;
+	psy_cfg.fwnode = dev_fwnode(dev);
+	tc->psy = devm_power_supply_register(dev, &max77705_typec_psy_desc,
+					     &psy_cfg);
+	if (IS_ERR(tc->psy)) {
+		ret = dev_err_probe(dev, PTR_ERR(tc->psy),
+				    "failed to register the source supply\n");
+		goto err_fwnode_put;
+	}
 
 	/*
 	 * Allocated before anything can report HPD, and only published once
