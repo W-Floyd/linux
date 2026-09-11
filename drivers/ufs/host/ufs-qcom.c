@@ -1767,6 +1767,9 @@ static int ufs_qcom_set_clk_40ns_cycles(struct ufs_hba *hba,
 	case UNIPRO_CORE_CLK_FREQ_201_5_MHZ:
 		cycles_in_40ns = 8;
 		break;
+	case UNIPRO_CORE_CLK_FREQ_200_MHZ:
+		cycles_in_40ns = 8;
+		break;
 	case UNIPRO_CORE_CLK_FREQ_150_MHZ:
 		cycles_in_40ns = 6;
 		break;
@@ -1775,6 +1778,9 @@ static int ufs_qcom_set_clk_40ns_cycles(struct ufs_hba *hba,
 		break;
 	case  UNIPRO_CORE_CLK_FREQ_75_MHZ:
 		cycles_in_40ns = 3;
+		break;
+	case  UNIPRO_CORE_CLK_FREQ_50_MHZ:
+		cycles_in_40ns = 2;
 		break;
 	case UNIPRO_CORE_CLK_FREQ_37_5_MHZ:
 		cycles_in_40ns = 2;
