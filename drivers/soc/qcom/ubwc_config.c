@@ -22,6 +22,10 @@ static const struct qcom_ubwc_cfg_data ubwc_0_0_hbb15 = {
 	.highest_bank_bit = 15,
 };
 
+static const struct qcom_ubwc_cfg_data ubwc_1_0_hbb13 = {
+	.ubwc_enc_version = UBWC_1_0,
+	.highest_bank_bit = 13,
+};
 static const struct qcom_ubwc_cfg_data ubwc_1_0_hbb14 = {
 	.ubwc_enc_version = UBWC_1_0,
 	.highest_bank_bit = 14,
@@ -106,6 +110,12 @@ static const struct qcom_ubwc_cfg_data milos_data = {
 };
 
 static const struct of_device_id qcom_ubwc_configs[] __maybe_unused = {
+	/*
+	 * Per-board, not per-SoC: measured on this handset as 13 clean /
+	 * 14 corrupt, and khaje is not otherwise described here. See the
+	 * commit log before generalising it to qcom,sm6225.
+	 */
+	{ .compatible = "motorola,fogona", .data = &ubwc_1_0_hbb13 },
 	{ .compatible = "qcom,apq8016", .data = &no_ubwc_data },
 	{ .compatible = "qcom,apq8026", .data = &no_ubwc_data },
 	{ .compatible = "qcom,apq8074", .data = &no_ubwc_data },
