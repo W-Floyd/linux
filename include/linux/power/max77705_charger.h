@@ -188,6 +188,11 @@ struct max77705_charger_data {
 	struct workqueue_struct *wqueue;
 	struct work_struct	chgin_work;
 	struct power_supply	*psy_chg;
+
+	/* The Type-C port's advertised entitlement, once something reports it */
+	struct notifier_block	nb;
+	struct work_struct	typec_work;
+	struct power_supply	*typec_psy;
 };
 
 #endif /* __MAX77705_CHARGER_H */

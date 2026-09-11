@@ -456,6 +456,80 @@ static int max77705_set_property(struct power_supply *psy,
 	return err;
 };
 
+/*
+ * The chip's input limit comes up at a default well below what a Type-C source
+ * offers, and nothing in the charger can discover the difference. The Type-C
+ * driver publishes what the port is entitled to draw, so take it from there
+ * once it says so -- the same way max77759 consumes tcpm's supply.
+ */
+static void max77705_charger_typec_work(struct work_struct *work)
+{
+	struct max77705_charger_data *chg = container_of(work,
+			struct max77705_charger_data, typec_work);
+	union power_supply_propval current_max, online;
+	int err;
+
+	err = power_supply_get_property(chg->typec_psy,
+					POWER_SUPPLY_PROP_ONLINE, &online);
+	if (err) {
+		dev_err(chg->dev, "failed to read the source's online state: %d\n",
+			err);
+		return;
+	}
+
+	err = power_supply_get_property(chg->typec_psy,
+					POWER_SUPPLY_PROP_CURRENT_MAX,
+					&current_max);
+	if (err) {
+		dev_err(chg->dev, "failed to read the source's current limit: %d\n",
+			err);
+		return;
+	}
+
+	/*
+	 * Nothing attached, or attached with nothing to offer yet. Leave the
+	 * limit where it is rather than winding it down and back up across
+	 * every detach.
+	 */
+	if (!online.intval || !current_max.intval)
+		return;
+
+	err = max77705_set_integer(chg, MAX77705_CHG_CHGIN_LIM,
+				   MAX77705_CURRENT_CHGIN_MIN,
+				   MAX77705_CURRENT_CHGIN_MAX,
+				   MAX77705_CURRENT_CHGIN_STEP,
+				   current_max.intval);
+	if (err)
+		dev_err(chg->dev, "failed to set the input current limit: %d\n",
+			err);
+	else
+		dev_dbg(chg->dev, "input current limit set to %d uA\n",
+			current_max.intval);
+}
+
+static int max77705_charger_psy_changed(struct notifier_block *nb,
+					unsigned long evt, void *data)
+{
+	struct max77705_charger_data *chg = container_of(nb,
+			struct max77705_charger_data, nb);
+	static const char *psy_name = "max77705-typec-source";
+	struct power_supply *psy = data;
+
+	if (evt != PSY_EVENT_PROP_CHANGED ||
+	    strcmp(psy->desc->name, psy_name))
+		return NOTIFY_OK;
+
+	chg->typec_psy = psy;
+	schedule_work(&chg->typec_work);
+
+	return NOTIFY_OK;
+}
+
+static void max77705_charger_unreg_notifier(void *nb)
+{
+	power_supply_unreg_notifier(nb);
+}
+
 static int max77705_property_is_writeable(struct power_supply *psy,
 					  enum power_supply_property psp)
 {
@@ -669,6 +743,22 @@ static int max77705_charger_probe(struct i2c_client *i2c)
 					NULL, max77705_aicl_irq,
 					IRQF_TRIGGER_NONE,
 					"aicl-irq", chg);
+	if (ret)
+		return ret;
+
+	ret = devm_work_autocancel(dev, &chg->typec_work,
+				   max77705_charger_typec_work);
+	if (ret)
+		return ret;
+
+	chg->nb.notifier_call = max77705_charger_psy_changed;
+	ret = power_supply_reg_notifier(&chg->nb);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				     "failed to register the supply notifier\n");
+
+	ret = devm_add_action_or_reset(dev, max77705_charger_unreg_notifier,
+				       &chg->nb);
 	if (ret)
 		return ret;
 
