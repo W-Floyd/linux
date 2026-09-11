@@ -29,15 +29,34 @@
 
 	chosen {
 		/*
-		 * *_ignore_unused is load-bearing on this board, not tidiness.
-		 * ABL hands over with the panel lit and its clocks/rails
-		 * running, and simple-framebuffer does not claim any of them --
-		 * so the late-boot "disable everything unclaimed" passes turn
-		 * the display off. Observed exactly that: Tux drawn, then black.
+		 * The two remaining *_ignore_unused are inherited from the
+		 * simple-framebuffer era: ABL handed over with the panel lit
+		 * and its clocks/rails running, simplefb claimed none of them,
+		 * and the late-boot "disable everything unclaimed" passes then
+		 * turned the display off -- Tux drawn, then black.
 		 *
-		 * The board makes it worse than usual: LCD_1.8V is VREG_L9A,
-		 * which the PM6225 datasheet says must never be turned off (it
-		 * also carries VDD_PX31..36 and LPDDR4x_VDD1).
+		 * regulator_ignore_unused was dropped 2026-09-10 and is NOT
+		 * coming back. That premise no longer holds for rails, because
+		 * the panel driver claims its own: icnl9916_panel_prepare()
+		 * calls regulator_bulk_enable() on vddio/avdd/avee and
+		 * _unprepare() releases them. Measured on hardware without the
+		 * flag -- lcd_panel_avdd and lcd_panel_avee sit at use=0 while
+		 * blanked, regulator_init_complete disables them, and the next
+		 * prepare() turns them straight back on. Observed 0 -> 1 within
+		 * one boot, backlight back to 1637. The other rails the pass
+		 * touches are the ath10k ones, which have no driver holding
+		 * them because WiFi does not work yet, and dummy regulators.
+		 *
+		 * L9A (LCD_1.8V) is a separate matter and was never what the
+		 * flag protected: the PM6225 datasheet says it must never be
+		 * turned off (it also carries VDD_PX31..36 and LPDDR4x_VDD1),
+		 * and it is already regulator-always-on in this DTS, which is
+		 * what actually keeps it up.
+		 *
+		 * clk_ignore_unused and pd_ignore_unused are UNTESTED. Drop
+		 * them one at a time, not together -- they guard different
+		 * subsystems, and unlike the rails there is no equivalent
+		 * measurement yet showing a driver claims what ABL left on.
 		 *
 		 * androidboot.slot_suffix is not for Android's benefit: it is
 		 * how msm-firmware-loader finds the slotted partitions. Its
@@ -48,7 +67,7 @@
 		 * provides no firmware at all. Hardcoded because slot A is
 		 * active; installing qbootctl would track the real slot.
 		 */
-		bootargs = "console=tty0 loglevel=7 panic=0 fbcon=map:0,font:6x10 clk_ignore_unused pd_ignore_unused regulator_ignore_unused pmos.nosplash plymouth.enable=0 ignore_loglevel rdinit=/init.pmos androidboot.slot_suffix=_a";
+		bootargs = "console=tty0 loglevel=7 panic=0 fbcon=map:0,font:6x10 clk_ignore_unused pd_ignore_unused pmos.nosplash plymouth.enable=0 ignore_loglevel rdinit=/init.pmos androidboot.slot_suffix=_a";
 	};
 
 	/*
