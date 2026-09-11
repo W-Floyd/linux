@@ -888,7 +888,7 @@ static const struct msm_gpio_wakeirq_map sm6225_mpm_map[] = {
 };
 
 static const int khaje_reserved_gpios[] = {
-	0, 1, 2, 3, -1
+	14, 15, 16, 17, -1
 };
 
 static const struct msm_pinctrl_soc_data sm6225_tlmm = {
