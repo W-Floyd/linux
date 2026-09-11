@@ -2272,6 +2272,16 @@ static int clk_zonda_pll_set_rate(struct clk_hw *hw, unsigned long rate,
 	if (!clk_hw_is_enabled(hw))
 		return 0;
 
+	/*
+	 * A PLL that supports dynamic update latches the new L and ALPHA
+	 * through the PLL_UPDATE handshake and stays locked across the change.
+	 * Without it the only option is to wait for the PLL to re-lock of its
+	 * own accord, which does not happen reliably while the PLL is running
+	 * and clocking a consumer.
+	 */
+	if (pll->flags & SUPPORTS_DYNAMIC_UPDATE)
+		return __clk_alpha_pll_update_latch(pll);
+
 	/* Wait before polling for the frequency latch */
 	udelay(5);
 
