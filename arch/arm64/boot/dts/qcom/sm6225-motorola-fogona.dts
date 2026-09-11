@@ -53,10 +53,28 @@
 		 * and it is already regulator-always-on in this DTS, which is
 		 * what actually keeps it up.
 		 *
-		 * clk_ignore_unused and pd_ignore_unused are UNTESTED. Drop
-		 * them one at a time, not together -- they guard different
-		 * subsystems, and unlike the rails there is no equivalent
-		 * measurement yet showing a driver claims what ABL left on.
+		 * pd_ignore_unused was dropped 2026-09-11, also tested. Only
+		 * three domains were at risk -- hlos1_vote_mm_snoc_mmu_tbu_rt,
+		 * _nrt and hlos1_vote_turing_mmu_tbu0 -- all on with no DT node
+		 * referencing them, so unlike the display clocks they could not
+		 * gain a consumer by waking the screen. All four TBU GDSCs are
+		 * VOTABLE, meaning the HLOS vote is one of several and dropping
+		 * it does not force the block off; hlos1_vote_turing_mmu_tbu1
+		 * was already off before the change with nothing broken, which
+		 * is the precedent. Measured without the flag: genpd reports
+		 * "Disabling unused power domains", all four TBUs read off-0,
+		 * mdss_gdsc/gcc_usb30_prim/gcc_ufs_phy stay on because they
+		 * have real consumers, and display, GPU, Type-C, UFS and SSH
+		 * are all unaffected with zero SMMU faults.
+		 *
+		 * clk_ignore_unused is UNTESTED and should stay for now. It is
+		 * a much worse bet than the other two were: 55 clocks are
+		 * hardware-enabled with no consumer, spanning USB3 PHY, SDCC,
+		 * QUP, CPU and -- the real problem -- snoc/ipa/ce1 interconnect
+		 * and RPM votes that no mainline driver on this port claims.
+		 * Gating interconnect hangs the bus with no diagnostic, which
+		 * is the same failure class as the adreno SMMU bug. It becomes
+		 * droppable when those subsystems have drivers, not before.
 		 *
 		 * androidboot.slot_suffix is not for Android's benefit: it is
 		 * how msm-firmware-loader finds the slotted partitions. Its
@@ -67,7 +85,7 @@
 		 * provides no firmware at all. Hardcoded because slot A is
 		 * active; installing qbootctl would track the real slot.
 		 */
-		bootargs = "console=tty0 loglevel=7 panic=0 fbcon=map:0,font:6x10 clk_ignore_unused pd_ignore_unused pmos.nosplash plymouth.enable=0 ignore_loglevel rdinit=/init.pmos androidboot.slot_suffix=_a";
+		bootargs = "console=tty0 loglevel=7 panic=0 fbcon=map:0,font:6x10 clk_ignore_unused pmos.nosplash plymouth.enable=0 ignore_loglevel rdinit=/init.pmos androidboot.slot_suffix=_a";
 	};
 
 	/*
