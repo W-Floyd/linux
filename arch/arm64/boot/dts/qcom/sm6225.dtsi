@@ -1876,7 +1876,7 @@
 			status = "disabled";
 
 			mdp: display-controller@5e01000 {
-				compatible = "qcom,sm6375-dpu";
+				compatible = "qcom,sm6225-dpu";
 				reg = <0x0 0x05e01000 0x0 0x8f000>,
 				      <0x0 0x05eb0000 0x0 0x2008>;
 				reg-names = "mdp", "vbif";
