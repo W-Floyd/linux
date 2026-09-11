@@ -632,7 +632,19 @@
 		};
 
 		tlmm: pinctrl@500000 {
-			compatible = "qcom,sm6115-tlmm";
+			/*
+			 * khaje, not bengal. The pin tables are not
+			 * interchangeable: khaje inserts usb2phy_ac at mux slot
+			 * 2 of GPIO0, shifting m_voc, ddr_bist, phase_flag and
+			 * everything after it down one slot, and GPIOs 35, 36,
+			 * 47 and 48 differ too. Mux slots are positional -- the
+			 * driver writes the function's index -- so bengal's
+			 * table silently puts khaje pins in the wrong mode.
+			 * Confirmed against Qualcomm's own pinctrl-khaje.c,
+			 * which matches pinctrl-sm6225.c and not
+			 * pinctrl-sm6115.c.
+			 */
+			compatible = "qcom,sm6225-tlmm";
 			reg = <0x0 0x00500000 0x0 0x400000>,
 			      <0x0 0x00900000 0x0 0x400000>,
 			      <0x0 0x00d00000 0x0 0x400000>;
