@@ -516,6 +516,20 @@
 	 *             maximum-speed = "high-speed";
 	 *             dr_mode = "peripheral";
 	 *     };
+	 *
+	 * high-speed and the usb2-phy-only phys list are NOT just inherited from
+	 * j606f: this board physically cannot do SuperSpeed. USB0_SS_* and
+	 * USB0_DP_AUX_* appear in the SoC pinout with no routing, the test-point
+	 * bank breaks out only CC1/CC2 and the HS pair, and the eLDO in the
+	 * power-on sequence gates SuperSpeed DP that is not there
+	 * (FOGONA-BOARD.md 3 and 4). The SoC offers USB 3.1 and khaje-usb.dtsi
+	 * asks for "super-speed", but khaje is the SoC, not this handset.
+	 *
+	 * So do not "restore" SuperSpeed here. usb_qmpphy is already disabled in
+	 * sm6225.dtsi and must stay that way; ABL still leaves its clocks
+	 * running, which is why gcc_usb3_prim_phy_* show up hardware-enabled
+	 * with no consumer in clk_summary. Those are safe to gate -- they feed a
+	 * PHY whose outputs go nowhere.
 	 */
 	/delete-property/ usb-role-switch;
 	maximum-speed = "high-speed";
