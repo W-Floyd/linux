@@ -20,7 +20,9 @@ properties:
   compatible:
     oneOf:
       - items:
-          - const: qcom,sm6115-venus
+          - enum:
+              - qcom,sm6115-venus
+              - qcom,sm6225-venus
           - const: qcom,qcm2290-venus
       - const: qcom,qcm2290-venus
 
