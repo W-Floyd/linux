@@ -1715,6 +1715,11 @@
 
 			iommus = <&adreno_smmu 0 1>,
 				 <&adreno_smmu 2 0>;
+
+			interconnects = <&bimc MASTER_GRAPHICS_3D RPM_ALWAYS_TAG
+					 &bimc SLAVE_EBI_CH0 RPM_ALWAYS_TAG>;
+			interconnect-names = "gfx-mem";
+
 			operating-points-v2 = <&gpu_opp_table>;
 			power-domains = <&rpmpd SM6115_VDDCX>;
 			qcom,gmu = <&gmu_wrapper>;
@@ -1734,42 +1739,49 @@
 
 				opp-320000000 {
 					opp-hz = /bits/ 64 <320000000>;
+					opp-peak-kBps = <4273437>;
 					required-opps = <&rpmpd_opp_low_svs>;
 					opp-supported-hw = <0x1f>;
 				};
 
 				opp-465000000 {
 					opp-hz = /bits/ 64 <465000000>;
+					opp-peak-kBps = <6000000>;
 					required-opps = <&rpmpd_opp_svs>;
 					opp-supported-hw = <0x1f>;
 				};
 
 				opp-600000000 {
 					opp-hz = /bits/ 64 <600000000>;
+					opp-peak-kBps = <7945312>;
 					required-opps = <&rpmpd_opp_svs_plus>;
 					opp-supported-hw = <0x1f>;
 				};
 
 				opp-745000000 {
 					opp-hz = /bits/ 64 <745000000>;
+					opp-peak-kBps = <12148437>;
 					required-opps = <&rpmpd_opp_nom>;
 					opp-supported-hw = <0xf>;
 				};
 
 				opp-785000000 {
 					opp-hz = /bits/ 64 <785000000>;
+					opp-peak-kBps = <12148437>;
 					required-opps = <&rpmpd_opp_nom>;
 					opp-supported-hw = <0xf>;
 				};
 
 				opp-820000000 {
 					opp-hz = /bits/ 64 <820000000>;
+					opp-peak-kBps = <14093750>;
 					required-opps = <&rpmpd_opp_nom_plus>;
 					opp-supported-hw = <0x7>;
 				};
 
 				opp-900000000 {
 					opp-hz = /bits/ 64 <900000000>;
+					opp-peak-kBps = <14093750>;
 					required-opps = <&rpmpd_opp_turbo>;
 					opp-supported-hw = <0x7>;
 				};
@@ -1777,24 +1789,28 @@
 				/* Speed bin 2 can reach 950 Mhz instead of 980 like the rest. */
 				opp-950000000 {
 					opp-hz = /bits/ 64 <950000000>;
+					opp-peak-kBps = <14093750>;
 					required-opps = <&rpmpd_opp_turbo_plus>;
 					opp-supported-hw = <0x4>;
 				};
 
 				opp-980000000 {
 					opp-hz = /bits/ 64 <980000000>;
+					opp-peak-kBps = <14093750>;
 					required-opps = <&rpmpd_opp_turbo_plus>;
 					opp-supported-hw = <0x3>;
 				};
 
 				opp-1025000000 {
 					opp-hz = /bits/ 64 <1025000000>;
+					opp-peak-kBps = <14093750>;
 					required-opps = <&rpmpd_opp_turbo>;
 					opp-supported-hw = <0x7>;
 				};
 
 				opp-1114800000 {
 					opp-hz = /bits/ 64 <1114800000>;
+					opp-peak-kBps = <16343750>;
 					required-opps = <&rpmpd_opp_turbo_plus>;
 					opp-supported-hw = <0x3>;
 				};
