@@ -520,8 +520,18 @@
 		interrupts-extended = <&tlmm 80 IRQ_TYPE_EDGE_FALLING>;
 		touchscreen-reset-gpios = <&tlmm 86 GPIO_ACTIVE_LOW>;
 
+		/*
+		 * ts_int_default only. ts_reset_default muxes GPIO_86, which is
+		 * touchscreen-reset-gpios above -- the same GPIO-vs-pinctrl
+		 * collision that killed the avdd regulator and then the panel
+		 * on 7.3. Not yet observed failing here only because touch is a
+		 * module and had not probed; it would fail identically.
+		 *
+		 * ts_int_default is GPIO_80, used via interrupts-extended
+		 * rather than as a GPIO, so nothing claims the pin and it stays.
+		 */
 		pinctrl-names = "default";
-		pinctrl-0 = <&ts_int_default>, <&ts_reset_default>;
+		pinctrl-0 = <&ts_int_default>;
 	};
 };
 
@@ -713,8 +723,29 @@
 		enable-active-high;
 		regulator-boot-on;
 
-		pinctrl-names = "default";
-		pinctrl-0 = <&panel_avdd_default>;
+		/*
+		 * Deliberately NO pinctrl-0. This node used to carry
+		 * `pinctrl-0 = <&panel_avdd_default>`, a group that muxes the
+		 * same GPIO_111 this regulator drives. On 6.14 that was
+		 * tolerated; on 7.3 pinctrl refuses to claim a pin a GPIO
+		 * consumer already holds, and the whole probe fails:
+		 *
+		 *   sm6225-tlmm 500000.pinctrl: pin GPIO_111 already requested
+		 *     by regulator-lcd-avdd; cannot claim for 500000.pinctrl:623
+		 *   reg-fixed-voltage regulator-lcd-avdd: error -EINVAL:
+		 *     can't get GPIO
+		 *
+		 * That took the panel down with it -- the DSI host sat in
+		 * "deferred probe pending: supplier regulator-lcd-avdd not
+		 * ready" forever, so no connector, no card1-DSI-1, and the
+		 * unused-regulator sweep then switched lcd_panel_avee off at
+		 * ~31 s, which is the backlight going out.
+		 *
+		 * lcd_panel_avee below is the proof of the right shape: it has
+		 * a gpio and no pinctrl-0, and it probes. Requesting a TLMM pin
+		 * as a GPIO already muxes it to the gpio function, so the group
+		 * only ever added drive-strength/bias -- not worth the probe.
+		 */
 	};
 
 	lcd_panel_avee: regulator-lcd-avee {
@@ -748,8 +779,21 @@
 		avdd-supply = <&lcd_panel_avdd>;
 		avee-supply = <&lcd_panel_avee>;
 
+		/*
+		 * te_active only. mdss_dsi_active muxes GPIO_82, which is the
+		 * reset-gpios line above -- same collision as the avdd
+		 * regulator, and on 7.3 it fails the panel's whole probe:
+		 *
+		 *   pin GPIO_82 already requested by 5e94000.dsi.0; cannot
+		 *     claim for 500000.pinctrl:594
+		 *   panel-icnl9916-720x1600: error -EINVAL: Failed to get
+		 *     reset GPIO
+		 *
+		 * te_active is GPIO_81 (tear-effect), which no GPIO consumer
+		 * claims, so it stays.
+		 */
 		pinctrl-names = "default";
-		pinctrl-0 = <&te_active &mdss_dsi_active>;
+		pinctrl-0 = <&te_active>;
 
 		port {
 			panel_in: endpoint {
