@@ -111,6 +111,36 @@
 	};
 
 	/*
+	 * Persistent kernel log across reboots. CONFIG_PSTORE_RAM is already
+	 * enabled, but without a region the driver is inert -- which is why an
+	 * unexplained reboot leaves nothing behind. That matters more than
+	 * usual here: every boot is a manual `fastboot boot`, so a crash that
+	 * explains itself is worth a lot.
+	 *
+	 * Address and sizes are Motorola's own for this SoC, from
+	 * kernel-msm/include/dt-bindings/moto/moto-mem-reserve.h
+	 * (RAMOOPS_BASE_ADDR 0xaf000000, console 0x40000, record 0x3f800,
+	 * total 0xbf800), used by khaje-moto-common-overlay.dtsi. So the
+	 * bootloader already treats it as scratch and nothing else claims it;
+	 * our own highest reserved region is rmtfs at 0x89b01000, far below.
+	 *
+	 * No `no-map`: ramoops needs the region mapped to read it back, and
+	 * every in-tree arm64 qcom example omits it. pmsg-size is omitted too
+	 * because CONFIG_PSTORE_PMSG is off -- the space then goes to extra
+	 * dump records instead.
+	 *
+	 * After a crash the previous boot's log is at /sys/fs/pstore/.
+	 */
+	reserved-memory {
+		ramoops@af000000 {
+			compatible = "ramoops";
+			reg = <0x0 0xaf000000 0x0 0xbf800>;
+			console-size = <0x40000>;
+			record-size = <0x3f800>;
+		};
+	};
+
+	/*
 	 * The gauge reports state of charge as a percentage and knows nothing
 	 * about pack size, so the design capacity has to come from here.
 	 * 5000 mAh matches stock's fcc_design of 0x1388 for all three packs.
