@@ -308,11 +308,22 @@ void drm_kms_helper_poll_enable(struct drm_device *dev)
 	    !drm_kms_helper_poll || dev->mode_config.poll_running)
 		return;
 
+	/*
+	 * Say polling is running before enabling hot plug detection, not
+	 * after. A bridge may report a status change from inside its own
+	 * hpd_enable -- replaying one that arrived before anything was
+	 * listening is a reason to -- and that notification is delivered
+	 * holding the bridge's hot plug mutex. It reaches this function again
+	 * through the connector probe that follows, and with the flag still
+	 * clear it would walk into drm_bridge_hpd_enable() a second time and
+	 * deadlock on that mutex. Setting it first makes the second call
+	 * return here instead.
+	 */
+	dev->mode_config.poll_running = true;
+
 	if (drm_kms_helper_enable_hpd(dev) ||
 	    dev->mode_config.delayed_event)
 		reschedule_output_poll_work(dev);
-
-	dev->mode_config.poll_running = true;
 }
 EXPORT_SYMBOL(drm_kms_helper_poll_enable);
 
