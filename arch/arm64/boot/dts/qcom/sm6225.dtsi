@@ -1749,6 +1749,15 @@
 			gpu_opp_table: opp-table {
 				compatible = "operating-points-v2";
 
+				/*
+				 * khaje's own table, per khaje-gpu.dtsi. The
+				 * 745/820/900/950/980 MHz entries that used to be
+				 * here are bengal's (bengal-gpu.dtsi) and appear
+				 * nowhere in khaje's: khaje-gpu.dtsi deletes the
+				 * inherited qcom,gpu-pwrlevel-bins outright and
+				 * defines 320/465/600/785/1025/1114.8/1260 only.
+				 */
+
 				opp-320000000 {
 					opp-hz = /bits/ 64 <320000000>;
 					opp-peak-kBps = <4273437>;
@@ -1770,47 +1779,11 @@
 					opp-supported-hw = <0x1f>;
 				};
 
-				opp-745000000 {
-					opp-hz = /bits/ 64 <745000000>;
-					opp-peak-kBps = <12148437>;
-					required-opps = <&rpmpd_opp_nom>;
-					opp-supported-hw = <0xf>;
-				};
-
 				opp-785000000 {
 					opp-hz = /bits/ 64 <785000000>;
 					opp-peak-kBps = <12148437>;
 					required-opps = <&rpmpd_opp_nom>;
 					opp-supported-hw = <0xf>;
-				};
-
-				opp-820000000 {
-					opp-hz = /bits/ 64 <820000000>;
-					opp-peak-kBps = <14093750>;
-					required-opps = <&rpmpd_opp_nom_plus>;
-					opp-supported-hw = <0x7>;
-				};
-
-				opp-900000000 {
-					opp-hz = /bits/ 64 <900000000>;
-					opp-peak-kBps = <14093750>;
-					required-opps = <&rpmpd_opp_turbo>;
-					opp-supported-hw = <0x7>;
-				};
-
-				/* Speed bin 2 can reach 950 Mhz instead of 980 like the rest. */
-				opp-950000000 {
-					opp-hz = /bits/ 64 <950000000>;
-					opp-peak-kBps = <14093750>;
-					required-opps = <&rpmpd_opp_turbo_plus>;
-					opp-supported-hw = <0x4>;
-				};
-
-				opp-980000000 {
-					opp-hz = /bits/ 64 <980000000>;
-					opp-peak-kBps = <14093750>;
-					required-opps = <&rpmpd_opp_turbo_plus>;
-					opp-supported-hw = <0x3>;
 				};
 
 				opp-1025000000 {
