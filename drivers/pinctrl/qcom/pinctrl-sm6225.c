@@ -740,6 +740,7 @@ static const struct pinfunction sm6225_functions[] = {
 	MSM_PIN_FUNCTION(uim2_data),
 	MSM_PIN_FUNCTION(uim2_present),
 	MSM_PIN_FUNCTION(uim2_reset),
+	MSM_PIN_FUNCTION(usb2phy_ac),
 	MSM_PIN_FUNCTION(usb_phy),
 	MSM_PIN_FUNCTION(vfr_1),
 	MSM_PIN_FUNCTION(vsense_trigger),
