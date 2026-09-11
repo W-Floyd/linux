@@ -651,11 +651,6 @@ static int max77705_typec_dp_supported(struct max77705_typec *tc)
 
 /*
  * How long to keep trying to get DisplayPort going once something is attached,
- * which has to cover a whole connection coming up: the power contract, a data
- * role swap and then the firmware's own mode discovery.
- */
-/*
- * How long to keep trying to get DisplayPort going once something is attached,
  * which has to cover a whole connection coming up: the power contract, the
  * data role swap and then the firmware's own mode discovery. Quickly at first,
  * then slowly, because the interesting part is over in a moment when it works
@@ -695,17 +690,26 @@ static bool max77705_typec_is_dfp(struct max77705_typec *tc)
  *
  * Only ever asked while this port is the UFP, because the opcode is a toggle
  * rather than a request for a particular role and would otherwise give the
- * role away again. And only when the board's hot plug line says a display is
- * really there, so that plugging in a charger or a USB host never has its data
- * role meddled with -- that line is the one piece of evidence available before
- * any of the discovery that would otherwise have to come first.
+ * role away again.
+ *
+ * This used to be asked only while the board's hot plug line was high, on the
+ * grounds that it was evidence a display was really there before any discovery
+ * had run. It is not: that line follows the sink's own hot plug, which cannot
+ * rise until the mux has been switched, which is downstream of the discovery
+ * this is trying to unblock. Measured on hardware, it reads low for the whole
+ * time the port is the UFP and only goes high once the mode is entered, so the
+ * test was never once true when it mattered and the request was never sent.
+ *
+ * Asked sparingly instead, because a chip that is not going to answer costs a
+ * whole mailbox timeout every time, which would otherwise stretch each pass of
+ * the retry loop from its interval to seconds.
  */
 static void max77705_typec_want_dfp(struct max77705_typec *tc)
 {
 	u8 what = MAX77705_SWAP_DATA_ROLE;
 	int ret;
 
-	if (!tc->hpd_gpio || !gpiod_get_value_cansleep(tc->hpd_gpio))
+	if (tc->dp_tries % MAX77705_DP_REENABLE_EVERY)
 		return;
 
 	ret = max77705_typec_opcode_xfer(tc, MAX77705_OPCODE_SWAP_REQUEST,
