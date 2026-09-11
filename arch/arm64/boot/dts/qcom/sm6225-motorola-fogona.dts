@@ -141,6 +141,13 @@
 &tlmm {
 	gpio-reserved-ranges = <14 4>;
 
+	typec_int_n: typec-int-state {
+		pins = "gpio84";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
 	te_active: te-active-state {
 		pins = "gpio81";
 		function = "mdp_vsync";
@@ -493,6 +500,57 @@
  * (phy-qcom-qusb2.c, which asks for vdd/vdda-pll/vdda-phy-dpdm). Different
  * driver, different names, same three board rails.
  */
+/*
+ * Type-C CC logic: SGM7220 at 0x47 on QUP SE1, interrupt on GPIO 84. Wiring is
+ * Motorola's, from kernel-devicetree/qcom/sgm7220.dtsi via
+ * khaje-fogona-common-overlay.dtsi.
+ *
+ * "ti,tusb320" is not an approximation. The SGM7220 is a register-level
+ * TUSB320 clone: same default address, and it returns the literal signature
+ * "TUSB320" from registers 7..0, which is what tusb320_check_signature()
+ * compares against. Confirmed independently by Quectel's own SGM7220 driver,
+ * which checks the identical byte array -- and now on hardware, where the port
+ * reports a live power_operation_mode read back over i2c.
+ *
+ * This exists to give dwc3 connect/disconnect events. Without a role-switch
+ * provider dwc3 pulls up once at boot and can never recover a lost session --
+ * observed as usb0 going DOWN with the UDC reading "not attached", and
+ * unrecoverable by replugging because the VBUS event had no consumer.
+ *
+ * UFP-only on purpose: this handset is never a host, and vendor configures
+ * Try.SNK. The role switch is here to report DEVICE and NONE.
+ */
+&i2c1 {
+	status = "okay";
+
+	typec@47 {
+		compatible = "ti,tusb320";
+		reg = <0x47>;
+
+		interrupts-extended = <&tlmm 84 IRQ_TYPE_EDGE_FALLING>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&typec_int_n>;
+
+		connector {
+			compatible = "usb-c-connector";
+			label = "USB-C";
+			power-role = "sink";
+			data-role = "device";
+			typec-power-opmode = "default";
+
+			port {
+				typec_hs: endpoint {
+					remote-endpoint = <&usb_dwc3_hs>;
+				};
+			};
+		};
+	};
+};
+
+&usb_dwc3_hs {
+	remote-endpoint = <&typec_hs>;
+};
+
 &usb {
 	qcom,select-utmi-as-pipe-clk;
 	status = "okay";
@@ -500,22 +558,19 @@
 
 &usb_dwc3 {
 	/*
-	 * usb-role-switch MUST be deleted, not just overridden by dr_mode.
-	 * sm6225.dtsi sets it on this node, which makes dwc3 wait for a
-	 * role-switch provider to tell it host-or-peripheral. fogona has no such
-	 * provider in any tree we can reach: the Type-C CC controller is an
-	 * SGM7220 on APPS_I2C (FOGONA-BOARD.md 5) with no driver enabled and no
-	 * usb-connector node, so the role never arrives and no UDC is ever
-	 * registered -- /sys/class/udc stays empty even with a working phy.
+	 * usb-role-switch is KEPT, reversing what this comment used to say.
 	 *
-	 * sm6115p-lenovo-j606f.dts does exactly this for the same reason, and it
-	 * is the upstream bengal board closest to our situation:
+	 * It was deleted here for good reason: sm6225.dtsi sets it, dwc3 then
+	 * waits for a provider to say host-or-peripheral, and fogona had none --
+	 * so the role never arrived and /sys/class/udc stayed empty even with a
+	 * working phy. j606f does the same, for the same reason.
 	 *
-	 *     &usb_dwc3 {
-	 *             /delete-property/ usb-role-switch;
-	 *             maximum-speed = "high-speed";
-	 *             dr_mode = "peripheral";
-	 *     };
+	 * The SGM7220 above is that provider now. Keeping the deletion also meant
+	 * dwc3 had no connect/disconnect events at all, so a session lost to a
+	 * host suspend or bus reset could never be recovered -- usb0 went DOWN
+	 * with the UDC "not attached" and nothing, replugging included, brought
+	 * it back. On a board whose only debug channel is this port, that is
+	 * worse than the problem the deletion solved.
 	 *
 	 * high-speed and the usb2-phy-only phys list are NOT just inherited from
 	 * j606f: this board physically cannot do SuperSpeed. USB0_SS_* and
@@ -531,11 +586,27 @@
 	 * with no consumer in clk_summary. Those are safe to gate -- they feed a
 	 * PHY whose outputs go nowhere.
 	 */
-	/delete-property/ usb-role-switch;
 	maximum-speed = "high-speed";
 	phys = <&usb_hsphy>;
 	phy-names = "usb2-phy";
-	dr_mode = "peripheral";
+	/*
+	 * "otg", not "peripheral", and this is load-bearing rather than scope
+	 * creep. dwc3 calls dwc3_drd_init() -- and therefore
+	 * dwc3_setup_role_switch() -> usb_role_switch_register() -- ONLY under
+	 * case USB_DR_MODE_OTG. With "peripheral" no role switch is registered,
+	 * so the tusb320's fwnode_usb_role_switch_get() returns -EPROBE_DEFER
+	 * forever and the chip never binds. Measured exactly that: 0-0047 sat on
+	 * /sys/kernel/debug/devices_deferred, driver registered and device
+	 * present but unbound, while USB still worked because "peripheral"
+	 * forces device mode on its own.
+	 *
+	 * This does not make the handset a host. dwc3_setup_role_switch()
+	 * defaults role_switch_default_mode to PERIPHERAL and sets
+	 * DWC3_GCTL_PRTCAP_DEVICE at probe unless role-switch-default-mode says
+	 * "host", so the gadget comes up at boot before any CC event.
+	 */
+	dr_mode = "otg";
+	role-switch-default-mode = "peripheral";
 };
 
 &usb_hsphy {
