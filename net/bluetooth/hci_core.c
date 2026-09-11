@@ -941,6 +941,26 @@ static const struct rfkill_ops hci_rfkill_ops = {
 	.set_block = hci_rfkill_set_block,
 };
 
+/*
+ * Tell udev the controller is ready to be worked on.
+ *
+ * The device is published by hci_register_dev(), which is long before it can
+ * be used: a controller that loads firmware spends the whole of hdev->setup()
+ * with HCI_SETUP held, and the management interface deliberately hides it for
+ * that entire time. So an "add" event says a controller exists, and nothing
+ * says when it started working -- mgmt clients learn it from Index Added, and
+ * everyone watching udev is left guessing. Tools that configure a controller
+ * from a udev rule therefore race the firmware download and lose; they can
+ * only retry blindly and hope.
+ *
+ * Send a change event from the same place Index Added is sent, so a rule can
+ * wait for the controller instead.
+ */
+static void hci_uevent_ready(struct hci_dev *hdev)
+{
+	kobject_uevent(&hdev->dev.kobj, KOBJ_CHANGE);
+}
+
 static void hci_power_on(struct work_struct *work)
 {
 	struct hci_dev *hdev = container_of(work, struct hci_dev, power_on);
@@ -995,6 +1015,7 @@ static void hci_power_on(struct work_struct *work)
 		 * and no event will be send.
 		 */
 		mgmt_index_added(hdev);
+		hci_uevent_ready(hdev);
 	} else if (hci_dev_test_and_clear_flag(hdev, HCI_CONFIG)) {
 		/* When the controller is now configured, then it
 		 * is important to clear the HCI_RAW flag.
@@ -1007,6 +1028,7 @@ static void hci_power_on(struct work_struct *work)
 		 * configured. This will send the Index Added event.
 		 */
 		mgmt_index_added(hdev);
+		hci_uevent_ready(hdev);
 	}
 }
 
