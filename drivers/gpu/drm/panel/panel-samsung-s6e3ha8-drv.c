@@ -412,9 +412,9 @@ static int s6e3ha8_amb577px01_wqhd_prepare(struct drm_panel *panel)
 	mipi_dsi_msleep(&ctx, 28);
 
 	/*
-	 * Read calibration here rather than in enable(): this is a video mode
-	 * panel, and the host cannot service DSI reads once the encoder has
-	 * started streaming.
+	 * Read calibration here rather than in enable(): the host cannot
+	 * service DSI reads once the encoder has been enabled, and enable()
+	 * runs after that.
 	 */
 	if (!ctx.accum_err)
 		s6e3ha8_dimming_setup(priv);
@@ -490,6 +490,16 @@ static int s6e3ha8_amb577px01_wqhd_probe(struct mipi_dsi_device *dsi)
 
 	dsi->lanes = 4;
 	dsi->format = MIPI_DSI_FMT_RGB888;
+	/*
+	 * This is a command mode panel, driven off the TE pin -- the vendor
+	 * describes it as "dsi_cmd_mode" with qcom,mdss-dsi-te-using-te-pin,
+	 * and the init sequence turns TE on with DCS 0x35. The absence of
+	 * MIPI_DSI_MODE_VIDEO below is therefore deliberate: adding it garbles
+	 * the whole display. The MODE_VIDEO_NO_* flags only mean anything
+	 * alongside MIPI_DSI_MODE_VIDEO, so they do nothing here, and the
+	 * porch values in the mode above are not evidence otherwise -- the
+	 * vendor carries the same ones for the timing engine.
+	 */
 	dsi->mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS |
 		MIPI_DSI_MODE_VIDEO_NO_HFP | MIPI_DSI_MODE_VIDEO_NO_HBP |
 		MIPI_DSI_MODE_VIDEO_NO_HSA | MIPI_DSI_MODE_NO_EOT_PACKET;
