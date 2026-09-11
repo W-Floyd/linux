@@ -169,6 +169,7 @@ obj-$(CONFIG_SM_CAMCC_MILOS) += camcc-milos.o
 obj-$(CONFIG_SM_DISPCC_4450) += dispcc-sm4450.o
 obj-$(CONFIG_SM_DISPCC_6115) += dispcc-sm6115.o
 obj-$(CONFIG_SM_DISPCC_6125) += dispcc-sm6125.o
+obj-$(CONFIG_SM_DISPCC_6225) += dispcc-sm6225.o
 obj-$(CONFIG_SM_DISPCC_6350) += dispcc-sm6350.o
 obj-$(CONFIG_SM_DISPCC_6375) += dispcc-sm6375.o
 obj-$(CONFIG_SM_DISPCC_7150) += dispcc-sm7150.o
