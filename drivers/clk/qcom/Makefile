@@ -196,6 +196,7 @@ obj-$(CONFIG_SM_GCC_MILOS) += gcc-milos.o
 obj-$(CONFIG_SM_GPUCC_4450) += gpucc-sm4450.o
 obj-$(CONFIG_SM_GPUCC_6115) += gpucc-sm6115.o
 obj-$(CONFIG_SM_GPUCC_6125) += gpucc-sm6125.o
+obj-$(CONFIG_SM_GPUCC_6225) += gpucc-sm6225.o
 obj-$(CONFIG_SM_GPUCC_6350) += gpucc-sm6350.o
 obj-$(CONFIG_SM_GPUCC_6375) += gpucc-sm6375.o
 obj-$(CONFIG_SM_GPUCC_8150) += gpucc-sm8150.o
