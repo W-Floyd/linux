@@ -2274,6 +2274,25 @@ static void zonda_pll_adjust_l_val(unsigned long rate, unsigned long prate, u32 
 	*l = quotient + (u32)(remainder * 2 >= prate);
 }
 
+static unsigned long
+clk_zonda_pll_recalc_rate(struct clk_hw *hw, unsigned long parent_rate)
+{
+	struct clk_alpha_pll *pll = to_clk_alpha_pll(hw);
+	u32 l, frac, alpha_width = pll_alpha_width(pll);
+
+	if (regmap_read(pll->clkr.regmap, PLL_L_VAL(pll), &l))
+		return 0;
+
+	if (regmap_read(pll->clkr.regmap, PLL_ALPHA_VAL(pll), &frac))
+		return 0;
+
+	/* Zonda uses a signed fractional multiplier; L was rounded up. */
+	if (frac & PLL_ALPHA_MSB)
+		l--;
+
+	return alpha_pll_calc_rate(parent_rate, l, frac, alpha_width);
+}
+
 static int clk_zonda_pll_set_rate(struct clk_hw *hw, unsigned long rate,
 				  unsigned long prate)
 {
@@ -2291,7 +2310,7 @@ static int clk_zonda_pll_set_rate(struct clk_hw *hw, unsigned long rate,
 		return ret;
 
 	if (a & PLL_ALPHA_MSB)
-		zonda_pll_adjust_l_val(rate, prate, &l);
+		zonda_pll_adjust_l_val(rrate, prate, &l);
 
 	regmap_write(pll->clkr.regmap, PLL_ALPHA_VAL(pll), a);
 	regmap_write(pll->clkr.regmap, PLL_L_VAL(pll), l);
@@ -2332,7 +2351,7 @@ const struct clk_ops clk_alpha_pll_zonda_ops = {
 	.enable = clk_zonda_pll_enable,
 	.disable = clk_zonda_pll_disable,
 	.is_enabled = clk_trion_pll_is_enabled,
-	.recalc_rate = clk_trion_pll_recalc_rate,
+	.recalc_rate = clk_zonda_pll_recalc_rate,
 	.determine_rate = clk_alpha_pll_determine_rate,
 	.set_rate = clk_zonda_pll_set_rate,
 };
