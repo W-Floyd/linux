@@ -16,6 +16,10 @@
 
 #define MAX77705_LED_NUM_LEDS			4
 #define MAX77705_LED_EN_MASK			GENMASK(1, 0)
+/* Values of the per-channel 2-bit field in MAX77705_RGBLED_REG_LEDEN */
+#define MAX77705_LED_EN_OFF			0
+#define MAX77705_LED_EN_ON			1
+#define MAX77705_LED_EN_BLINK			2
 #define MAX77705_LED_MAX_BRIGHTNESS		0xff
 #define MAX77705_LED_EN_SHIFT(reg)		(reg * MAX77705_RGBLED_EN_WIDTH)
 #define MAX77705_LED_REG_BRIGHTNESS(reg)	(reg + MAX77705_RGBLED_REG_LED0BRT)
@@ -75,8 +79,14 @@ static int max77705_rgb_blink(struct regmap *regmap,
 	return regmap_write(regmap, MAX77705_RGBLED_REG_LEDBLNK, value);
 }
 
+/*
+ * Drive each channel at its requested brightness. @en_val selects what the
+ * channel's enable field is set to: MAX77705_LED_EN_ON for a steady light, or
+ * MAX77705_LED_EN_BLINK to hand the channel over to the hardware blink timer
+ * programmed in MAX77705_RGBLED_REG_LEDBLNK.
+ */
 static int max77705_led_brightness_set(struct regmap *regmap, struct mc_subled *subled,
-				int num_colors)
+				int num_colors, unsigned int en_val)
 {
 	int ret;
 
@@ -90,7 +100,8 @@ static int max77705_led_brightness_set(struct regmap *regmap, struct mc_subled *
 			/* Flash OFF */
 			ret = regmap_update_bits(regmap,
 					MAX77705_RGBLED_REG_LEDEN,
-					MAX77705_LED_EN_MASK << MAX77705_LED_EN_SHIFT(channel), 0);
+					MAX77705_LED_EN_MASK << MAX77705_LED_EN_SHIFT(channel),
+					MAX77705_LED_EN_OFF << MAX77705_LED_EN_SHIFT(channel));
 		} else {
 			/* Set current */
 			ret = regmap_write(regmap, MAX77705_LED_REG_BRIGHTNESS(channel),
@@ -101,11 +112,20 @@ static int max77705_led_brightness_set(struct regmap *regmap, struct mc_subled *
 			ret = regmap_update_bits(regmap,
 					MAX77705_RGBLED_REG_LEDEN,
 					MAX77705_LED_EN_MASK << MAX77705_LED_EN_SHIFT(channel),
-					LED_ON << MAX77705_LED_EN_SHIFT(channel));
+					en_val << MAX77705_LED_EN_SHIFT(channel));
 		}
 	}
 
 	return ret;
+}
+
+/*
+ * The brightness a hardware blink runs at, mirroring what the LED core picks
+ * for a software blink: the current brightness, or full scale if it is off.
+ */
+static enum led_brightness max77705_blink_brightness(struct led_classdev *cdev)
+{
+	return cdev->brightness ? cdev->brightness : cdev->max_brightness;
 }
 
 static int max77705_rgb_blink_single(struct led_classdev *cdev,
@@ -113,8 +133,16 @@ static int max77705_rgb_blink_single(struct led_classdev *cdev,
 				unsigned long *delay_off)
 {
 	struct max77705_led *led = container_of(cdev, struct max77705_led, cdev);
+	int ret;
 
-	return max77705_rgb_blink(led->regmap, delay_on, delay_off);
+	ret = max77705_rgb_blink(led->regmap, delay_on, delay_off);
+	if (ret)
+		return ret;
+
+	led->subled_info->brightness = max77705_blink_brightness(cdev);
+
+	return max77705_led_brightness_set(led->regmap, led->subled_info, 1,
+					MAX77705_LED_EN_BLINK);
 }
 
 static int max77705_rgb_blink_multi(struct led_classdev *cdev,
@@ -123,8 +151,16 @@ static int max77705_rgb_blink_multi(struct led_classdev *cdev,
 {
 	struct led_classdev_mc *mcdev = lcdev_to_mccdev(cdev);
 	struct max77705_led *led = container_of(mcdev, struct max77705_led, mcdev);
+	int ret;
 
-	return max77705_rgb_blink(led->regmap, delay_on, delay_off);
+	ret = max77705_rgb_blink(led->regmap, delay_on, delay_off);
+	if (ret)
+		return ret;
+
+	led_mc_calc_color_components(mcdev, max77705_blink_brightness(cdev));
+
+	return max77705_led_brightness_set(led->regmap, mcdev->subled_info,
+					mcdev->num_colors, MAX77705_LED_EN_BLINK);
 }
 
 static int max77705_led_brightness_set_single(struct led_classdev *cdev,
@@ -134,7 +170,8 @@ static int max77705_led_brightness_set_single(struct led_classdev *cdev,
 
 	led->subled_info->brightness = brightness;
 
-	return max77705_led_brightness_set(led->regmap, led->subled_info, 1);
+	return max77705_led_brightness_set(led->regmap, led->subled_info, 1,
+					MAX77705_LED_EN_ON);
 }
 
 static int max77705_led_brightness_set_multi(struct led_classdev *cdev,
@@ -145,7 +182,8 @@ static int max77705_led_brightness_set_multi(struct led_classdev *cdev,
 
 	led_mc_calc_color_components(mcdev, brightness);
 
-	return max77705_led_brightness_set(led->regmap, led->mcdev.subled_info, mcdev->num_colors);
+	return max77705_led_brightness_set(led->regmap, led->mcdev.subled_info,
+					mcdev->num_colors, MAX77705_LED_EN_ON);
 }
 
 static int max77705_parse_subled(struct device *dev, struct fwnode_handle *np,
