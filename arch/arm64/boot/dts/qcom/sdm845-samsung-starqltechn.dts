@@ -1587,6 +1587,22 @@
 			sound-dai = <&q6routing>;
 		};
 	};
+
+	displayport-rx-dai-link {
+		link-name = "DisplayPort Playback";
+
+		cpu {
+			sound-dai = <&q6afedai DISPLAY_PORT_RX>;
+		};
+
+		platform {
+			sound-dai = <&q6routing>;
+		};
+
+		codec {
+			sound-dai = <&mdss_dp>;
+		};
+	};
 };
 
 &q6afedai {
@@ -1598,6 +1614,10 @@
 	dai@23 {
 		reg = <23>;
 		qcom,sd-lines = <0>;
+	};
+
+	dai@104 {
+		reg = <DISPLAY_PORT_RX>;
 	};
 };
 
