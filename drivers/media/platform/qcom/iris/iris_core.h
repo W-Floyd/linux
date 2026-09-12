@@ -104,6 +104,12 @@ struct iris_core {
 	const struct qcom_ubwc_cfg_data		*ubwc_cfg;
 	enum iris_core_state			state;
 	/*
+	 * Latched when core init failed and cleaned up after itself, leaving
+	 * the state at IRIS_CORE_DEINIT but the core known bad. Cleared only
+	 * by a deinit that actually tore the hardware down.
+	 */
+	bool					init_failed;
+	/*
 	 * True only while the controller/HW rails and clocks are up, so the
 	 * threaded IRQ handler can tell whether reg_base is safe to touch.
 	 */
