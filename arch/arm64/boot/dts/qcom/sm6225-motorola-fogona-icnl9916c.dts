@@ -1,0 +1,87 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/*
+ * Motorola Moto G Play (2024) -- "fogona" with the Tianma ICNL9916C panel.
+ *
+ * fogona is dual-sourced for the display. The ChipOne ICNL9916C is a TDDI part,
+ * so the same silicon drives the panel and the touch controller -- which is why
+ * both nodes are here rather than in the common .dtsi, and why the touch node
+ * follows the panel for power sequencing.
+ *
+ * Copyright (c) 2026 William Floyd
+ */
+
+/dts-v1/;
+
+#include "sm6225-motorola-fogona.dtsi"
+
+/ {
+	model = "Motorola Moto G Play (2024) (Tianma ICNL9916C)";
+};
+
+&spi0 {
+	touchscreen@0 {
+		compatible = "chipone,icnl9916";
+
+		/*
+		 * TDDI: this is the same chip as the panel, so its power
+		 * sequencing is the panel's. Following the panel is what tells
+		 * the touch half to reload its SRAM firmware after a blank
+		 * has reset the shared silicon.
+		 */
+		panel = <&panel>;
+		reg = <0>;
+		/* 1 MHz while bringing the link up; stock allows 9.6 MHz. */
+		spi-max-frequency = <1000000>;
+
+		interrupts-extended = <&tlmm 80 IRQ_TYPE_EDGE_FALLING>;
+		touchscreen-reset-gpios = <&tlmm 86 GPIO_ACTIVE_LOW>;
+
+		/*
+		 * ts_int_default only. ts_reset_default muxes GPIO_86, which is
+		 * touchscreen-reset-gpios above -- the same GPIO-vs-pinctrl
+		 * collision that killed the avdd regulator and then the panel
+		 * on 7.3. Not yet observed failing here only because touch is a
+		 * module and had not probed; it would fail identically.
+		 *
+		 * ts_int_default is GPIO_80, used via interrupts-extended
+		 * rather than as a GPIO, so nothing claims the pin and it stays.
+		 */
+		pinctrl-names = "default";
+		pinctrl-0 = <&ts_int_default>;
+	};
+};
+
+&mdss_dsi0 {
+	panel: panel@0 {
+		compatible = "tianma,icnl9916c-720x1600";
+		reg = <0>;
+
+		reset-gpios = <&tlmm 82 GPIO_ACTIVE_LOW>;
+
+		vddio-supply = <&pm6125_l9>;
+		avdd-supply = <&lcd_panel_avdd>;
+		avee-supply = <&lcd_panel_avee>;
+
+		/*
+		 * te_active only. mdss_dsi_active muxes GPIO_82, which is the
+		 * reset-gpios line above -- same collision as the avdd
+		 * regulator, and on 7.3 it fails the panel's whole probe:
+		 *
+		 *   pin GPIO_82 already requested by 5e94000.dsi.0; cannot
+		 *     claim for 500000.pinctrl:594
+		 *   panel-icnl9916-720x1600: error -EINVAL: Failed to get
+		 *     reset GPIO
+		 *
+		 * te_active is GPIO_81 (tear-effect), which no GPIO consumer
+		 * claims, so it stays.
+		 */
+		pinctrl-names = "default";
+		pinctrl-0 = <&te_active>;
+
+		port {
+			panel_in: endpoint {
+				remote-endpoint = <&mdss_dsi0_out>;
+			};
+		};
+	};
+};

@@ -2,10 +2,19 @@
 /*
  * Motorola Moto G Play (2024) -- "fogona", XT2413, SM6225 (khaje).
  *
+ * Everything common to the board. fogona is dual-sourced for the display, and
+ * the panel is a TDDI part that drives touch as well, so BOTH the panel and the
+ * touch controller are per-variant and live in the including .dts:
+ *
+ *   sm6225-motorola-fogona-icnl9916c.dts   Tianma ICNL9916C   (this unit)
+ *   sm6225-motorola-fogona-nt36528.dts     CSOT NT36528       (not written)
+ *   sm6225-motorola-fogona-ili9883c.dts    TXD ILI9883C       (not written)
+ *
+ * Stock does the same thing at runtime instead, declaring all three touch nodes
+ * on one SPI bus and matching mmi,panel_name; separate DTBs is the mainline way.
+ *
  * Copyright (c) 2026 William Floyd
  */
-
-/dts-v1/;
 
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
@@ -500,39 +509,14 @@
  * PIO is more than enough for a touch controller whose largest transfer is a
  * 77-byte report.
  */
+/*
+ * The bus only. The touch controller itself is a TDDI half of the panel, so it
+ * differs per panel variant and lives in the per-panel .dts alongside it --
+ * stock declares novatek@0, chipone_tddi@1 and ilitek@2 on this one bus for
+ * exactly that reason, picking one at runtime by mmi,panel_name.
+ */
 &spi0 {
 	status = "okay";
-
-	touchscreen@0 {
-		compatible = "chipone,icnl9916";
-
-		/*
-		 * TDDI: this is the same chip as the panel, so its power
-		 * sequencing is the panel's. Following the panel is what tells
-		 * the touch half to reload its SRAM firmware after a blank
-		 * has reset the shared silicon.
-		 */
-		panel = <&panel>;
-		reg = <0>;
-		/* 1 MHz while bringing the link up; stock allows 9.6 MHz. */
-		spi-max-frequency = <1000000>;
-
-		interrupts-extended = <&tlmm 80 IRQ_TYPE_EDGE_FALLING>;
-		touchscreen-reset-gpios = <&tlmm 86 GPIO_ACTIVE_LOW>;
-
-		/*
-		 * ts_int_default only. ts_reset_default muxes GPIO_86, which is
-		 * touchscreen-reset-gpios above -- the same GPIO-vs-pinctrl
-		 * collision that killed the avdd regulator and then the panel
-		 * on 7.3. Not yet observed failing here only because touch is a
-		 * module and had not probed; it would fail identically.
-		 *
-		 * ts_int_default is GPIO_80, used via interrupts-extended
-		 * rather than as a GPIO, so nothing claims the pin and it stays.
-		 */
-		pinctrl-names = "default";
-		pinctrl-0 = <&ts_int_default>;
-	};
 };
 
 /*
@@ -764,43 +748,14 @@
 	status = "okay";
 };
 
+/*
+ * The DSI host only. fogona is dual-sourced, so the panel node itself lives in
+ * the per-panel .dts that includes this file.
+ */
 &mdss_dsi0 {
 	/* L18 is fixed at 1.232 V for the DSI PHY; it is also UFS's vdda-pll. */
 	vdda-supply = <&pm6125_l18>;
 	status = "okay";
-
-	panel: panel@0 {
-		compatible = "tianma,icnl9916c-720x1600";
-		reg = <0>;
-
-		reset-gpios = <&tlmm 82 GPIO_ACTIVE_LOW>;
-
-		vddio-supply = <&pm6125_l9>;
-		avdd-supply = <&lcd_panel_avdd>;
-		avee-supply = <&lcd_panel_avee>;
-
-		/*
-		 * te_active only. mdss_dsi_active muxes GPIO_82, which is the
-		 * reset-gpios line above -- same collision as the avdd
-		 * regulator, and on 7.3 it fails the panel's whole probe:
-		 *
-		 *   pin GPIO_82 already requested by 5e94000.dsi.0; cannot
-		 *     claim for 500000.pinctrl:594
-		 *   panel-icnl9916-720x1600: error -EINVAL: Failed to get
-		 *     reset GPIO
-		 *
-		 * te_active is GPIO_81 (tear-effect), which no GPIO consumer
-		 * claims, so it stays.
-		 */
-		pinctrl-names = "default";
-		pinctrl-0 = <&te_active>;
-
-		port {
-			panel_in: endpoint {
-				remote-endpoint = <&mdss_dsi0_out>;
-			};
-		};
-	};
 };
 
 &mdss_dsi0_out {
