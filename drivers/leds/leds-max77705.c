@@ -88,7 +88,7 @@ static int max77705_rgb_blink(struct regmap *regmap,
 static int max77705_led_brightness_set(struct regmap *regmap, struct mc_subled *subled,
 				int num_colors, unsigned int en_val)
 {
-	int ret;
+	int ret = 0;
 
 	for (int i = 0; i < num_colors; i++) {
 		unsigned int channel, brightness;
@@ -114,6 +114,9 @@ static int max77705_led_brightness_set(struct regmap *regmap, struct mc_subled *
 					MAX77705_LED_EN_MASK << MAX77705_LED_EN_SHIFT(channel),
 					en_val << MAX77705_LED_EN_SHIFT(channel));
 		}
+
+		if (ret < 0)
+			return ret;
 	}
 
 	return ret;
@@ -212,7 +215,7 @@ static int max77705_parse_subled(struct device *dev, struct fwnode_handle *np,
 static int max77705_add_led(struct device *dev, struct regmap *regmap, struct fwnode_handle *np)
 {
 	int ret, i = 0;
-	unsigned int color, reg;
+	unsigned int color = LED_COLOR_ID_GREEN, reg;
 	struct max77705_led *led;
 	struct led_classdev *cdev;
 	struct mc_subled *info;
@@ -271,7 +274,9 @@ static int max77705_add_led(struct device *dev, struct regmap *regmap, struct fw
 		if (!info)
 			return -ENOMEM;
 
-		max77705_parse_subled(dev, np, info);
+		ret = max77705_parse_subled(dev, np, info);
+		if (ret < 0)
+			return ret;
 
 		led->subled_info = info;
 		led->cdev.brightness_set_blocking = max77705_led_brightness_set_single;
