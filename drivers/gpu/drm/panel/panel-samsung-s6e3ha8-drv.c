@@ -378,6 +378,18 @@ static int s6e3ha8_disable(struct drm_panel *panel)
 	s6e3ha8_afc_off(&ctx);
 	s6e3ha8_test_key_off_lvl2(&ctx);
 
+	/*
+	 * Sleep in, not just display off. unprepare() releases the panel's
+	 * supplies, but nothing guarantees they actually drop: on the S9 the
+	 * bootloader framebuffer holds the same three rails, so the panel
+	 * stays powered after the display is disabled. Display off alone
+	 * leaves it driving a dim raster in that case; sleep in puts the
+	 * driver IC down whether or not the rails go away.
+	 */
+	s6e3ha8_test_key_on_lvl1(&ctx);
+	mipi_dsi_dcs_enter_sleep_mode_multi(&ctx);
+	s6e3ha8_test_key_off_lvl1(&ctx);
+
 	mipi_dsi_msleep(&ctx, 160);
 
 	return ctx.accum_err;
@@ -428,6 +440,13 @@ err:
 static int s6e3ha8_amb577px01_wqhd_unprepare(struct drm_panel *panel)
 {
 	struct s6e3ha8 *priv = to_s6e3ha8_amb577px01_wqhd(panel);
+
+	/*
+	 * Hold the panel in reset before dropping the supplies. reset-gpios is
+	 * described active high here and the reset pulse ends high, so zero is
+	 * the asserted state.
+	 */
+	gpiod_set_value_cansleep(priv->reset_gpio, 0);
 
 	return regulator_bulk_disable(ARRAY_SIZE(s6e3ha8_supplies), priv->supplies);
 }
