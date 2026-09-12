@@ -130,6 +130,13 @@
 #define MAX77705_CURRENT_CHG_STEP	50000
 #define MAX77705_CURRENT_CHGIN_MIN	100000
 #define MAX77705_CURRENT_CHGIN_MAX	3200000
+/*
+ * CHG_CC is six bits at a 50 mA step, so it stops one step short of the input
+ * limit's 3.2 A. Asking for more encodes to 64, which does not fit the field.
+ */
+#define MAX77705_CURRENT_CHG_MAX	3150000
+/* Used only when the battery does not say what it will take. */
+#define MAX77705_CURRENT_CHG_DEFAULT	500000
 
 enum max77705_field_idx {
 	MAX77705_CHGPROT,

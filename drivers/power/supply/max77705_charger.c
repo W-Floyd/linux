@@ -359,6 +359,16 @@ static int max77705_get_charge_current(struct max77705_charger_data *chg,
 	return 0;
 }
 
+static int max77705_set_charge_current(struct max77705_charger_data *chg,
+					int charge_current)
+{
+	return max77705_set_integer(chg, MAX77705_CHG_CC_LIM,
+				    MAX77705_CURRENT_CHGIN_MIN,
+				    MAX77705_CURRENT_CHG_MAX,
+				    MAX77705_CURRENT_CHG_STEP,
+				    charge_current);
+}
+
 static int max77705_set_float_voltage(struct max77705_charger_data *chg,
 					int float_voltage)
 {
@@ -436,11 +446,7 @@ static int max77705_set_property(struct power_supply *psy,
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
-		err = max77705_set_integer(chg, MAX77705_CHG_CC_LIM,
-					   MAX77705_CURRENT_CHGIN_MIN,
-					   MAX77705_CURRENT_CHGIN_MAX,
-					   MAX77705_CURRENT_CHG_STEP,
-					   val->intval);
+		err = max77705_set_charge_current(chg, val->intval);
 		break;
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
 		err = max77705_set_integer(chg, MAX77705_CHG_CHGIN_LIM,
@@ -635,6 +641,22 @@ static int max77705_charger_initialize(struct max77705_charger_data *chg)
 	} else {
 		max77705_set_float_voltage(chg, info->voltage_max_design_uv);
 	}
+
+	/*
+	 * The fast charge current comes up at the chip's 100 mA default and
+	 * nothing else ever raises it, so take what the battery says it will
+	 * accept. Without this the charger trickles regardless of what the
+	 * input limit negotiated.
+	 */
+	if (info->constant_charge_current_max_ua < 0) {
+		dev_warn(chg->dev, "missing battery:constant-charge-current-max-microamp\n");
+		err = max77705_set_charge_current(chg, MAX77705_CURRENT_CHG_DEFAULT);
+	} else {
+		err = max77705_set_charge_current(chg,
+						  info->constant_charge_current_max_ua);
+	}
+	if (err)
+		goto err;
 
 	err = regmap_field_write(chg->rfield[MAX77705_VCHGIN], MAX77705_VCHGIN_4_5);
 	if (err)
