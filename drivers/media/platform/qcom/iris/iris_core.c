@@ -25,6 +25,14 @@ void iris_core_deinit(struct iris_core *core)
 
 		iris_hfi_queues_deinit(core);
 		core->state = IRIS_CORE_DEINIT;
+		/*
+		 * Cleared only when this actually tore the hardware down. A core
+		 * that failed init already cleaned up and left the state at
+		 * IRIS_CORE_DEINIT, so this block is skipped and the latch
+		 * survives -- otherwise the sys_error handler's deinit + init
+		 * would walk straight back into the init that failed.
+		 */
+		core->init_failed = false;
 	}
 	mutex_unlock(&core->lock);
 
@@ -59,6 +67,19 @@ int iris_core_init(struct iris_core *core)
 		goto exit;
 	} else if (core->state == IRIS_CORE_ERROR) {
 		ret = -EINVAL;
+		goto exit;
+	}
+
+	/*
+	 * A previous init failed and cleaned the hardware back up, so the state
+	 * is an honest IRIS_CORE_DEINIT -- but the core is known bad. Re-running
+	 * the power-on and firmware-boot sequence against it is not recoverable
+	 * on every part, and iris registers two video nodes, so udev opening the
+	 * second one walks straight back in here. Refuse until an explicit
+	 * deinit clears the latch.
+	 */
+	if (core->init_failed) {
+		ret = -EIO;
 		goto exit;
 	}
 
@@ -101,6 +122,7 @@ error_power_off:
 error_queue_deinit:
 	iris_hfi_queues_deinit(core);
 error:
+	core->init_failed = true;
 	core->state = IRIS_CORE_DEINIT;
 exit:
 	mutex_unlock(&core->lock);
