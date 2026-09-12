@@ -320,6 +320,13 @@ struct iris_platform_data {
 	u32 tz_cp_config_data_size;
 	u32 num_vpp_pipe;
 	bool no_aon;
+	/*
+	 * Set on cores with no NOC low-power-interface handshake (AR50_LITE).
+	 * The LPI control/status registers belong to the Iris2 map; driving
+	 * them here leaves an unacked power-down request on a NOC that never
+	 * quiesces, and the teardown that follows hangs the SoC.
+	 */
+	bool no_noc_lpi;
 	u32 max_session_count;
 	/* max number of macroblocks per frame supported */
 	u32 max_core_mbpf;
