@@ -3134,11 +3134,24 @@ static struct gdsc gcc_usb30_prim_gdsc = {
 	.pwrsts = PWRSTS_OFF_ON,
 };
 
+/*
+ * The vcodec0 GDSC supports hardware trigger mode: Qualcomm's khaje.dtsi marks
+ * this exact node (qcom,gdsc@1458098, i.e. this gdscr) "qcom,support-hw-trigger",
+ * and msm-vidc hands the regulator to hardware on that basis. Its sibling
+ * gcc_venus_gdsc is deliberately not marked, matching how videocc-sm8250 flags
+ * mvs0/mvs1 but not the mvs0c/mvs1c controller domains. gcc-sm6115 and
+ * gcc-qcm2290, same family and same 0x58098 offset, already carry the flag.
+ *
+ * Without it gdsc_init() never installs pd.set_hwmode_dev, so
+ * dev_pm_genpd_set_hwmode() returns -EOPNOTSUPP and the iris video driver
+ * fails core init with -95.
+ */
 static struct gdsc gcc_vcodec0_gdsc = {
 	.gdscr = 0x58098,
 	.pd = {
 		.name = "gcc_vcodec0",
 	},
+	.flags = HW_CTRL_TRIGGER,
 	.pwrsts = PWRSTS_OFF_ON,
 };
 
