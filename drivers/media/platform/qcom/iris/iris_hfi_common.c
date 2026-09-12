@@ -105,6 +105,21 @@ irqreturn_t iris_hfi_isr_handler(int irq, void *data)
 		return IRQ_NONE;
 
 	mutex_lock(&core->lock);
+
+	/*
+	 * The rails may have gone down while this handler was blocked on
+	 * core->lock: iris_core_init() holds that lock across its entire error
+	 * unwind, which powers off both power domains and every clock, and the
+	 * disable_irq_nosync() in iris_vpu_power_off() does not wait for an
+	 * already-running threaded handler. Touching reg_base now would stall
+	 * the fabric -- on SM6225 that hangs the SoC with no oops and no
+	 * console output, recoverable only by a fastboot cycle.
+	 */
+	if (!core->power_enabled) {
+		mutex_unlock(&core->lock);
+		return IRQ_HANDLED;
+	}
+
 	pm_runtime_mark_last_busy(core->dev);
 	iris_vpu_clear_interrupt(core);
 	mutex_unlock(&core->lock);
