@@ -15,6 +15,7 @@
 
 #include "iris_platform_milos.h"
 #include "iris_platform_sc7280.h"
+#include "iris_platform_sm6225.h"
 #include "iris_platform_sm8250.h"
 
 static const struct iris_firmware_desc iris_milos_desc = {
@@ -39,6 +40,24 @@ static const struct iris_firmware_desc iris_vpu20_p4_gen1_desc = {
 	.firmware_data = &iris_hfi_gen1_data,
 	.get_vpu_buffer_size = iris_vpu_buf_size,
 	.fwname = "qcom/vpu/vpu20_p4.mbn",
+};
+
+/*
+ * SM6225 ("khaje", AR50_LITE) ships a vendor firmware that speaks HFI Gen2
+ * ("video-firmware.2.x"), while linux-firmware's qcom/venus-6.0/venus.mbn is
+ * Gen1 ("VIDEO.VE.6.0-..."). Declaring both lets iris_detect_firmware() pick
+ * from the image actually present rather than from the compatible.
+ */
+static const struct iris_firmware_desc iris_sm6225_gen1_desc = {
+	.firmware_data = &iris_hfi_gen1_data,
+	.get_vpu_buffer_size = iris_vpu_buf_size,
+	.fwname = "qcom/venus-6.0/venus.mbn",
+};
+
+static const struct iris_firmware_desc iris_sm6225_gen2_desc = {
+	.firmware_data = &iris_hfi_gen2_data,
+	.get_vpu_buffer_size = iris_vpu33_buf_size,
+	.fwname = "qcom/venus-6.0/venus.mbn",
 };
 
 static const u32 iris_fmts_vpu2_dec[] = {
@@ -103,6 +122,36 @@ const struct iris_platform_data milos_data = {
 	.max_session_count = 16,
 	.max_core_mbpf = ((4096 * 2176) / 256) * 2,
 	.max_core_mbps = ((3840 * 2176) / 256) * 30 + ((1920 * 1088) / 256) * 30,
+};
+
+const struct iris_platform_data sm6225_data = {
+	.firmware_desc_gen1 = &iris_sm6225_gen1_desc,
+	.firmware_desc_gen2 = &iris_sm6225_gen2_desc,
+	.vpu_ops = &iris_vpu2_ops,
+	.icc_tbl = iris_icc_info_vpu2,
+	.icc_tbl_size = ARRAY_SIZE(iris_icc_info_vpu2),
+	.bw_tbl_dec = sm6225_bw_table_dec,
+	.bw_tbl_dec_size = ARRAY_SIZE(sm6225_bw_table_dec),
+	.pmdomain_tbl = iris_pmdomain_table_vpu2,
+	.pmdomain_tbl_size = ARRAY_SIZE(iris_pmdomain_table_vpu2),
+	.opp_pd_tbl = sm6225_opp_pd_table,
+	.opp_pd_tbl_size = ARRAY_SIZE(sm6225_opp_pd_table),
+	.clk_tbl = sm6225_clk_table,
+	.clk_tbl_size = ARRAY_SIZE(sm6225_clk_table),
+	.opp_clk_tbl = sm6225_opp_clk_table,
+	/* Upper bound of DMA address range */
+	.dma_mask = 0xe0000000 - 1,
+	.inst_iris_fmts = iris_fmts_vpu2_dec,
+	.inst_iris_fmts_size = ARRAY_SIZE(iris_fmts_vpu2_dec),
+	.inst_caps = &platform_inst_cap_vpu2,
+	.tz_cp_config_data = tz_cp_config_sm6225,
+	.tz_cp_config_data_size = ARRAY_SIZE(tz_cp_config_sm6225),
+	.num_vpp_pipe = 1,
+	.no_aon = true,
+	.max_session_count = 16,
+	/* khaje tops out at 1080p@30 + 720p@30, i.e. max_load 352800 */
+	.max_core_mbpf = (1920 * 1088) / 256 + (1280 * 736) / 256,
+	.max_core_mbps = ((1920 * 1088) / 256) * 30 + ((1280 * 736) / 256) * 30,
 };
 
 const struct iris_platform_data sc7280_data = {
