@@ -103,6 +103,11 @@ struct iris_core {
 	const struct iris_firmware_desc		*iris_firmware_desc;
 	const struct qcom_ubwc_cfg_data		*ubwc_cfg;
 	enum iris_core_state			state;
+	/*
+	 * True only while the controller/HW rails and clocks are up, so the
+	 * threaded IRQ handler can tell whether reg_base is safe to touch.
+	 */
+	bool					power_enabled;
 	dma_addr_t				iface_q_table_daddr;
 	dma_addr_t				sfr_daddr;
 	void					*iface_q_table_vaddr;
