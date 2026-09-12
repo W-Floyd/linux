@@ -324,8 +324,20 @@ int iris_vpu_power_on_hw(struct iris_core *core)
 	if (ret && ret != -ENOENT)
 		goto err_disable_hw_ahb_clock;
 
+	/*
+	 * AR50_LITE parts gate the video core on a throttle clock. Downstream
+	 * enables it here, alongside the per-core clocks and after the hardware
+	 * power domain is up, rather than in the controller step. Optional, so
+	 * platforms naming no throttle clock get -ENOENT and are unaffected.
+	 */
+	ret = iris_prepare_enable_clock(core, IRIS_THROTTLE_CLK);
+	if (ret && ret != -ENOENT)
+		goto err_disable_bse_clock;
+
 	return 0;
 
+err_disable_bse_clock:
+	iris_disable_unprepare_clock(core, IRIS_BSE_HW_CLK);
 err_disable_hw_ahb_clock:
 	iris_disable_unprepare_clock(core, IRIS_HW_AHB_CLK);
 err_disable_hw_clock:
