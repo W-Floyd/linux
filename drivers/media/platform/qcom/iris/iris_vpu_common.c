@@ -194,25 +194,49 @@ int iris_vpu_power_off_controller(struct iris_core *core)
 			goto disable_power;
 	}
 
-	writel(REQ_POWER_DOWN_PREP, core->reg_base + WRAPPER_IRIS_CPU_NOC_LPI_CONTROL);
+	/*
+	 * AR50_LITE has no NOC low-power-interface handshake. Qualcomm's own
+	 * driver (msm-vidc v2, driver/variant/ar50lt/) powers this controller
+	 * down with regulator and clock disables plus an ahb2axi bridge reset,
+	 * and never writes WRAPPER_IRIS_CPU_NOC_LPI_CONTROL at all -- the
+	 * register belongs to the Iris2 map.
+	 *
+	 * Requesting it here is not merely a no-op. Measured on SM6225: the
+	 * status bit never sets, the poll returns -ETIMEDOUT after 2 ms with
+	 * val = 0x0, and the clocks and power domain then go down behind a NOC
+	 * that never quiesced.
+	 */
+	if (!core->iris_platform_data->no_noc_lpi) {
+		writel(REQ_POWER_DOWN_PREP, core->reg_base + WRAPPER_IRIS_CPU_NOC_LPI_CONTROL);
 
-	ret = readl_poll_timeout(core->reg_base + WRAPPER_IRIS_CPU_NOC_LPI_STATUS,
-				 val, val & BIT(0), 200, 2000);
-	if (ret) {
-		/*
-		 * Do not leave the request asserted on a NOC that did not ack
-		 * it; the teardown below is what turns that into a fabric hang.
-		 */
-		writel(0x0, core->reg_base + WRAPPER_IRIS_CPU_NOC_LPI_CONTROL);
-		goto disable_power;
+		ret = readl_poll_timeout(core->reg_base + WRAPPER_IRIS_CPU_NOC_LPI_STATUS,
+					 val, val & BIT(0), 200, 2000);
+		if (ret) {
+			/*
+			 * Do not leave the request asserted on a NOC that did
+			 * not ack it; the teardown below is what turns that
+			 * into a fabric hang.
+			 */
+			writel(0x0, core->reg_base + WRAPPER_IRIS_CPU_NOC_LPI_CONTROL);
+			goto disable_power;
+		}
 	}
 
-	writel(0x0, core->reg_base + WRAPPER_DEBUG_BRIDGE_LPI_CONTROL);
+	/*
+	 * Same generation split as above: the debug bridge LPI block is Iris2's.
+	 * Skipping it on AR50_LITE matters because a timeout here jumps over the
+	 * AXI clock halt and QNS4PDXFIFO reset below, which is the closest
+	 * mainline equivalent of the vendor's reset_ahb2axi_bridge() and is the
+	 * part this core does need.
+	 */
+	if (!core->iris_platform_data->no_noc_lpi) {
+		writel(0x0, core->reg_base + WRAPPER_DEBUG_BRIDGE_LPI_CONTROL);
 
-	ret = readl_poll_timeout(core->reg_base + WRAPPER_DEBUG_BRIDGE_LPI_STATUS,
-				 val, val == 0, 200, 2000);
-	if (ret)
-		goto disable_power;
+		ret = readl_poll_timeout(core->reg_base + WRAPPER_DEBUG_BRIDGE_LPI_STATUS,
+					 val, val == 0, 200, 2000);
+		if (ret)
+			goto disable_power;
+	}
 
 	writel(CTL_AXI_CLK_HALT | CTL_CLK_HALT,
 	       core->reg_base + WRAPPER_TZ_CTL_AXI_CLOCK_CONFIG);
