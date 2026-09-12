@@ -58,6 +58,25 @@ static int core_clks_enable(struct venus_core *core)
 		dev_pm_opp_put(opp);
 	}
 
+	/*
+	 * Establish the performance-state vote on the OPP power domain before
+	 * the core clocks come up.
+	 *
+	 * core_power_v4(POWER_OFF) explicitly *drops* this vote with
+	 * dev_pm_opp_set_rate(dev, 0), but nothing on the power-on side ever
+	 * established it: core_clks_set_rate(), the only caller of
+	 * dev_pm_opp_set_rate() with a real rate, is reached from
+	 * load_scale_v4(), which runs when a session starts -- long after the
+	 * firmware has been clocked and booted. Until then the core ran at the
+	 * lowest OPP's frequency with the domain left wherever RPM had it, and
+	 * no required-opps vote to match.
+	 */
+	if (core->opp_pmdomain) {
+		ret = dev_pm_opp_set_rate(dev, freq);
+		if (ret)
+			goto err;
+	}
+
 	for (i = 0; i < res->clks_num; i++) {
 		if (IS_V6(core) || (IS_V4(core) && is_lite(core))) {
 			ret = clk_set_rate(core->clks[i], freq);
