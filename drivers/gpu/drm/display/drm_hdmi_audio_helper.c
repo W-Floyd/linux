@@ -130,7 +130,24 @@ EXPORT_SYMBOL(drm_connector_hdmi_audio_plugged_notify);
 
 static const struct hdmi_codec_ops drm_connector_hdmi_audio_ops = {
 	.audio_startup = drm_connector_hdmi_audio_startup,
-	.prepare = drm_connector_hdmi_audio_prepare,
+	/*
+	 * Configure the encoder from hw_params rather than prepare. ASoC runs
+	 * hw_params on a link before it prepares any DAI on it, and prepares
+	 * the CPU DAI before the codec one, so a controller whose CPU side
+	 * waits on the display would wait on something this callback has not
+	 * done yet.
+	 *
+	 * Qualcomm's is such a controller: its ADSP synchronises DisplayPort
+	 * audio to an interrupt from the display engine, which is raised from
+	 * here. Configuring at prepare left the AFE port start blocked until it
+	 * timed out, because the display was only told afterwards.
+	 *
+	 * The two callbacks are interchangeable -- hdmi-codec documents either
+	 * as sufficient, they take the same arguments, and hdmi_codec_hw_params()
+	 * fills them from the same values hdmi_codec_prepare() reads back off
+	 * the runtime.
+	 */
+	.hw_params = drm_connector_hdmi_audio_prepare,
 	.audio_shutdown = drm_connector_hdmi_audio_shutdown,
 	.mute_stream = drm_connector_hdmi_audio_mute_stream,
 	.get_eld = drm_connector_hdmi_audio_get_eld,
