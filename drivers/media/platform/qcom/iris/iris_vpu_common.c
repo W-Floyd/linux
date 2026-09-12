@@ -198,8 +198,14 @@ int iris_vpu_power_off_controller(struct iris_core *core)
 
 	ret = readl_poll_timeout(core->reg_base + WRAPPER_IRIS_CPU_NOC_LPI_STATUS,
 				 val, val & BIT(0), 200, 2000);
-	if (ret)
+	if (ret) {
+		/*
+		 * Do not leave the request asserted on a NOC that did not ack
+		 * it; the teardown below is what turns that into a fabric hang.
+		 */
+		writel(0x0, core->reg_base + WRAPPER_IRIS_CPU_NOC_LPI_CONTROL);
 		goto disable_power;
+	}
 
 	writel(0x0, core->reg_base + WRAPPER_DEBUG_BRIDGE_LPI_CONTROL);
 
@@ -353,8 +359,14 @@ int iris_vpu35_vpu4x_power_off_controller(struct iris_core *core)
 
 	ret = readl_poll_timeout(core->reg_base + WRAPPER_IRIS_CPU_NOC_LPI_STATUS,
 				 val, val & BIT(0), 200, 2000);
-	if (ret)
+	if (ret) {
+		/*
+		 * Do not leave the request asserted on a NOC that did not ack
+		 * it; the teardown below is what turns that into a fabric hang.
+		 */
+		writel(0x0, core->reg_base + WRAPPER_IRIS_CPU_NOC_LPI_CONTROL);
 		goto disable_power;
+	}
 
 	writel(0, core->reg_base + WRAPPER_IRIS_CPU_NOC_LPI_CONTROL);
 
