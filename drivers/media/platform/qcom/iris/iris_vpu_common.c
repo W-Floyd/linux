@@ -92,7 +92,10 @@ int iris_vpu_boot_firmware(struct iris_core *core)
 	}
 
 	if (count >= max_tries) {
-		dev_err(core->dev, "error booting up iris firmware\n");
+		dev_err(core->dev,
+			"error booting up iris firmware (CTRL_STATUS=0x%x after %u tries, INTR_MASK=0x%x)\n",
+			readl(core->reg_base + CTRL_STATUS), count,
+			readl(core->reg_base + WRAPPER_INTR_MASK));
 		return -ETIME;
 	}
 
@@ -236,8 +239,17 @@ void iris_vpu_power_off(struct iris_core *core)
 	core->iris_platform_data->vpu_ops->power_off_controller(core);
 	iris_unset_icc_bw(core);
 
+	/*
+	 * disable_irq_nosync(), not disable_irq(): iris_core_init() calls this
+	 * from its error paths while still holding core->lock (only the success
+	 * path unlocks first), and iris_hfi_isr_handler() takes that same lock
+	 * as its first statement. Waiting for the threaded handler to finish
+	 * here therefore deadlocks whenever an interrupt is in flight during an
+	 * error unwind -- observed as irq/N-iris blocked inside
+	 * iris_hfi_isr_handler() while the opener sat in __synchronize_irq().
+	 */
 	if (!iris_vpu_watchdog(core, core->intr_status))
-		disable_irq(core->irq);
+		disable_irq_nosync(core->irq);
 }
 
 int iris_vpu_power_on_controller(struct iris_core *core)
