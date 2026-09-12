@@ -212,6 +212,7 @@ static int sdm845_snd_hw_params(struct snd_pcm_substream *substream,
 		break;
 	case QUATERNARY_MI2S_RX:
 	case SECONDARY_MI2S_RX:
+	case DISPLAY_PORT_RX:
 		break;
 	default:
 		pr_err("%s: invalid dai id 0x%x\n", __func__, cpu_dai->id);
@@ -431,6 +432,7 @@ static int sdm845_snd_startup(struct snd_pcm_substream *substream)
 		}
 		break;
 	case SLIMBUS_0_RX...SLIMBUS_6_TX:
+	case DISPLAY_PORT_RX:
 		break;
 
 	default:
@@ -479,6 +481,7 @@ static void  sdm845_snd_shutdown(struct snd_pcm_substream *substream)
 		break;
 	case SLIMBUS_0_RX...SLIMBUS_6_TX:
 	case QUATERNARY_MI2S_RX:
+	case DISPLAY_PORT_RX:
 		break;
 
 	default:
