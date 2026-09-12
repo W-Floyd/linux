@@ -327,6 +327,13 @@ struct iris_platform_data {
 	 * quiesces, and the teardown that follows hangs the SoC.
 	 */
 	bool no_noc_lpi;
+	/*
+	 * Set on cores whose firmware has no UBWC configuration interface
+	 * (AR50_LITE). SYS_INIT must then carry HFI_CMD_INIT alone -- this
+	 * firmware answers the first UBWC property with HFI_SYS_ERROR_FATAL
+	 * rather than ignoring it.
+	 */
+	bool no_ubwc_props;
 	u32 max_session_count;
 	/* max number of macroblocks per frame supported */
 	u32 max_core_mbpf;

@@ -140,6 +140,19 @@ void iris_hfi_gen2_packet_sys_init(struct iris_core *core, struct iris_hfi_heade
 				    &payload,
 				    sizeof(u32));
 
+	/*
+	 * AR50_LITE's firmware has no UBWC configuration interface, and does not
+	 * merely ignore one: the first property below is answered with
+	 * HFI_SYS_ERROR_FATAL, which fails core init and takes the whole
+	 * SYS_INIT with it. msm-vidc does the same thing from the other
+	 * direction -- hfi_packet_sys_init() returns right after HFI_CMD_INIT
+	 * when the platform has no UBWC config, and khaje, monaco and ravelin
+	 * (the AR50_LITE parts) all set .ubwc_config = NULL while the Iris2
+	 * ones declare it.
+	 */
+	if (core->iris_platform_data->no_ubwc_props)
+		return;
+
 	payload = qcom_ubwc_macrotile_mode(ubwc) ? 8 : 4;
 	iris_hfi_gen2_create_packet(hdr,
 				    HFI_PROP_UBWC_MAX_CHANNELS,
