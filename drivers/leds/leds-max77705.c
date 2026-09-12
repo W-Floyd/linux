@@ -100,8 +100,8 @@ static int max77705_led_brightness_set(struct regmap *regmap, struct mc_subled *
 
 			ret = regmap_update_bits(regmap,
 					MAX77705_RGBLED_REG_LEDEN,
-					LED_ON << MAX77705_LED_EN_SHIFT(channel),
-					MAX77705_LED_EN_MASK << MAX77705_LED_EN_SHIFT(channel));
+					MAX77705_LED_EN_MASK << MAX77705_LED_EN_SHIFT(channel),
+					LED_ON << MAX77705_LED_EN_SHIFT(channel));
 		}
 	}
 
