@@ -4745,6 +4745,7 @@
 			mdss_dp: displayport-controller@ae90000 {
 				status = "disabled";
 				compatible = "qcom,sdm845-dp";
+				#sound-dai-cells = <0>;
 
 				reg = <0 0x0ae90000 0 0x200>,
 				      <0 0x0ae90200 0 0x200>,
