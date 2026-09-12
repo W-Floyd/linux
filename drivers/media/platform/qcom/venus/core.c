@@ -103,8 +103,16 @@ static void venus_sys_error_handler(struct work_struct *work)
 	core->ops->core_deinit(core);
 	core->state = CORE_UNINIT;
 
+	/*
+	 * A firmware SYS_ERROR can arrive before the decoder and encoder child
+	 * devices have probed -- hfi_core_init() runs during venus_probe(), and
+	 * vdec_probe()/venc_probe() are what set dev_dec/dev_enc. Both are
+	 * still NULL in that window, and pm_runtime_active() dereferences its
+	 * argument, so this must not assume they exist.
+	 */
 	for (i = 0; i < max_attempts; i++) {
-		if (!pm_runtime_active(core->dev_dec) && !pm_runtime_active(core->dev_enc))
+		if (!(core->dev_dec && pm_runtime_active(core->dev_dec)) &&
+		    !(core->dev_enc && pm_runtime_active(core->dev_enc)))
 			break;
 		msleep(10);
 	}
@@ -515,6 +523,14 @@ err_remove_dynamic_nodes:
 err_core_deinit:
 	hfi_core_deinit(core, false);
 err_venus_shutdown:
+	/*
+	 * A firmware SYS_ERROR during hfi_core_init() queues the recovery work
+	 * from venus_event_notify(). Leaving it queued lets it run against a
+	 * core this path is still tearing down, and on failure it re-arms
+	 * itself every 10 ms forever, so it has to be cancelled here as well as
+	 * in venus_remove().
+	 */
+	cancel_delayed_work_sync(&core->work);
 	venus_shutdown(core);
 err_firmware_deinit:
 	venus_firmware_deinit(core);
