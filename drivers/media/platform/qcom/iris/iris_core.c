@@ -59,7 +59,7 @@ int iris_core_init(struct iris_core *core)
 		goto exit;
 	} else if (core->state == IRIS_CORE_ERROR) {
 		ret = -EINVAL;
-		goto error;
+		goto exit;
 	}
 
 	core->state = IRIS_CORE_INIT;
