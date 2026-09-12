@@ -22,7 +22,6 @@
 #include "hfi_venus_io.h"
 
 #define VENUS_PAS_ID			9
-#define VENUS_FW_MEM_SIZE		(6 * SZ_1M)
 #define VENUS_FW_START_ADDR		0x0
 
 static void venus_reset_cpu(struct venus_core *core)
@@ -112,7 +111,7 @@ static int venus_load_fw(struct venus_core *core, const char *fwname,
 	*mem_phys = res.start;
 	*mem_size = resource_size(&res);
 
-	if (*mem_size < fw_size || fw_size > VENUS_FW_MEM_SIZE) {
+	if (*mem_size < fw_size) {
 		ret = -EINVAL;
 		goto err_release_fw;
 	}
