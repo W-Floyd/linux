@@ -215,7 +215,7 @@ static int max77705_parse_subled(struct device *dev, struct fwnode_handle *np,
 static int max77705_add_led(struct device *dev, struct regmap *regmap, struct fwnode_handle *np)
 {
 	int ret, i = 0;
-	unsigned int color = LED_COLOR_ID_GREEN, reg;
+	unsigned int color = LED_COLOR_ID_GREEN;
 	struct max77705_led *led;
 	struct led_classdev *cdev;
 	struct mc_subled *info;
@@ -236,10 +236,6 @@ static int max77705_add_led(struct device *dev, struct regmap *regmap, struct fw
 
 	if (color == LED_COLOR_ID_RGB) {
 		int num_channels = of_get_available_child_count(to_of_node(np));
-
-		ret = fwnode_property_read_u32(np, "reg", &reg);
-		if (ret || reg >= MAX77705_LED_NUM_LEDS)
-			return -EINVAL;
 
 		info = devm_kcalloc(dev, num_channels, sizeof(*info), GFP_KERNEL);
 		if (!info)
