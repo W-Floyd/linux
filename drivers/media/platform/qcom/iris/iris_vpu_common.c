@@ -234,6 +234,15 @@ void iris_vpu_power_off_hw(struct iris_core *core)
 
 void iris_vpu_power_off(struct iris_core *core)
 {
+	/*
+	 * Mark the rails down before touching any of them. iris_hfi_isr_handler()
+	 * may already be blocked on core->lock (iris_core_init() holds it across
+	 * its whole error unwind, and disable_irq_nosync() below does not wait
+	 * for a threaded handler that is already running). When it finally gets
+	 * the lock it must not issue the MMIO in iris_vpu_clear_interrupt().
+	 */
+	core->power_enabled = false;
+
 	iris_opp_set_rate(core->dev, 0);
 	core->iris_platform_data->vpu_ops->power_off_hw(core);
 	core->iris_platform_data->vpu_ops->power_off_controller(core);
@@ -499,6 +508,7 @@ int iris_vpu_power_on(struct iris_core *core)
 
 	iris_vpu_interrupt_init(core);
 	core->intr_status = 0;
+	core->power_enabled = true;
 	enable_irq(core->irq);
 
 	return 0;
