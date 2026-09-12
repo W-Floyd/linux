@@ -481,11 +481,6 @@
 			no-map;
 		};
 
-		pil_video_mem: memory@51400000 {
-			reg = <0x0 0x51400000 0x0 0x500000>;
-			no-map;
-		};
-
 		wlan_msa_mem: memory@51900000 {
 			reg = <0x0 0x51900000 0x0 0x100000>;
 			no-map;
@@ -513,6 +508,26 @@
 
 		pil_gpu_mem: memory@55615000 {
 			reg = <0x0 0x55615000 0x0 0x2000>;
+			no-map;
+		};
+
+		/*
+		 * Both the address and the size come from Qualcomm's khaje
+		 * device tree, which reserves 0x700000 here, immediately after
+		 * pil_gpu_mem. The size has to match the firmware: the
+		 * venus.mbn this SoC carries spans exactly 0x700000, measured
+		 * the way qcom_mdt_get_size() measures it. The address matters
+		 * too -- the TZ authenticates the image for VENUS_PAS_ID
+		 * against a fixed region, so a correctly sized carveout at the
+		 * wrong address is not equivalent.
+		 *
+		 * This used to sit at 0x51400000 with 0x500000, which is both
+		 * too small for the firmware and not where the TZ expects it.
+		 * It could not simply grow in place: 0x51400000 + 0x700000
+		 * runs into wlan_msa_mem at 0x51900000.
+		 */
+		pil_video_mem: memory@55617000 {
+			reg = <0x0 0x55617000 0x0 0x700000>;
 			no-map;
 		};
 
