@@ -148,6 +148,7 @@ const struct iris_platform_data sm6225_data = {
 	.tz_cp_config_data_size = ARRAY_SIZE(tz_cp_config_sm6225),
 	.num_vpp_pipe = 1,
 	.no_aon = true,
+	.no_noc_lpi = true,
 	.max_session_count = 16,
 	/* khaje tops out at 1080p@30 + 720p@30, i.e. max_load 352800 */
 	.max_core_mbpf = (1920 * 1088) / 256 + (1280 * 736) / 256,
