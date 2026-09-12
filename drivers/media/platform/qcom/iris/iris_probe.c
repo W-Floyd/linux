@@ -200,6 +200,17 @@ static void iris_remove(struct platform_device *pdev)
 	if (!core)
 		return;
 
+	/*
+	 * Stop the sys_error work before anything it touches goes away. It
+	 * re-arms itself on every firmware error -- deinit + init, and init
+	 * failing raises the next error -- so on a core the firmware is
+	 * rejecting it is pending essentially all the time, and nothing below
+	 * waits for it: core is devm memory, core->lock is destroyed at the end
+	 * of this function, and on module unload the work function itself is
+	 * freed with the module text.
+	 */
+	disable_delayed_work_sync(&core->sys_error_handler);
+
 	iris_core_deinit(core);
 
 	video_unregister_device(core->vdev_dec);
