@@ -820,6 +820,23 @@
 	status = "disabled";
 };
 
+/*
+ * The venus driver's default for this compatible is
+ * "qcom/venus-6.0/venus.mbn", a path nothing on this rootfs provides.
+ * msm-firmware-loader assembles the vendor partition's firmware into a flat
+ * directory and points the kernel's search path at it
+ * (/sys/module/firmware_class/parameters/path), so the image is simply
+ * "venus.mbn" -- extracted from modem_a/image, 0x700000 of loadable segments,
+ * which is what pil_video_mem is now sized and placed for.
+ *
+ * This belongs on the board rather than in sm6225.dtsi because it describes
+ * where *this* rootfs puts firmware, not where the SoC keeps it. The node
+ * stays disabled here; enable it for a build the same way &gpu is.
+ */
+&venus {
+	firmware-name = "venus.mbn";
+};
+
 &adreno_smmu {
 	status = "okay";
 };
