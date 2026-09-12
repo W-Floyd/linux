@@ -385,6 +385,28 @@ static void q6afe_dai_shutdown(struct snd_pcm_substream *substream,
 
 }
 
+/*
+ * Stop a display port before the display is told to withdraw audio.
+ *
+ * The DSP ties these ports to the display engine: it acts on an interrupt
+ * raised when the display enables or disables audio, rather than on our
+ * command alone. Stopping from .shutdown is too late, because the DAIs are
+ * shut down in reverse and the codec -- the display -- has already gone by
+ * then. The stop that follows is never answered, the port is left started,
+ * and the next attempt to start it is refused as already done.
+ *
+ * Every hw_free on a link runs before any shutdown on it, so stop here
+ * instead. .shutdown stays harmless: it returns early once the port is no
+ * longer marked started.
+ */
+static int q6afe_dai_hw_free(struct snd_pcm_substream *substream,
+			     struct snd_soc_dai *dai)
+{
+	q6afe_dai_shutdown(substream, dai);
+
+	return 0;
+}
+
 static int q6afe_dai_prepare(struct snd_pcm_substream *substream,
 		struct snd_soc_dai *dai)
 {
@@ -731,6 +753,7 @@ static const struct snd_soc_dai_ops q6hdmi_ops = {
 	.remove			= msm_dai_q6_dai_remove,
 	.prepare		= q6afe_dai_prepare,
 	.hw_params		= q6hdmi_hw_params,
+	.hw_free		= q6afe_dai_hw_free,
 	.shutdown		= q6afe_dai_shutdown,
 };
 
