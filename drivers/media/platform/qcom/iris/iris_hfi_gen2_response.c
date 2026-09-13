@@ -372,7 +372,25 @@ static int iris_hfi_gen2_handle_output_buffer(struct iris_inst *inst,
 	 * instead -- see msm_vidc_allow_last_flag() -- and so do we.
 	 */
 	if (hfi_buffer->flags & HFI_BUF_FW_FLAG_LAST) {
-		if (iris_inst_sub_state_change_drain_last(inst))
+		int ret;
+
+		/*
+		 * The same flag ends a drain and ends the sequence a source
+		 * change interrupts; which one it is depends on what the driver
+		 * asked for, not on the flag. msm_vidc_allow_last_flag() accepts
+		 * it while draining and while a source change is pending alike,
+		 * and firmware that has no separate PSC_LAST -- AR50_LITE, and
+		 * every part msm-vidc supports -- marks the last buffer before a
+		 * source change with this flag and no other.
+		 */
+		if (inst->sub_state & IRIS_INST_SUB_DRAIN)
+			ret = iris_inst_sub_state_change_drain_last(inst);
+		else if (inst->sub_state & IRIS_INST_SUB_DRC)
+			ret = iris_inst_sub_state_change_drc_last(inst);
+		else
+			ret = -EINVAL;
+
+		if (ret)
 			hfi_buffer->flags &= ~HFI_BUF_FW_FLAG_LAST;
 	}
 
