@@ -767,12 +767,30 @@
 	status = "okay";
 };
 
+/*
+ * The Adreno 610 is what makes this a usable phone: phoc builds its renderer on
+ * it, and with the GPU off Turnip cannot find a device ("could not get GPU ID"),
+ * wlroots fails both its Vulkan and GLES paths, the greeter exits without
+ * creating a session, and greetd crash-loops into systemd's start limit. The
+ * panel stays lit with nothing drawing on it, which reads as a display bug and
+ * is not one.
+ *
+ * These were left disabled while the GPU was the thing under investigation, and
+ * that made sense when every image was hand-built with them flipped on. It stops
+ * making sense now that the device assembles its own boot image from the
+ * packaged DTB (fogona-mkboot), because the default is what ships.
+ *
+ * Known cost, deliberately accepted: sustained load at the top OPPs still
+ * produces a6xx_irq faults and hangcheck recoveries, and eventually a hard crash
+ * to the bootloader -- see /repo/investigations/gpu-adreno610.md. A phone that
+ * can fault under load beats a phone with no session at all.
+ */
 &gpu {
-	status = "disabled";
+	status = "okay";
 };
 
 &gmu_wrapper {
-	status = "disabled";
+	status = "okay";
 };
 
 /*
@@ -785,11 +803,17 @@
  * which is what pil_video_mem is now sized and placed for.
  *
  * This belongs on the board rather than in sm6225.dtsi because it describes
- * where *this* rootfs puts firmware, not where the SoC keeps it. The node
- * stays disabled here; enable it for a build the same way &gpu is.
+ * where *this* rootfs puts firmware, not where the SoC keeps it.
+ *
+ * Enabled: iris brings the core up on this firmware -- SYS_INIT completes and
+ * the firmware answers HFI_PROP_IMAGE_VERSION. Both drivers match this node's
+ * "qcom,sm6225-venus" compatible, so exactly one of them may be loaded;
+ * /etc/modprobe.d/fogona-video.conf in the device package blacklists venus_core
+ * and leaves qcom_iris to bind.
  */
 &venus {
 	firmware-name = "venus.mbn";
+	status = "okay";
 };
 
 &adreno_smmu {
