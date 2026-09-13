@@ -1178,17 +1178,24 @@ static int iris_hfi_gen2_session_pause(struct iris_inst *inst, u32 plane)
 static int iris_hfi_gen2_session_resume_drc(struct iris_inst *inst, u32 plane)
 {
 	struct iris_inst_hfi_gen2 *inst_hfi_gen2 = to_iris_inst_hfi_gen2(inst);
-	u32 payload = HFI_CMD_SETTINGS_CHANGE;
 
+	/*
+	 * No payload. The firmware knows what it paused for, and a RESUME
+	 * carrying a command code as a u32 is not something it acknowledges:
+	 * on AR50_LITE it answers HFI_FW_FLAGS_INFORMATION instead of
+	 * HFI_FW_FLAGS_SUCCESS, leaves the bitstream port paused, and decoding
+	 * never starts. msm-vidc sends RESUME with no payload on every part it
+	 * supports.
+	 */
 	iris_hfi_gen2_packet_session_command(inst,
 					     HFI_CMD_RESUME,
 					     (HFI_HOST_FLAGS_RESPONSE_REQUIRED |
 					     HFI_HOST_FLAGS_INTR_REQUIRED),
 					     iris_hfi_gen2_get_port(inst, plane),
 					     inst->session_id,
-					     HFI_PAYLOAD_U32,
-					     &payload,
-					     sizeof(u32));
+					     HFI_PAYLOAD_NONE,
+					     NULL,
+					     0);
 
 	return iris_hfi_queue_cmd_write(inst->core, inst_hfi_gen2->packet,
 					inst_hfi_gen2->packet->size);
