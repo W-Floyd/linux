@@ -332,11 +332,17 @@ static int iris_hfi_gen2_handle_input_buffer(struct iris_inst *inst,
 			break;
 		}
 	}
+	/*
+	 * A buffer the driver no longer knows about is not an error either.
+	 * After a flush vb2 has reclaimed the buffers while the firmware may
+	 * still return ones it was holding, and a buffer already dequeued
+	 * cannot be dequeued twice.
+	 */
 	if (!found)
-		return -EINVAL;
+		return 0;
 
 	if (!(buf->attr & BUF_ATTR_QUEUED))
-		return -EINVAL;
+		return 0;
 
 	buf->attr &= ~BUF_ATTR_QUEUED;
 	buf->attr |= BUF_ATTR_DEQUEUED;
@@ -353,18 +359,26 @@ static int iris_hfi_gen2_handle_output_buffer(struct iris_inst *inst,
 	struct v4l2_m2m_buffer *m2m_buffer, *n;
 	struct iris_buffer *buf;
 	bool found = false;
-	int ret;
 
+	/*
+	 * A LAST flag that does not fit the current state is not an error.
+	 * After a flush -- a seek, say -- the firmware can hand back a buffer
+	 * marked as the last of the sequence it was decoding before the flush,
+	 * while the driver is not draining and the sub-state change is refused.
+	 *
+	 * Failing here is fatal: iris_hfi_gen2_handle_session_response() answers
+	 * any handler error by moving the instance to IRIS_INST_ERROR, so a
+	 * single seek permanently stops playback. msm-vidc discards the flag
+	 * instead -- see msm_vidc_allow_last_flag() -- and so do we.
+	 */
 	if (hfi_buffer->flags & HFI_BUF_FW_FLAG_LAST) {
-		ret = iris_inst_sub_state_change_drain_last(inst);
-		if (ret)
-			return ret;
+		if (iris_inst_sub_state_change_drain_last(inst))
+			hfi_buffer->flags &= ~HFI_BUF_FW_FLAG_LAST;
 	}
 
 	if (hfi_buffer->flags & HFI_BUF_FW_FLAG_PSC_LAST) {
-		ret = iris_inst_sub_state_change_drc_last(inst);
-		if (ret)
-			return ret;
+		if (iris_inst_sub_state_change_drc_last(inst))
+			hfi_buffer->flags &= ~HFI_BUF_FW_FLAG_PSC_LAST;
 	}
 
 	v4l2_m2m_for_each_dst_buf_safe(m2m_ctx, m2m_buffer, n) {
@@ -376,11 +390,12 @@ static int iris_hfi_gen2_handle_output_buffer(struct iris_inst *inst,
 			break;
 		}
 	}
+	/* Not an error -- see iris_hfi_gen2_handle_input_buffer(). */
 	if (!found)
-		return -EINVAL;
+		return 0;
 
 	if (!(buf->attr & BUF_ATTR_QUEUED))
-		return -EINVAL;
+		return 0;
 
 	/*
 	 * A capture buffer that comes back empty carries no frame, and the only
