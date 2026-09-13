@@ -330,8 +330,17 @@
 	regulators-0 {
 		compatible = "qcom,rpm-pm6125-regulators";
 
+		/*
+		 * The 0.9 V analog rail: UFS's vdda-phy, the DSI PHY's
+		 * vdda-0p9 and VDD_A_CSI_0/1/2_0P9. The minimum here is the
+		 * operating point, not the LDO's floor, because nothing on
+		 * this board asks the regulator for a voltage -- so whatever
+		 * the minimum says is what the rail sits at. With the LDO's
+		 * 720 mV floor it sat at 720 mV, 20% under every consumer's
+		 * nominal, which is measurable in /sys/class/regulator.
+		 */
 		pm6125_l4: l4 {
-			regulator-min-microvolt = <720000>;
+			regulator-min-microvolt = <900000>;
 			regulator-max-microvolt = <1050000>;
 		};
 
@@ -363,8 +372,15 @@
 			regulator-max-microvolt = <3544000>;
 		};
 
+		/*
+		 * The 1.2 V PLL rail: UFS's vdda-pll, the DSI's vdda-1p2 and
+		 * VDD_A_CSI_0/1/2_1P2. Same reasoning as L4 above -- it was
+		 * sitting at its 1.1 V floor rather than the 1.2 V every
+		 * consumer wants. The sibling tb128 pins this at 1.232 V for
+		 * the DSI PHY, which this window still allows.
+		 */
 		pm6125_l18: l18 {
-			regulator-min-microvolt = <1100000>;
+			regulator-min-microvolt = <1200000>;
 			regulator-max-microvolt = <1300000>;
 		};
 
