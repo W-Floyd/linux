@@ -195,6 +195,42 @@
 			debounce-interval = <15>;
 		};
 	};
+
+	/*
+	 * Speaker playback. Both amplifiers sit on the one primary MI2S port,
+	 * so they are two codecs on a single dai-link rather than two links.
+	 *
+	 * The card deliberately programs no LPASS clocks of its own: under
+	 * AudioReach the interface clocking belongs to the DSP graph, and
+	 * q6apm-lpass-dais only takes an explicit bit clock when the port node
+	 * carries "mclk"/"bclk" clock references, which it does not here. This
+	 * mirrors monaco-evk, the other GPR board with a plain I2S codec on
+	 * MI2S. If playback ever runs with no audible output and no error, the
+	 * machine driver's mi2s_bclk_enable path is the first thing to try.
+	 */
+	sound {
+		compatible = "motorola,fogona-sndcard";
+		model = "Moto-G-Play-2024";
+
+		pinctrl-0 = <&lpi_i2s1_active>;
+		pinctrl-names = "default";
+
+		pri-mi2s-dai-link {
+			link-name = "Primary MI2S Playback";
+
+			codec {
+				sound-dai = <&speaker_amp>, <&receiver_amp>;
+			};
+
+			cpu {
+				sound-dai = <&q6apmbedai PRIMARY_MI2S_RX>;
+			};
+
+			platform {
+				sound-dai = <&q6apm>;
+			};
+		};
+	};
 };
 
 /*
@@ -449,6 +485,46 @@
 			02 a0 5f 00 00 00 64 23 c3 55
 			00 00 00 00 00 00 00 00 00 c6
 		];
+	};
+
+	/*
+	 * The two speaker amplifiers. Both are AW88261s on the primary MI2S
+	 * port, distinguished only by I2C address and channel: 0x34 is the
+	 * loudspeaker, 0x35 the earpiece.
+	 *
+	 * awinic,audio-channel is not cosmetic and not a slot number -- it
+	 * selects which tuning the shared ACF container applies, because
+	 * aw88395_lib.c matches it against each section's dev_index. The
+	 * container on this handset carries dev_index 0 and 1, so these values
+	 * follow Motorola's own assignment rather than being chosen.
+	 *
+	 * firmware-name points at the vendor ACF, which msm-firmware-loader
+	 * already exposes from the vendor partition -- the driver hard-fails
+	 * probe without one, as there is no register-defaults fallback.
+	 *
+	 * No reset-gpios: the binding forbids them on aw88261, which has no
+	 * reset pin. No interrupts either -- downstream wires TLMM 102 and 107
+	 * to these parts, but mainline's driver has no interrupt support and
+	 * the binding does not allow the property.
+	 */
+	speaker_amp: audio-codec@34 {
+		compatible = "awinic,aw88261";
+		reg = <0x34>;
+
+		#sound-dai-cells = <0>;
+		awinic,audio-channel = <1>;
+		dvdd-supply = <&pm6125_l9>;
+		firmware-name = "aw882xx_acf.bin";
+	};
+
+	receiver_amp: audio-codec@35 {
+		compatible = "awinic,aw88261";
+		reg = <0x35>;
+
+		#sound-dai-cells = <0>;
+		awinic,audio-channel = <0>;
+		dvdd-supply = <&pm6125_l9>;
+		firmware-name = "aw882xx_acf.bin";
 	};
 };
 
