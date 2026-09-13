@@ -457,8 +457,15 @@
 	status = "okay";
 };
 
+/*
+ * No firmware-name here on purpose. The driver default for this compatible is
+ * the bare "modem.mdt", which is what msm-firmware-loader links flat into the
+ * firmware search path and what resolves on this handset. The nested
+ * qcom/sm6225/motorola/fogona/ subtree that something else creates under that
+ * root points at /mnt/modem, which is an empty directory, so every file under
+ * it dangles -- naming it here is how the modem failed to load for months.
+ */
 &remoteproc_mpss {
-	firmware-name = "qcom/sm6225/motorola/fogona/modem.mdt";
 	status = "okay";
 };
 
