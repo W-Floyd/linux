@@ -319,6 +319,44 @@ static void vfe_violation_read(struct vfe_device *vfe)
 }
 
 /*
+ * vfe_isr_errors - Report error interrupts
+ * @vfe: VFE device
+ * @status1: Content of VFE_IRQ_STATUS_1
+ * @bus_status: Content of the VFE_BUS_IRQ_STATUS registers
+ *
+ * Every bit tested here is already unmasked by vfe_enable_irq_common(), so the
+ * hardware is already raising these interrupts; they were simply never looked
+ * at. Reporting them costs no additional interrupts.
+ */
+static void vfe_isr_errors(struct vfe_device *vfe, u32 status1,
+			   const u32 *bus_status)
+{
+	struct device *dev = vfe->camss->dev;
+	unsigned int i;
+
+	if (status1 & STATUS_1_VIOLATION)
+		vfe->res->hw_ops->violation_read(vfe);
+
+	if (status1 & MASK_1_CAMIF_ERROR)
+		dev_err_ratelimited(dev, "VFE%u: CAMIF error\n", vfe->id);
+
+	for (i = 0; i < MSM_VFE_IMAGE_MASTERS_NUM; i++)
+		if (status1 & MASK_1_IMAGE_MASTER_n_BUS_OVERFLOW(i))
+			dev_err_ratelimited(dev,
+					    "VFE%u: write master %u bus overflow\n",
+					    vfe->id, i);
+
+	if (bus_status[0] & STATUS0_COMP_ERROR)
+		dev_err_ratelimited(dev, "VFE%u: bus composite error\n", vfe->id);
+
+	if (bus_status[0] & STATUS0_OVERFLOW)
+		dev_err_ratelimited(dev, "VFE%u: bus overflow\n", vfe->id);
+
+	if (bus_status[0] & STATUS0_VIOLATION)
+		dev_err_ratelimited(dev, "VFE%u: bus violation\n", vfe->id);
+}
+
+/*
  * vfe_isr - VFE module interrupt handler
  * @irq: Interrupt line
  * @dev: VFE device
@@ -347,6 +385,8 @@ static irqreturn_t vfe_isr(int irq, void *dev)
 
 	writel_relaxed(CMD_GLOBAL_CLEAR, vfe->base + VFE_IRQ_CMD);
 	writel_relaxed(1, vfe->base + VFE_BUS_IRQ_CLEAR_GLOBAL);
+
+	vfe_isr_errors(vfe, status1, vfe_bus_status);
 
 	if (status0 & STATUS_0_RESET_ACK)
 		vfe->isr_ops.reset_ack(vfe);
