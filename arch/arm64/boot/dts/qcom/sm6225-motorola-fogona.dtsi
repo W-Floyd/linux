@@ -198,6 +198,13 @@
 &tlmm {
 	gpio-reserved-ranges = <14 4>;
 
+	charger_int_n: charger-int-state {
+		pins = "gpio28";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
 	typec_int_n: typec-int-state {
 		pins = "gpio84";
 		function = "gpio";
@@ -595,6 +602,56 @@
  */
 &i2c1 {
 	status = "okay";
+
+	/*
+	 * Main charger. The schematic second-sources this position between an
+	 * SGM41542 at 0x3B and a Southchip SC89890H at 0x6A, and the stock dtbo
+	 * declares both, so the DT alone cannot say which is fitted. A bus scan
+	 * settles it: 0x3B is silent, 0x6A answers, and its REG14 part-number
+	 * field reads 4, which is the SC89890H's ID. Hence the Southchip
+	 * compatible and not a TI one -- the part shares the bq25890 register
+	 * map but not its current and boost step sizes.
+	 *
+	 * Without this node nothing drives the charger and it is left exactly
+	 * as the bootloader hands it over, which on this unit means REG03
+	 * CHG_CFG clear: VBUS present, PG good, and no charge current at all.
+	 * The phone discharges on a charger. This node is what turns that
+	 * around; it is not a tuning refinement.
+	 *
+	 * Values follow stock's bq25890@6A with one deliberate exception. Stock
+	 * regulates to 4500 mV, but it pairs that with an mmi JEITA layer that
+	 * drops to 4250 mV below 15 degrees and 4200 mV above 45. Mainline has
+	 * no JEITA for this chip, so 4500 mV would be held at every
+	 * temperature, including cold, where it risks plating the cell. 4400 mV
+	 * is our battery node's voltage-max-design and is the value to use
+	 * until something implements the temperature zones.
+	 *
+	 * No ti,use-ilim-pin: EN_ILIM is clear as the hardware is handed over,
+	 * and whether this board even fits the ILIM resistor is unestablished,
+	 * so enabling the pin could clamp the input somewhere arbitrary. The
+	 * input limit comes from the chip's own BC1.2/auto-DPDM detection
+	 * either way -- the Type-C Rp advertisement is not wired to it, and on
+	 * this chip it never will be (see investigations/charging.md).
+	 *
+	 * The boost properties are required by the binding but unused here:
+	 * the port is UFP-only and this handset is never a host.
+	 */
+	charger@6a {
+		compatible = "southchip,sc89890h";
+		reg = <0x6a>;
+
+		interrupts-extended = <&tlmm 28 IRQ_TYPE_EDGE_FALLING>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&charger_int_n>;
+
+		ti,battery-regulation-voltage = <4400000>;
+		ti,charge-current = <3000000>;
+		ti,termination-current = <243000>;
+		ti,precharge-current = <300000>;
+		ti,minimum-sys-voltage = <3500000>;
+		ti,boost-voltage = <5000000>;
+		ti,boost-max-current = <1200000>;
+	};
 
 	typec@47 {
 		compatible = "ti,tusb320";
