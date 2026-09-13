@@ -479,7 +479,10 @@
  *
  * adsp.mdt and its adsp.b* segments come from the modem partition by way of
  * msm-firmware-loader, the same route modem.mdt above takes; nothing is
- * redistributed with the port.
+ * redistributed with the port. No firmware-name here, for exactly the reason
+ * given at &remoteproc_mpss: adsp_resource_init already defaults to the bare
+ * "adsp.mdt", which is the flat link that resolves, and the nested
+ * qcom/sm6225/motorola/fogona/adsp.mdt dangles the same way modem.mdt did.
  *
  * The service layer under this node is GPR rather than APR -- see the sm6225
  * dtsi change that converted it. The distinction matters here because an ADSP
@@ -487,7 +490,6 @@
  * node coming up is not on its own evidence that audio will work.
  */
 &remoteproc_adsp {
-	firmware-name = "qcom/sm6225/motorola/fogona/adsp.mdt";
 	status = "okay";
 };
 
