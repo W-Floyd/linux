@@ -506,6 +506,14 @@
 	 * reset pin. No interrupts either -- downstream wires TLMM 102 and 107
 	 * to these parts, but mainline's driver has no interrupt support and
 	 * the binding does not allow the property.
+	 *
+	 * sound-name-prefix is load-bearing, not decoration. Two instances of
+	 * one codec driver on a single card register identically named controls
+	 * and widgets, and the second one loses: "control PCM Playback Volume
+	 * is already present", -EBUSY out of snd_soc_component_probe(), and the
+	 * whole card fails to instantiate. The prefixes make them
+	 * "Speaker ..." and "Receiver ...", which is also how userspace tells
+	 * the two apart.
 	 */
 	speaker_amp: audio-codec@34 {
 		compatible = "awinic,aw88261";
@@ -515,6 +523,7 @@
 		awinic,audio-channel = <1>;
 		dvdd-supply = <&pm6125_l9>;
 		firmware-name = "aw882xx_acf.bin";
+		sound-name-prefix = "Speaker";
 	};
 
 	receiver_amp: audio-codec@35 {
@@ -525,6 +534,7 @@
 		awinic,audio-channel = <0>;
 		dvdd-supply = <&pm6125_l9>;
 		firmware-name = "aw882xx_acf.bin";
+		sound-name-prefix = "Receiver";
 	};
 };
 
