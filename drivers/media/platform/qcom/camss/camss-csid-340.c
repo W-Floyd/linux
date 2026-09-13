@@ -95,6 +95,22 @@ static void __csid_configure_stream(struct csid_device *csid, u8 enable, u8 port
 	u32 val;
 
 	/*
+	 * Only RST_DONE is unmasked, so the ISR never runs while streaming and
+	 * anything the receiver latched is still sitting in the status
+	 * register. Read it on the way out rather than unmasking error
+	 * interrupts, which would mean enabling bits this driver has no
+	 * handling for on a path that runs per packet.
+	 */
+	if (!enable) {
+		u32 irq = readl_relaxed(csid->base + CSID_IRQ_STATUS);
+
+		if (irq & ~CSID_IRQ_MASK_RST_DONE)
+			dev_warn(csid->camss->dev,
+				 "CSID%u: latched IRQ status 0x%08x at stream stop\n",
+				 csid->id, irq);
+	}
+
+	/*
 	 * DT_ID is a two bit bitfield that is concatenated with
 	 * the four least significant bits of the five bit VC
 	 * bitfield to generate an internal CID value.
@@ -178,7 +194,9 @@ static irqreturn_t csid_isr(int irq, void *dev)
 	if (val & CSID_IRQ_MASK_RST_DONE)
 		complete(&csid->reset_complete);
 	else
-		dev_warn_ratelimited(csid->camss->dev, "Spurious CSID interrupt\n");
+		dev_warn_ratelimited(csid->camss->dev,
+				     "CSID%u: unhandled interrupt, status 0x%08x\n",
+				     csid->id, val);
 
 	return IRQ_HANDLED;
 }
