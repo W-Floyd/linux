@@ -467,7 +467,7 @@
 &i2c2 {
 	status = "okay";
 
-	fuel-gauge@64 {
+	fuel_gauge: fuel-gauge@64 {
 		compatible = "cellwise,cw221X";
 		reg = <0x64>;
 
@@ -750,6 +750,21 @@
 		 * publishes what was actually promised.
 		 */
 		power-supplies = <&typec>;
+
+		/*
+		 * The pack thermistor is on the gauge, not here: the schematic
+		 * puts BATT_THERM on the CW2217's TS pin, and this charger's TS
+		 * input sits at the top of its range as a result -- TSPCT reads
+		 * 0x7F with the ADC both stopped and running, which the driver
+		 * renders as -21 C while the gauge reports a correct 33 C.
+		 *
+		 * This only fixes what is *reported*. The chip's own JEITA
+		 * derating, and the driver's cool-band derating, both key off
+		 * NTC_FAULT, which comes from that same unconnected pin -- so
+		 * there is still no temperature protection in the charging
+		 * path. See investigations/charging.md.
+		 */
+		battery-temperature-supply = <&fuel_gauge>;
 
 		ti,battery-regulation-voltage = <4400000>;
 		ti,charge-current = <3000000>;
