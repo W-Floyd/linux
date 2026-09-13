@@ -35,6 +35,15 @@ properties:
   interrupts:
     maxItems: 1
 
+  battery-temperature-supply:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description:
+      Power supply, typically a fuel gauge, that measures the battery pack
+      temperature. Boards that do not wire the charger's TS pin to the pack
+      thermistor should name it here, so that the battery temperature this
+      charger reports is the real one rather than an artefact of whatever the
+      unconnected pin floats to. When absent, the TS pin is used.
+
   ti,battery-regulation-voltage:
     $ref: /schemas/types.yaml#/definitions/uint32
     description: maximum charging voltage (in uV)
