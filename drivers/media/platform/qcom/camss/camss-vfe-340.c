@@ -207,17 +207,35 @@ static irqreturn_t vfe_isr(int irq, void *dev)
 				vfe_buf_done(vfe, __subgroup_to_line(i));
 		}
 
-		if (bus_status & TFE_BUS_IRQ_MASK_0_CONS_VIOL)
-			dev_err_ratelimited(vfe->camss->dev, "VFE%u: Bad config violation",
-					    vfe->id);
+		if (bus_status & (TFE_BUS_IRQ_MASK_0_CONS_VIOL |
+				  TFE_BUS_IRQ_MASK_0_VIOL |
+				  TFE_BUS_IRQ_MASK_0_IMG_VIOL)) {
+			/*
+			 * The hardware latches which write client tripped and,
+			 * for a size violation, the dimensions it objected to.
+			 * Reporting only that a violation happened leaves no
+			 * way to tell a misconfigured client from a malformed
+			 * stream, so read both back.
+			 */
+			u32 viol = readl_relaxed(vfe->base + TFE_BUS_VIOLATION_STATUS);
+			u32 img_viol = readl_relaxed(vfe->base +
+						     TFE_BUS_IMAGE_SZ_VIOLATION_STATUS);
 
-		if (bus_status & TFE_BUS_IRQ_MASK_0_VIOL)
-			dev_err_ratelimited(vfe->camss->dev, "VFE%u: Input data violation",
-					    vfe->id);
+			if (bus_status & TFE_BUS_IRQ_MASK_0_CONS_VIOL)
+				dev_err_ratelimited(vfe->camss->dev,
+						    "VFE%u: Bad config violation, clients 0x%08x\n",
+						    vfe->id, viol);
 
-		if (bus_status & TFE_BUS_IRQ_MASK_0_IMG_VIOL)
-			dev_err_ratelimited(vfe->camss->dev, "VFE%u: Image size violation",
-					    vfe->id);
+			if (bus_status & TFE_BUS_IRQ_MASK_0_VIOL)
+				dev_err_ratelimited(vfe->camss->dev,
+						    "VFE%u: Input data violation, clients 0x%08x\n",
+						    vfe->id, viol);
+
+			if (bus_status & TFE_BUS_IRQ_MASK_0_IMG_VIOL)
+				dev_err_ratelimited(vfe->camss->dev,
+						    "VFE%u: Image size violation, 0x%08x\n",
+						    vfe->id, img_viol);
+		}
 	}
 
 	status = readl_relaxed(vfe->base + TFE_BUS_OVERFLOW_STATUS);
