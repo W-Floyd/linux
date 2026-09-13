@@ -30,6 +30,13 @@ properties:
     description: MCLK supply clock.
     maxItems: 1
 
+  power-domains:
+    description:
+      Power domain the MCLK generator belongs to, where the SoC gates it behind
+      one -- Qualcomm CAMSS puts the camera MCLKs inside the CAMSS top GDSC, so
+      the sensor cannot be clocked while that domain is off.
+    maxItems: 1
+
   reset-gpios:
     description: Active low GPIO connected to RESET pad of the sensor.
     maxItems: 1
