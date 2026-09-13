@@ -5,6 +5,7 @@
 
 #include <media/v4l2-mem2mem.h>
 
+#include "iris_buffer.h"
 #include "iris_hfi_gen2.h"
 #include "iris_hfi_gen2_defines.h"
 #include "iris_hfi_gen2_packet.h"
@@ -381,6 +382,25 @@ static int iris_hfi_gen2_handle_output_buffer(struct iris_inst *inst,
 	if (!(buf->attr & BUF_ATTR_QUEUED))
 		return -EINVAL;
 
+	/*
+	 * A capture buffer that comes back empty carries no frame, and the only
+	 * empty buffer that means anything to the client is the one flagged
+	 * LAST at the end of a drain. Anything else is the firmware handing
+	 * back a buffer it did not need -- on AR50_LITE that happens once per
+	 * VP9 session, right after the capture port starts.
+	 *
+	 * Surfacing it costs a real frame rather than merely wasting one:
+	 * iris_vb2_buffer_done() completes an empty buffer as
+	 * VB2_BUF_STATE_ERROR, and a V4L2 client accounts for an errored
+	 * capture buffer by dropping a frame -- GStreamer calls
+	 * gst_video_decoder_drop_frame() -- so the stream comes out one frame
+	 * short with every later frame shifted. Give it back to the firmware
+	 * instead; it is still marked queued, so nothing else has to change.
+	 */
+	if (!hfi_buffer->data_size && inst->state == IRIS_INST_STREAMING &&
+	    !(hfi_buffer->flags & HFI_BUF_FW_FLAG_LAST))
+		return iris_queue_buffer(inst, buf);
+
 	buf->data_offset = hfi_buffer->data_offset;
 	buf->data_size = hfi_buffer->data_size;
 	buf->timestamp = hfi_buffer->timestamp;
@@ -389,11 +409,6 @@ static int iris_hfi_gen2_handle_output_buffer(struct iris_inst *inst,
 	buf->attr |= BUF_ATTR_DEQUEUED;
 
 	buf->flags = iris_hfi_gen2_get_driver_buffer_flags(inst, hfi_buffer->flags);
-
-	if (!buf->data_size && inst->state == IRIS_INST_STREAMING &&
-	    !(hfi_buffer->flags & HFI_BUF_FW_FLAG_LAST)) {
-		buf->flags |= V4L2_BUF_FLAG_ERROR;
-	}
 
 	return 0;
 }
