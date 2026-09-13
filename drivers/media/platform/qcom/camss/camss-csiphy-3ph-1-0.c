@@ -965,6 +965,8 @@ static irqreturn_t csiphy_isr(int irq, void *dev)
 {
 	struct csiphy_device *csiphy = dev;
 	struct csiphy_device_regs *regs = csiphy->regs;
+	u8 status[11];
+	bool any = false;
 	int i;
 
 	for (i = 0; i < 11; i++) {
@@ -973,9 +975,23 @@ static irqreturn_t csiphy_isr(int irq, void *dev)
 			CSIPHY_3PH_CMN_CSI_COMMON_STATUSn(regs->offset,
 							  regs->common_status_offset, i));
 
+		status[i] = val;
+		if (val)
+			any = true;
+
 		writel_relaxed(val, csiphy->base +
 			       CSIPHY_3PH_CMN_CSI_COMMON_CTRLn(regs->offset, c));
 	}
+
+	/*
+	 * These eleven registers are the PHY's only account of itself while a
+	 * stream is running, and acking them without looking is why a CSIPHY
+	 * that never locks is indistinguishable here from one that is working.
+	 */
+	if (any)
+		dev_warn_ratelimited(csiphy->camss->dev,
+				     "CSIPHY%u: irq status %*ph\n",
+				     csiphy->id, (int)sizeof(status), status);
 
 	writel_relaxed(0x1, csiphy->base +
 		       CSIPHY_3PH_CMN_CSI_COMMON_CTRLn(regs->offset, 10));
