@@ -789,13 +789,33 @@ static int bq25890_charger_get_scaled_iinlim_regval(struct bq25890_device *bq,
 	return bq25890_find_idx(bq, iinlim_ua, TBL_IINLIM);
 }
 
-/* On the BQ25892 try to get charger-type info from our supplier */
+/* Get the input current limit from whatever our supplier can tell us */
 static void bq25890_charger_external_power_changed(struct power_supply *psy)
 {
 	struct bq25890_device *bq = power_supply_get_drvdata(psy);
 	union power_supply_propval val;
 	int input_current_limit, ret;
 
+	/*
+	 * A Type-C port knows the current the source advertises through its Rp
+	 * resistor, which BC1.2 detection cannot see: a 1.5 A or 3.0 A source
+	 * presenting a plain SDP signature is charged at 500 mA otherwise. This
+	 * is independent of the chip version, and of the USB type below -- Rp
+	 * is a promise about current, not about what kind of port it is -- so
+	 * prefer it whenever a supplier reports it.
+	 */
+	ret = power_supply_get_property_from_supplier(psy,
+						      POWER_SUPPLY_PROP_CURRENT_MAX,
+						      &val);
+	if (!ret && val.intval > 0) {
+		input_current_limit =
+			bq25890_charger_get_scaled_iinlim_regval(bq, val.intval);
+		bq25890_field_write(bq, F_IINLIM, input_current_limit);
+		power_supply_changed(psy);
+		return;
+	}
+
+	/* Otherwise, on the BQ25892 only, fall back to charger-type info */
 	if (bq->chip_version != BQ25892)
 		return;
 
