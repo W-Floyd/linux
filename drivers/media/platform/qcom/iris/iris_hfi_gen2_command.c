@@ -1138,6 +1138,14 @@ static int iris_hfi_gen2_session_stop(struct iris_inst *inst, u32 plane)
 
 	reinit_completion(&inst->completion);
 
+	/*
+	 * The firmware hands every buffer it holds on this port back before it
+	 * answers the stop, and those come back empty. Mark the window so the
+	 * response path can tell them apart from a spare buffer returned during
+	 * normal decoding, which it gives back to the firmware.
+	 */
+	inst->stop_pending = true;
+
 	iris_hfi_gen2_packet_session_command(inst,
 					     HFI_CMD_STOP,
 					     (HFI_HOST_FLAGS_RESPONSE_REQUIRED |
@@ -1151,10 +1159,12 @@ static int iris_hfi_gen2_session_stop(struct iris_inst *inst, u32 plane)
 
 	ret = iris_hfi_queue_cmd_write(inst->core, inst_hfi_gen2->packet,
 				       inst_hfi_gen2->packet->size);
-	if (ret)
-		return ret;
+	if (!ret)
+		ret = iris_wait_for_session_response(inst, false);
 
-	return iris_wait_for_session_response(inst, false);
+	inst->stop_pending = false;
+
+	return ret;
 }
 
 static int iris_hfi_gen2_session_pause(struct iris_inst *inst, u32 plane)

@@ -411,9 +411,19 @@ static int iris_hfi_gen2_handle_output_buffer(struct iris_inst *inst,
 	 * gst_video_decoder_drop_frame() -- so the stream comes out one frame
 	 * short with every later frame shifted. Give it back to the firmware
 	 * instead; it is still marked queued, so nothing else has to change.
+	 *
+	 * Only while the port is actually running. A stop makes the firmware
+	 * return every buffer it holds on that port, all of them empty and none
+	 * of them flagged LAST, and inst->state does not reach the streamoff
+	 * until the stop has been answered -- so without inst->stop_pending each
+	 * of those is handed straight back to a port that is stopping, the
+	 * firmware answers HFI_CMD_BUFFER with HFI_ERROR_INVALID_STATE, and the
+	 * session is lost. A client that stops the capture port with both ports
+	 * streaming reaches this, which is what the source change following a
+	 * seek asks for.
 	 */
 	if (!hfi_buffer->data_size && inst->state == IRIS_INST_STREAMING &&
-	    !(hfi_buffer->flags & HFI_BUF_FW_FLAG_LAST))
+	    !inst->stop_pending && !(hfi_buffer->flags & HFI_BUF_FW_FLAG_LAST))
 		return iris_queue_buffer(inst, buf);
 
 	buf->data_offset = hfi_buffer->data_offset;
