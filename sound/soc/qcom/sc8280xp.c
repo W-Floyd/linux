@@ -488,6 +488,31 @@ static const struct qcom_snd_soc_common qcs6490_priv_data = {
 	.wcd_jack = true,
 };
 
+/*
+ * fogona drives a loudspeaker and an earpiece from two I2S amplifiers sharing
+ * the primary MI2S port. It has no jack and no microphone on this card, so the
+ * widget set is just the two speakers.
+ */
+static const struct snd_kcontrol_new fogona_controls[] = {
+	SOC_DAPM_PIN_SWITCH("Speaker"),
+	SOC_DAPM_PIN_SWITCH("Receiver"),
+};
+
+static const struct snd_soc_dapm_widget fogona_dapm_widgets[] = {
+	SND_SOC_DAPM_SPK("Speaker", NULL),
+	SND_SOC_DAPM_SPK("Receiver", NULL),
+};
+
+static const struct qcom_snd_soc_common fogona_priv_data = {
+	.driver_name = "sm6225",
+	.dapm_widgets = fogona_dapm_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(fogona_dapm_widgets),
+	.controls = fogona_controls,
+	.num_controls = ARRAY_SIZE(fogona_controls),
+	.codec_dai_fmt = SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_I2S |
+			 SND_SOC_DAIFMT_BC_FC,
+};
+
 static const struct qcom_snd_soc_common qcs8275_priv_data = {
 	.driver_name = "qcs8300",
 	.dapm_widgets = max98090_dapm_widgets,
@@ -560,6 +585,7 @@ static const struct qcom_snd_soc_common sm8750_priv_data = {
 
 static const struct of_device_id snd_sc8280xp_dt_match[] = {
 	{ .compatible = "ayaneo,pocket-s2-sndcard", .data = &ayaneo_ps2_priv_data },
+	{ .compatible = "motorola,fogona-sndcard", .data = &fogona_priv_data },
 	{ .compatible = "qcom,eliza-sndcard", .data = &eliza_priv_data },
 	{ .compatible = "qcom,hawi-sndcard", .data = &hawi_priv_data },
 	{ .compatible = "qcom,kaanapali-sndcard", .data = &kaanapali_priv_data },
