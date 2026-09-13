@@ -477,7 +477,7 @@ static const struct parent_map gcc_parent_map_4[] = {
 static const struct clk_parent_data gcc_parents_4[] = {
 	{ .index = DT_BI_TCXO },
 	{ .hw = &gpll0.clkr.hw },
-	{ .hw = &gpll0.clkr.hw },
+	{ .hw = &gpll0_out_even.clkr.hw },
 	{ .hw = &gpll4.clkr.hw },
 	{ .hw = &gpll3_out_even.clkr.hw },
 };
