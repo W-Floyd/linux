@@ -410,7 +410,7 @@ static const struct cci_reg_sequence s5kjn1_4080x3072_30fps_mode[] = {
 	{ CCI_REG16(0x0382), 0x0002 },
 	{ CCI_REG16(0x0384), 0x0002 },
 	{ CCI_REG16(0x0386), 0x0002 },
-	{ CCI_REG16(0x0110), 0x1002 },
+	{ CCI_REG16(0x0110), 0x0002 },
 	{ CCI_REG16(0x0114), 0x0301 },
 	{ CCI_REG16(0x0116), 0x3000 },
 
@@ -694,7 +694,7 @@ static const struct cci_reg_sequence s5kjn1_8160x6144_10fps_mode[] = {
 	{ CCI_REG16(0x0382), 0x0001 },
 	{ CCI_REG16(0x0384), 0x0001 },
 	{ CCI_REG16(0x0386), 0x0001 },
-	{ CCI_REG16(0x0110), 0x1002 },
+	{ CCI_REG16(0x0110), 0x0002 },
 	{ CCI_REG16(0x0114), 0x0300 },
 	{ CCI_REG16(0x0116), 0x3000 },
 
