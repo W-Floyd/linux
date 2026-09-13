@@ -138,6 +138,14 @@ struct csid_hw_ops {
 	 * @is_clear: Indicate if it is clearing reg update or setting reg update
 	 */
 	void (*reg_update)(struct csid_device *csid, int port_id, bool is_clear);
+
+	/*
+	 * report_errors - Report receive errors latched during a stream
+	 * @csid: CSID device
+	 *
+	 * Called as a stream stops. Optional.
+	 */
+	void (*report_errors)(struct csid_device *csid);
 };
 
 struct csid_subdev_resources {

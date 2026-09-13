@@ -26,11 +26,27 @@
 #define		RST_STROBES	0
 
 #define CSID_CSI2_RX_IRQ_STATUS	0x20
+#define		CSI2_RX_ERROR_CPHY_EOT_RECEPTION	BIT(11)
+#define		CSI2_RX_ERROR_CPHY_SOT_RECEPTION	BIT(12)
+#define		CSI2_RX_ERROR_CPHY_PH_CRC		BIT(13)
+#define		CSI2_RX_ERROR_LANE0_FIFO_OVERFLOW	BIT(15)
+#define		CSI2_RX_ERROR_LANE1_FIFO_OVERFLOW	BIT(16)
+#define		CSI2_RX_ERROR_LANE2_FIFO_OVERFLOW	BIT(17)
+#define		CSI2_RX_ERROR_LANE3_FIFO_OVERFLOW	BIT(18)
+#define		CSI2_RX_ERROR_CRC			BIT(19)
+#define		CSI2_RX_ERROR_ECC			BIT(20)
+#define		CSI2_RX_ERROR_MMAPPED_VC_DT		BIT(21)
+#define		CSI2_RX_ERROR_UNMAPPED_VC_DT		BIT(22)
+#define		CSI2_RX_ERROR_STREAM_UNDERFLOW		BIT(23)
+#define		CSI2_RX_ERROR_UNBOUNDED_FRAME		BIT(24)
 #define	CSID_CSI2_RX_IRQ_MASK	0x24
 #define CSID_CSI2_RX_IRQ_CLEAR	0x28
 
 #define CSID_CSI2_RDIN_IRQ_STATUS(rdi)		((csid_is_lite(csid) ? 0x30 : 0x40) \
 						 + 0x10 * (rdi))
+#define		RDIN_ERROR_FIFO_OVERFLOW		BIT(2)
+#define		RDIN_ERROR_PIX_COUNT			BIT(13)
+#define		RDIN_ERROR_LINE_COUNT			BIT(14)
 #define CSID_CSI2_RDIN_IRQ_MASK(rdi)		((csid_is_lite(csid) ? 0x34 : 0x44) \
 						 + 0x10 * (rdi))
 #define CSID_CSI2_RDIN_IRQ_CLEAR(rdi)		((csid_is_lite(csid) ? 0x38 : 0x48) \
@@ -323,6 +339,78 @@ static void __csid_configure_rdi_stream(struct csid_device *csid, u8 enable, u8 
 	writel_relaxed(val, csid->base + CSID_RDI_CFG0(vc));
 }
 
+static const struct csid_error_bit {
+	u32 mask;
+	const char *name;
+} csid_rx_error_bits[] = {
+	{ CSI2_RX_ERROR_CPHY_EOT_RECEPTION, "CPHY_EOT_RECEPTION" },
+	{ CSI2_RX_ERROR_CPHY_SOT_RECEPTION, "CPHY_SOT_RECEPTION" },
+	{ CSI2_RX_ERROR_CPHY_PH_CRC, "CPHY_PH_CRC" },
+	{ CSI2_RX_ERROR_LANE0_FIFO_OVERFLOW, "LANE0_FIFO_OVERFLOW" },
+	{ CSI2_RX_ERROR_LANE1_FIFO_OVERFLOW, "LANE1_FIFO_OVERFLOW" },
+	{ CSI2_RX_ERROR_LANE2_FIFO_OVERFLOW, "LANE2_FIFO_OVERFLOW" },
+	{ CSI2_RX_ERROR_LANE3_FIFO_OVERFLOW, "LANE3_FIFO_OVERFLOW" },
+	{ CSI2_RX_ERROR_CRC, "CRC" },
+	{ CSI2_RX_ERROR_ECC, "ECC" },
+	{ CSI2_RX_ERROR_MMAPPED_VC_DT, "MMAPPED_VC_DT" },
+	{ CSI2_RX_ERROR_UNMAPPED_VC_DT, "UNMAPPED_VC_DT" },
+	{ CSI2_RX_ERROR_STREAM_UNDERFLOW, "STREAM_UNDERFLOW" },
+	{ CSI2_RX_ERROR_UNBOUNDED_FRAME, "UNBOUNDED_FRAME" },
+}, csid_rdin_error_bits[] = {
+	{ RDIN_ERROR_FIFO_OVERFLOW, "FIFO_OVERFLOW" },
+	{ RDIN_ERROR_PIX_COUNT, "PIX_COUNT" },
+	{ RDIN_ERROR_LINE_COUNT, "LINE_COUNT" },
+};
+
+static void csid_report_errors(struct csid_device *csid, u8 vc,
+			       u32 status, const struct csid_error_bit *bits,
+			       size_t nbits, const char *what)
+{
+	unsigned int i;
+
+	for (i = 0; i < nbits; i++)
+		if (status & bits[i].mask)
+			dev_warn(csid->camss->dev,
+				 "CSID%u VC%u %s error: %s\n",
+				 csid->id, vc, what, bits[i].name);
+}
+
+/*
+ * csid_check_errors - Report receive errors seen during a stream
+ * @csid: CSID device
+ * @vc: Virtual channel
+ *
+ * Only RESET_DONE is unmasked in CSID_TOP_IRQ_MASK, so csid_isr() does not run
+ * while a stream is up and the CSI-2 receive and RDI status bits simply
+ * accumulate. Read them as the stream stops so that a receive problem is
+ * reported rather than silently discarded, then clear them for the next stream.
+ */
+static void csid_check_errors(struct csid_device *csid, u8 vc)
+{
+	u32 rx, rdin;
+
+	rx = readl_relaxed(csid->base + CSID_CSI2_RX_IRQ_STATUS);
+	rdin = readl_relaxed(csid->base + CSID_CSI2_RDIN_IRQ_STATUS(vc));
+
+	csid_report_errors(csid, vc, rx, csid_rx_error_bits,
+			   ARRAY_SIZE(csid_rx_error_bits), "CSI-2 receive");
+	csid_report_errors(csid, vc, rdin, csid_rdin_error_bits,
+			   ARRAY_SIZE(csid_rdin_error_bits), "RDI");
+
+	writel_relaxed(rx, csid->base + CSID_CSI2_RX_IRQ_CLEAR);
+	writel_relaxed(rdin, csid->base + CSID_CSI2_RDIN_IRQ_CLEAR(vc));
+	writel_relaxed(1 << IRQ_CMD_CLEAR, csid->base + CSID_IRQ_CMD);
+}
+
+static void csid_report_stream_errors(struct csid_device *csid)
+{
+	u8 i;
+
+	for (i = 0; i < MSM_CSID_MAX_SRC_STREAMS; i++)
+		if (csid->phy.en_vc & BIT(i))
+			csid_check_errors(csid, i);
+}
+
 static void csid_configure_stream(struct csid_device *csid, u8 enable)
 {
 	struct csid_testgen_config *tg = &csid->testgen;
@@ -430,4 +518,5 @@ const struct csid_hw_ops csid_ops_gen2 = {
 	.reset = csid_reset,
 	.src_pad_code = csid_src_pad_code,
 	.subdev_init = csid_subdev_init,
+	.report_errors = csid_report_stream_errors,
 };
