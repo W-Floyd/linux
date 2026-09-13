@@ -111,6 +111,62 @@ static u32 hfi_buffer_bin_h265d(u32 frame_width, u32 frame_height, u32 num_vpp_p
 	return size_h265d_hw_bin_buffer(n_aligned_w, n_aligned_h, num_vpp_pipes);
 }
 
+/*
+ * AR50_LITE computes the decoder bin buffer differently from Iris2 and later:
+ * it tests the *YUV size* against the threshold rather than the pixel count,
+ * and uses its own header/residual split. Getting this wrong is not a rounding
+ * error -- for HEVC the Iris2 formula lands 42% under what this firmware wants,
+ * and HFI_CMD_START is refused with HFI_ERROR_INSUFFICIENT_RESOURCES.
+ */
+static u32 size_h264d_hw_bin_buffer_ar50lt(u32 frame_width, u32 frame_height)
+{
+	u32 size_yuv = (frame_width * frame_height * 3) >> 1;
+	u32 size_bin_hdr, size_bin_res;
+
+	if (size_yuv <= (1920 * 1088 * 3 / 2)) {
+		size_bin_hdr = size_yuv * H264_CABAC_HDR_RATIO_SM_TOT;
+		size_bin_res = size_yuv * H264_CABAC_RES_RATIO_SM_TOT;
+	} else {
+		size_bin_hdr = size_yuv * 3 / 5;
+		size_bin_res = size_yuv * 3 / 2;
+	}
+
+	return ALIGN(size_bin_hdr, DMA_ALIGNMENT) +
+	       ALIGN(size_bin_res, DMA_ALIGNMENT);
+}
+
+static u32 size_h265d_hw_bin_buffer_ar50lt(u32 frame_width, u32 frame_height)
+{
+	u32 size_yuv = (frame_width * frame_height * 3) >> 1;
+	u32 size_bin_hdr, size_bin_res;
+
+	if (size_yuv <= ((BIN_BUFFER_THRESHOLD * 3) >> 1)) {
+		size_bin_hdr = size_yuv * H265_CABAC_HDR_RATIO_SM_TOT;
+		size_bin_res = size_yuv * H265_CABAC_RES_RATIO_SM_TOT;
+	} else {
+		size_bin_hdr = size_yuv * 41 / 50;
+		size_bin_res = size_yuv * 59 / 50;
+	}
+
+	return ALIGN(size_bin_hdr, DMA_ALIGNMENT) +
+	       ALIGN(size_bin_res, DMA_ALIGNMENT);
+}
+
+static u32 size_vp9d_hw_bin_buffer_ar50lt(u32 frame_width, u32 frame_height,
+					  u32 num_vpp_pipes)
+{
+	u32 size_yuv = ALIGN(frame_width, 16) * ALIGN(frame_height, 16) * 3 / 2;
+	u32 _size;
+
+	size_yuv = ALIGN(size_yuv, DMA_ALIGNMENT);
+	size_yuv = max_t(u32, size_yuv, VPX_DECODER_FRAME_BIN_BUFFER_SIZE);
+
+	_size = ALIGN((size_yuv * 6 / 5) / num_vpp_pipes, DMA_ALIGNMENT) +
+		ALIGN((size_yuv * 4) / num_vpp_pipes, DMA_ALIGNMENT);
+
+	return _size * num_vpp_pipes;
+}
+
 static u32 hfi_buffer_comv_h264d(u32 frame_width, u32 frame_height, u32 _comv_bufcount)
 {
 	u32 frame_height_in_mbs = DIV_ROUND_UP(frame_height, 16);
@@ -2130,6 +2186,33 @@ u32 iris_vpu_buf_size(struct iris_inst *inst, enum iris_buffer_type buffer_type)
 	}
 
 	return size;
+}
+
+static u32 iris_vpu_ar50lt_dec_bin_size(struct iris_inst *inst)
+{
+	u32 num_vpp_pipes = inst->core->iris_platform_data->num_vpp_pipe;
+	struct v4l2_format *f = inst->fmt_src;
+	u32 height = f->fmt.pix_mp.height;
+	u32 width = f->fmt.pix_mp.width;
+
+	if (inst->codec == V4L2_PIX_FMT_H264)
+		return size_h264d_hw_bin_buffer_ar50lt(ALIGN(width, 16),
+						       ALIGN(height, 16));
+	else if (inst->codec == V4L2_PIX_FMT_HEVC)
+		return size_h265d_hw_bin_buffer_ar50lt(ALIGN(width, 16),
+						       ALIGN(height, 16));
+	else if (inst->codec == V4L2_PIX_FMT_VP9)
+		return size_vp9d_hw_bin_buffer_ar50lt(width, height, num_vpp_pipes);
+
+	return 0;
+}
+
+u32 iris_vpu_ar50lt_buf_size(struct iris_inst *inst, enum iris_buffer_type buffer_type)
+{
+	if (inst->domain == DECODER && buffer_type == BUF_BIN)
+		return iris_vpu_ar50lt_dec_bin_size(inst);
+
+	return iris_vpu_buf_size(inst, buffer_type);
 }
 
 u32 iris_vpu33_buf_size(struct iris_inst *inst, enum iris_buffer_type buffer_type)
