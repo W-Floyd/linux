@@ -292,6 +292,19 @@
 		drive-strength = <8>;
 		bias-disable;
 	};
+
+	/*
+	 * The rear sensor's master clock. This one IS a pinctrl group, unlike
+	 * every camera *enable* below: GPIO_20 is muxed to cam_mclk and driven
+	 * by GCC, so nothing requests it as a GPIO and the "already requested"
+	 * conflict described at lcd_panel_avdd cannot arise here.
+	 */
+	cam_mclk0_default: cam-mclk0-state {
+		pins = "gpio20";
+		function = "cam_mclk";
+		drive-strength = <2>;
+		bias-disable;
+	};
 };
 
 &pon_pwrkey {
@@ -1032,31 +1045,117 @@
 };
 
 /*
- * Camera flash and torch, which needs none of the CAMSS stack: it is a two-pin
- * charge pump and an existing driver, so a working torch does not wait on the
- * camera.
+ * Camera.
  *
- * The fitted part is an OCP8135 (OCS) or an SGM3785 (SGMICRO), not an I2C
- * device -- ENF selects flash vs movie/torch and ENM enables it. leds-sgm3140
- * matches ocs,ocp8110 and sgmicro,sgm3140, the same two-level charge-pump
- * family as both second sources, and its torch sequence (flash_gpio low, then
- * enable_gpio high) is the OCP8135 truth table in order.
+ * fogona has two sensors, not three: a 50 MP Samsung S5KJN1 on CCI bus 0 /
+ * CSIPHY 0, and an 8 MP front sensor (S5K4H7, or OV08F on the TS-Precision
+ * second source) on CCI bus 1 / CSIPHY 2. The schematic's OV02D10 macro camera
+ * is a position that is not populated -- the shipping dtbo, the downstream
+ * camera DT and the vendor sensormodule blobs all describe exactly these two.
+ * Only the rear one is wired up here, because the front sensor has no mainline
+ * driver and nothing downstream to port from: on Qualcomm CAMSS the kernel
+ * drives CCI/CSIPHY/CSID/TFE and the *sensor* is driven from userspace, so
+ * Motorola shipped no sensor driver for either part. Its rails are declared
+ * anyway, so adding the sensor later is a node and not an archaeology session.
  *
- * Downstream drives ENM from pm6125_pwm channel 0 for brightness control.
- * Mainline has no pm6125 LPG/PWM support and the driver only ever wants the pin
- * fully on, so it is a plain GPIO here -- the same thing already proven on
- * PM6125 gpio2 (panel AVEE) and gpio5 (volume up). The bootloader leaves gpio8
- * muxed as PWM ("out low func1" in /sys/kernel/debug/gpio); requesting it as a
- * GPIO re-muxes it.
+ * Every camera rail is a discrete GPIO-gated LDO -- there is no camera PMIC on
+ * this board, which is why these are regulator-fixed rather than an entry in
+ * the RPM block above. The _50m_/_8m_ names are Motorola's own and say which
+ * sensor each belongs to.
  *
- * As with lcd_panel_avdd, no pinctrl-0 naming either pin: requesting a TLMM pin
- * as a GPIO already muxes it, and a pinctrl group over the same pin makes the
- * consumer fail to probe on 7.3.
- *
- * Beware the net name -- the trace driving ENM is called HAPTIC_PWM on the
- * schematic and has nothing to do with the vibrator.
+ * As with lcd_panel_avdd, NONE of these carries a pinctrl-0 naming the pin it
+ * drives: requesting a TLMM pin as a GPIO already muxes it to the gpio
+ * function, and a pinctrl group over the same pin makes the regulator fail to
+ * probe on 7.3.
  */
 / {
+	camera_ldo_iovdd: regulator-cam-iovdd {
+		compatible = "regulator-fixed";
+		regulator-name = "camera_ldo_iovdd";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-enable-ramp-delay = <233>;
+		gpio = <&tlmm 25 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	camera_ldo_50m_avdd: regulator-cam-50m-avdd {
+		compatible = "regulator-fixed";
+		regulator-name = "camera_ldo_50m_avdd";
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
+		regulator-enable-ramp-delay = <233>;
+		gpio = <&tlmm 36 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	camera_ldo_50m_dvdd: regulator-cam-50m-dvdd {
+		compatible = "regulator-fixed";
+		regulator-name = "camera_ldo_50m_dvdd";
+		regulator-min-microvolt = <1050000>;
+		regulator-max-microvolt = <1050000>;
+		regulator-enable-ramp-delay = <233>;
+		gpio = <&tlmm 65 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	/* The rear module's autofocus actuator. */
+	camera_ldo_50m_afvdd: regulator-cam-50m-afvdd {
+		compatible = "regulator-fixed";
+		regulator-name = "camera_ldo_50m_afvdd";
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
+		regulator-enable-ramp-delay = <233>;
+		gpio = <&tlmm 26 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	camera_ldo_8m_avdd: regulator-cam-8m-avdd {
+		compatible = "regulator-fixed";
+		regulator-name = "camera_ldo_8m_avdd";
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
+		regulator-enable-ramp-delay = <233>;
+		gpio = <&tlmm 68 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	/*
+	 * The one camera rail not gated by a TLMM pin. The board doc's PMIC
+	 * GPIO map calls PM6125 GPIO_01 "Front_DVDD_EN" independently of the
+	 * downstream camera DT pointing it at the front sensor's digital core,
+	 * which is a pleasant cross-confirmation of both.
+	 */
+	camera_ldo_8m_dvdd: regulator-cam-8m-dvdd {
+		compatible = "regulator-fixed";
+		regulator-name = "camera_ldo_8m_dvdd";
+		regulator-min-microvolt = <1200000>;
+		regulator-max-microvolt = <1200000>;
+		regulator-enable-ramp-delay = <233>;
+		gpio = <&pm6125_gpios 1 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	/*
+	 * Camera flash and torch, which needs none of the CAMSS stack above:
+	 * it is a two-pin charge pump and an existing driver.
+	 *
+	 * The fitted part is an OCP8135 (OCS) or an SGM3785 (SGMICRO), not an
+	 * I2C device -- ENF selects flash vs movie/torch and ENM enables it.
+	 * leds-sgm3140 matches ocs,ocp8110 and sgmicro,sgm3140, the same
+	 * two-level charge-pump family, and its torch sequence (flash_gpio low,
+	 * then enable_gpio high) is the OCP8135 truth table in order.
+	 *
+	 * Downstream drives ENM from pm6125_pwm channel 0 for brightness
+	 * control. Mainline has no pm6125 LPG/PWM support and the driver only
+	 * ever wants the pin fully on, so it is a plain GPIO here -- the same
+	 * thing already proven on PM6125 gpio2 (panel AVEE) and gpio5 (volume
+	 * up). The bootloader leaves gpio8 muxed as PWM ("out low func1" in
+	 * /sys/kernel/debug/gpio); requesting it as a GPIO re-muxes it.
+	 *
+	 * Beware the net name: the trace driving ENM is called HAPTIC_PWM on
+	 * the schematic and has nothing to do with the vibrator.
+	 */
 	led-controller {
 		compatible = "ocs,ocp8110";
 		flash-gpios = <&tlmm 85 GPIO_ACTIVE_HIGH>;
@@ -1066,6 +1165,74 @@
 			function = LED_FUNCTION_FLASH;
 			color = <LED_COLOR_ID_WHITE>;
 			flash-max-timeout-us = <250000>;
+		};
+	};
+};
+
+/*
+ * L4A is VDD_A_CSI_0/1/2_0P9 and L18A is VDD_A_CSI_0/1/2_1P2 -- the board doc
+ * reads both straight off the schematic, and the downstream CSIPHY nodes agree
+ * (mipi-csi-vdd1 at 0.88-1.05 V, mipi-csi-vdd2 at 1.2-1.3 V). Note L18A is
+ * shared with the DSI PHY and UFS's vdda-pll; the regulator core refcounts it.
+ */
+&camss {
+	vdd-csiphy-0p9-supply = <&pm6125_l4>;
+	vdd-csiphy-1p2-supply = <&pm6125_l18>;
+
+	status = "okay";
+
+	ports {
+		port@0 {
+			csiphy0_ep: endpoint {
+				data-lanes = <0 1 2 3>;
+				remote-endpoint = <&s5kjn1_ep>;
+			};
+		};
+	};
+};
+
+&cci {
+	status = "okay";
+};
+
+&cci_i2c0 {
+	/*
+	 * The upstream samsung,s5kjn1 binding's own example is camera@56 with
+	 * 2.8 V vdda, 1.05 V vddd, 1.8 V vddio and a 2.8 V autofocus rail --
+	 * field for field this module. The driver rejects any MCLK that is not
+	 * exactly 24 MHz and any lane count that is not 4, both of which match.
+	 *
+	 * power-domains is not decoration: s5kjn1_power_on() runs at probe to
+	 * read CHIP_ID, and the MCLK branch it enables is inside the CAMSS top
+	 * GDSC -- downstream says as much by listing that GDSC as the sensor's
+	 * "cam_clk" supply. Without it the clock does not actually toggle and
+	 * the sensor never answers.
+	 */
+	camera@56 {
+		compatible = "samsung,s5kjn1";
+		reg = <0x56>;
+
+		clocks = <&gcc GCC_CAMSS_MCLK0_CLK>;
+		assigned-clocks = <&gcc GCC_CAMSS_MCLK0_CLK>;
+		assigned-clock-rates = <24000000>;
+		power-domains = <&gcc GCC_CAMSS_TOP_GDSC>;
+
+		pinctrl-0 = <&cam_mclk0_default>;
+		pinctrl-names = "default";
+
+		reset-gpios = <&tlmm 18 GPIO_ACTIVE_LOW>;
+
+		vdda-supply = <&camera_ldo_50m_avdd>;
+		vddd-supply = <&camera_ldo_50m_dvdd>;
+		vddio-supply = <&camera_ldo_iovdd>;
+		afvdd-supply = <&camera_ldo_50m_afvdd>;
+
+		port {
+			s5kjn1_ep: endpoint {
+				data-lanes = <1 2 3 4>;
+				link-frequencies = /bits/ 64 <700000000>;
+				remote-endpoint = <&csiphy0_ep>;
+			};
 		};
 	};
 };
