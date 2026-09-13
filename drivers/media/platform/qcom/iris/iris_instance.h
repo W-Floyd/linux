@@ -55,6 +55,7 @@ enum iris_fmt_type_cap {
  * @fw_min_count: minimnum count of buffers needed by fw
  * @state: instance state
  * @sub_state: instance sub state
+ * @stop_pending: a port stop has been sent and its response has not arrived
  * @once_per_session_set: boolean to set once per session property
  * @max_input_data_size: max size of input data
  * @power: structure of power info
@@ -102,6 +103,7 @@ struct iris_inst {
 	u32				fw_min_count;
 	enum iris_inst_state		state;
 	enum iris_inst_sub_state	sub_state;
+	bool				stop_pending;
 	bool				once_per_session_set;
 	size_t				max_input_data_size;
 	struct iris_inst_power		power;
