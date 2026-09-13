@@ -463,6 +463,28 @@
 };
 
 /*
+ * The audio DSP. Nothing in the audio subsystem exists without it: the codec
+ * macros, the MI2S ports and the sound card all hang off services this
+ * remoteproc publishes, and so -- less obviously -- does lpass_tlmm. The LPI
+ * pin controller's only clock is an LPASS vote owned by a DSP service, so with
+ * the ADSP down it is a node in the DT with no driver bound to it, and no pin
+ * on the LPI block can be muxed.
+ *
+ * adsp.mdt and its adsp.b* segments come from the modem partition by way of
+ * msm-firmware-loader, the same route modem.mdt above takes; nothing is
+ * redistributed with the port.
+ *
+ * The service layer under this node is GPR rather than APR -- see the sm6225
+ * dtsi change that converted it. The distinction matters here because an ADSP
+ * described the wrong way still boots and still reports "running", so this
+ * node coming up is not on its own evidence that audio will work.
+ */
+&remoteproc_adsp {
+	firmware-name = "qcom/sm6225/motorola/fogona/adsp.mdt";
+	status = "okay";
+};
+
+/*
  * Touchscreen: ChipOne ICNL9916C, a TDDI part that drives the panel and the
  * digitizer from one package. The touch half is on SPI SE0, which is how stock
  * has it -- its overlay's fixups resolve fragment@60's target to
