@@ -153,12 +153,22 @@
 	 * The gauge reports state of charge as a percentage and knows nothing
 	 * about pack size, so the design capacity has to come from here.
 	 * 5000 mAh matches stock's fcc_design of 0x1388 for all three packs.
+	 *
+	 * operating-range-celsius is the charge window, and nothing in mainline
+	 * reads it on this board yet -- bq25890_charger does not call
+	 * power_supply_get_battery_info(). It is recorded because it is the only
+	 * upstream way to state the pack's temperature limits at all: there is
+	 * no binding for JEITA zones, so stock's mmi,mmi-temp-zones table, which
+	 * derates to 4250 mV below 15C and 4200 mV above 45C, has no mainline
+	 * expression. See the charger node for why that pushed the regulation
+	 * voltage down to 4400 mV.
 	 */
 	battery: battery {
 		compatible = "simple-battery";
 		charge-full-design-microamp-hours = <5000000>;
 		voltage-min-design-microvolt = <3400000>;
 		voltage-max-design-microvolt = <4400000>;
+		operating-range-celsius = <0 45>;
 	};
 
 	gpio-keys {
