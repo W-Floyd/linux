@@ -19,6 +19,7 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/leds/common.h>
 #include "sm6225.dtsi"
 #include "pm6125.dtsi"
 
@@ -1028,4 +1029,43 @@
 
 &adreno_smmu {
 	status = "okay";
+};
+
+/*
+ * Camera flash and torch, which needs none of the CAMSS stack: it is a two-pin
+ * charge pump and an existing driver, so a working torch does not wait on the
+ * camera.
+ *
+ * The fitted part is an OCP8135 (OCS) or an SGM3785 (SGMICRO), not an I2C
+ * device -- ENF selects flash vs movie/torch and ENM enables it. leds-sgm3140
+ * matches ocs,ocp8110 and sgmicro,sgm3140, the same two-level charge-pump
+ * family as both second sources, and its torch sequence (flash_gpio low, then
+ * enable_gpio high) is the OCP8135 truth table in order.
+ *
+ * Downstream drives ENM from pm6125_pwm channel 0 for brightness control.
+ * Mainline has no pm6125 LPG/PWM support and the driver only ever wants the pin
+ * fully on, so it is a plain GPIO here -- the same thing already proven on
+ * PM6125 gpio2 (panel AVEE) and gpio5 (volume up). The bootloader leaves gpio8
+ * muxed as PWM ("out low func1" in /sys/kernel/debug/gpio); requesting it as a
+ * GPIO re-muxes it.
+ *
+ * As with lcd_panel_avdd, no pinctrl-0 naming either pin: requesting a TLMM pin
+ * as a GPIO already muxes it, and a pinctrl group over the same pin makes the
+ * consumer fail to probe on 7.3.
+ *
+ * Beware the net name -- the trace driving ENM is called HAPTIC_PWM on the
+ * schematic and has nothing to do with the vibrator.
+ */
+/ {
+	led-controller {
+		compatible = "ocs,ocp8110";
+		flash-gpios = <&tlmm 85 GPIO_ACTIVE_HIGH>;
+		enable-gpios = <&pm6125_gpios 8 GPIO_ACTIVE_HIGH>;
+
+		led {
+			function = LED_FUNCTION_FLASH;
+			color = <LED_COLOR_ID_WHITE>;
+			flash-max-timeout-us = <250000>;
+		};
+	};
 };
