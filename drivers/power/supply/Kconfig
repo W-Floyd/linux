@@ -828,7 +828,8 @@ config CHARGER_BQ25890
 	depends on GPIOLIB || COMPILE_TEST
 	select REGMAP_I2C
 	help
-	  Say Y to enable support for the TI BQ25890 battery charger.
+	  Say Y to enable support for the TI BQ25890 battery charger, and for
+	  the register-compatible Southchip SC89890H.
 
 config CHARGER_BQ25980
 	tristate "TI BQ25980 battery charger driver"
