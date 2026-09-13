@@ -1003,6 +1003,16 @@ static u32 iris_vpu_dec_partial_size(struct iris_inst *inst)
 	u32 height = f->fmt.pix_mp.height;
 	u32 width = f->fmt.pix_mp.width;
 
+	/*
+	 * This buffer holds AV1 Intra Block Copy data, so only an AV1 session
+	 * has any use for it. Sizing it to zero elsewhere makes
+	 * iris_create_internal_buffer() skip it, which matters beyond the wasted
+	 * allocation: firmware that does not implement AV1 answers the
+	 * HFI_CMD_BUFFER carrying it with HFI_INFO_UNSUPPORTED.
+	 */
+	if (inst->codec != V4L2_PIX_FMT_AV1)
+		return 0;
+
 	return hfi_buffer_ibc_av1d(width, height);
 }
 
