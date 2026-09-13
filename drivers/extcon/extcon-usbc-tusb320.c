@@ -13,6 +13,7 @@
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/power_supply.h>
 #include <linux/regmap.h>
 #include <linux/usb/typec.h>
 #include <linux/usb/typec_altmode.h>
@@ -83,6 +84,9 @@ struct tusb320_priv {
 	enum typec_pwr_opmode pwr_opmode;
 	struct fwnode_handle *connector_fwnode;
 	struct usb_role_switch *role_sw;
+	struct power_supply *psy;
+	unsigned int current_max;	/* uA the source advertises through Rp */
+	bool online;			/* attached to a source, drawing from it */
 };
 
 static const char * const tusb_attached_states[] = {
@@ -276,6 +280,79 @@ static void tusb320_extcon_irq_handler(struct tusb320_priv *priv, u8 reg)
 	priv->state = state;
 }
 
+/*
+ * The current a Type-C source advertises through its Rp resistor is not
+ * visible to BC1.2 detection, so a charger left to its own devices treats a
+ * 1.5 A or 3.0 A source presenting a plain SDP signature as a 500 mA port.
+ * Publish what the CC pins actually say, so a charger listed as supplied by
+ * this port can raise its input limit accordingly.
+ */
+static enum power_supply_property tusb320_psy_props[] = {
+	POWER_SUPPLY_PROP_ONLINE,
+	POWER_SUPPLY_PROP_CURRENT_MAX,
+};
+
+static int tusb320_psy_get_prop(struct power_supply *psy,
+				enum power_supply_property psp,
+				union power_supply_propval *val)
+{
+	struct tusb320_priv *priv = power_supply_get_drvdata(psy);
+
+	switch (psp) {
+	case POWER_SUPPLY_PROP_ONLINE:
+		val->intval = priv->online;
+		break;
+	case POWER_SUPPLY_PROP_CURRENT_MAX:
+		val->intval = priv->online ? priv->current_max : 0;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static void tusb320_set_source_current(struct tusb320_priv *priv,
+				       unsigned int current_max, bool online)
+{
+	if (!priv->psy ||
+	    (priv->current_max == current_max && priv->online == online))
+		return;
+
+	priv->current_max = current_max;
+	priv->online = online;
+	power_supply_changed(priv->psy);
+}
+
+static int tusb320_psy_register(struct tusb320_priv *priv)
+{
+	struct power_supply_config cfg = {
+		.fwnode = dev_fwnode(priv->dev),
+		.drv_data = priv,
+	};
+	struct power_supply_desc *desc;
+	char *name;
+
+	name = devm_kasprintf(priv->dev, GFP_KERNEL, "tusb320-source-psy-%s",
+			      dev_name(priv->dev));
+	if (!name)
+		return -ENOMEM;
+
+	desc = devm_kzalloc(priv->dev, sizeof(*desc), GFP_KERNEL);
+	if (!desc)
+		return -ENOMEM;
+
+	desc->name = name;
+	desc->type = POWER_SUPPLY_TYPE_USB;
+	desc->properties = tusb320_psy_props;
+	desc->num_properties = ARRAY_SIZE(tusb320_psy_props);
+	desc->get_property = tusb320_psy_get_prop;
+
+	priv->psy = devm_power_supply_register(priv->dev, desc, &cfg);
+
+	return PTR_ERR_OR_ZERO(priv->psy);
+}
+
 static void tusb320_typec_irq_handler(struct tusb320_priv *priv, u8 reg9)
 {
 	struct typec_port *port = priv->port;
@@ -284,6 +361,8 @@ static void tusb320_typec_irq_handler(struct tusb320_priv *priv, u8 reg9)
 	enum usb_role usb_role;
 	enum typec_role pwr_role;
 	enum typec_data_role data_role;
+	enum typec_pwr_opmode pwr_opmode;
+	unsigned int current_max;
 	u8 state, mode, accessory;
 	int ret, reg8;
 	bool ori;
@@ -361,14 +440,25 @@ static void tusb320_typec_irq_handler(struct tusb320_priv *priv, u8 reg9)
 	usb_role_switch_set_role(priv->role_sw, usb_role);
 
 	mode = FIELD_GET(TUSB320_REG8_CURRENT_MODE_DETECT, reg8);
-	if (mode == TUSB320_REG8_CURRENT_MODE_DETECT_DEF)
-		typec_set_pwr_opmode(port, TYPEC_PWR_MODE_USB);
-	else if (mode == TUSB320_REG8_CURRENT_MODE_DETECT_MED)
-		typec_set_pwr_opmode(port, TYPEC_PWR_MODE_1_5A);
-	else if (mode == TUSB320_REG8_CURRENT_MODE_DETECT_HI)
-		typec_set_pwr_opmode(port, TYPEC_PWR_MODE_3_0A);
-	else	/* Charge through accessory */
-		typec_set_pwr_opmode(port, TYPEC_PWR_MODE_USB);
+	if (mode == TUSB320_REG8_CURRENT_MODE_DETECT_MED) {
+		pwr_opmode = TYPEC_PWR_MODE_1_5A;
+		current_max = 1500000;
+	} else if (mode == TUSB320_REG8_CURRENT_MODE_DETECT_HI) {
+		pwr_opmode = TYPEC_PWR_MODE_3_0A;
+		current_max = 3000000;
+	} else {
+		/*
+		 * Default USB power, and charge-through accessories. 500 mA is
+		 * the figure guaranteed by a default Rp; a USB 3.x source may
+		 * offer 900 mA but nothing here can tell the two apart, so
+		 * report the amount that is always safe to draw.
+		 */
+		pwr_opmode = TYPEC_PWR_MODE_USB;
+		current_max = 500000;
+	}
+
+	typec_set_pwr_opmode(port, pwr_opmode);
+	tusb320_set_source_current(priv, current_max, pwr_role == TYPEC_SINK);
 }
 
 static irqreturn_t tusb320_state_update_handler(struct tusb320_priv *priv,
@@ -554,6 +644,19 @@ static int tusb320_probe(struct i2c_client *client)
 	ret = tusb320_typec_probe(client, priv);
 	if (ret)
 		return ret;
+
+	/*
+	 * Only meaningful alongside a Type-C connector: the advertised current
+	 * comes from the CC pins, which is exactly what the Type-C half reads.
+	 * Register before the first state update so it starts out populated.
+	 */
+	if (priv->port) {
+		ret = tusb320_psy_register(priv);
+		if (ret) {
+			tusb320_typec_remove(priv);
+			return ret;
+		}
+	}
 
 	/* update initial state */
 	tusb320_state_update_handler(priv, true);
