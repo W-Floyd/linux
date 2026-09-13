@@ -69,6 +69,17 @@ struct iris_inst;
 #define H264_CABAC_RES_RATIO_HD_TOT	3
 #define H265D_MAX_SLICE	3600
 #define SIZE_H265D_HW_PIC_T SIZE_H264D_HW_PIC_T
+/*
+ * AR50_LITE's bin buffer ratios. The HD_TOT pair below belongs to Iris2 and
+ * later; this core uses a different split entirely (and a different threshold
+ * test), so it needs its own.
+ */
+#define H264_CABAC_HDR_RATIO_SM_TOT	1
+#define H264_CABAC_RES_RATIO_SM_TOT	2
+#define H265_CABAC_HDR_RATIO_SM_TOT	1
+#define H265_CABAC_RES_RATIO_SM_TOT	6
+#define VPX_DECODER_FRAME_BIN_BUFFER_SIZE	(1024 * 1024)
+
 #define H265_CABAC_HDR_RATIO_HD_TOT 2
 #define H265_CABAC_RES_RATIO_HD_TOT 2
 #define SIZE_H265D_VPP_CMD_PER_BUF (256)
@@ -286,6 +297,7 @@ static inline u32 size_av1d_qp(u32 frame_width, u32 frame_height)
 }
 
 u32 iris_vpu_buf_size(struct iris_inst *inst, enum iris_buffer_type buffer_type);
+u32 iris_vpu_ar50lt_buf_size(struct iris_inst *inst, enum iris_buffer_type buffer_type);
 u32 iris_vpu33_buf_size(struct iris_inst *inst, enum iris_buffer_type buffer_type);
 u32 iris_vpu4x_buf_size(struct iris_inst *inst, enum iris_buffer_type buffer_type);
 int iris_vpu_buf_count(struct iris_inst *inst, enum iris_buffer_type buffer_type);

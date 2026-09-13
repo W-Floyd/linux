@@ -50,13 +50,13 @@ static const struct iris_firmware_desc iris_vpu20_p4_gen1_desc = {
  */
 static const struct iris_firmware_desc iris_sm6225_gen1_desc = {
 	.firmware_data = &iris_hfi_gen1_data,
-	.get_vpu_buffer_size = iris_vpu_buf_size,
+	.get_vpu_buffer_size = iris_vpu_ar50lt_buf_size,
 	.fwname = "qcom/venus-6.0/venus.mbn",
 };
 
 static const struct iris_firmware_desc iris_sm6225_gen2_desc = {
 	.firmware_data = &iris_hfi_gen2_data,
-	.get_vpu_buffer_size = iris_vpu33_buf_size,
+	.get_vpu_buffer_size = iris_vpu_ar50lt_buf_size,
 	.fwname = "qcom/venus-6.0/venus.mbn",
 };
 
