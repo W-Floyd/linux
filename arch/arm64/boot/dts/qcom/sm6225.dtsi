@@ -857,6 +857,40 @@
 			#gpio-cells = <2>;
 			gpio-ranges = <&lpass_tlmm 0 0 19>;
 
+			/*
+			 * Primary MI2S. The driver calls it "i2s1"; these four
+			 * pins carry it in their second mux function, the first
+			 * being dmic01/dmic23 -- which is why a board using the
+			 * primary port has to leave the LPI DMICs alone.
+			 *
+			 * Both data lines are muxed. The port is shared by two
+			 * amplifiers on this generation of hardware and vendor
+			 * device trees describe sd0 and sd1 together; muxing an
+			 * unused one costs nothing, while omitting a used one
+			 * is silent.
+			 */
+			lpi_i2s1_active: lpi-i2s1-active-state {
+				sck-pins {
+					pins = "gpio6";
+					function = "i2s1_clk";
+					bias-disable;
+					drive-strength = <8>;
+				};
+
+				ws-pins {
+					pins = "gpio7";
+					function = "i2s1_ws";
+					bias-disable;
+					drive-strength = <8>;
+				};
+
+				data-pins {
+					pins = "gpio8", "gpio9";
+					function = "i2s1_data";
+					bias-disable;
+					drive-strength = <8>;
+				};
+			};
 		};
 
 		gcc: clock-controller@1400000 {
