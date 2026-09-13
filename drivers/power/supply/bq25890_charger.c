@@ -21,11 +21,13 @@
 #include <linux/of.h>
 
 #define BQ25890_MANUFACTURER		"Texas Instruments"
+#define SC89890H_MANUFACTURER		"Southchip"
 #define BQ25890_IRQ_PIN			"bq25890_irq"
 
 #define BQ25890_ID			3
 #define BQ25895_ID			7
 #define BQ25896_ID			0
+#define SC89890H_ID			4
 
 #define PUMP_EXPRESS_START_DELAY	(5 * HZ)
 #define PUMP_EXPRESS_MAX_TRIES		6
@@ -36,6 +38,7 @@ enum bq25890_chip_version {
 	BQ25892,
 	BQ25895,
 	BQ25896,
+	SC89890H,
 };
 
 static const char *const bq25890_chip_name[] = {
@@ -43,6 +46,7 @@ static const char *const bq25890_chip_name[] = {
 	"BQ25892",
 	"BQ25895",
 	"BQ25896",
+	"SC89890H",
 };
 
 enum bq25890_fields {
@@ -104,6 +108,9 @@ struct bq25890_state {
 	u8 ntc_fault;
 };
 
+/* Per-chip conversion tables, defined below with the tables themselves */
+union bq25890_tbl;
+
 struct bq25890_device {
 	struct i2c_client *client;
 	struct device *dev;
@@ -128,6 +135,7 @@ struct bq25890_device {
 	u32 pump_express_vbus_max;
 	u32 iinlim_percentage;
 	enum bq25890_chip_version chip_version;
+	const union bq25890_tbl *tables;
 	struct bq25890_init_data init_data;
 	struct bq25890_state state;
 
@@ -277,6 +285,7 @@ enum bq25890_table_ids {
 	/* range tables */
 	TBL_ICHG,
 	TBL_ITERM,
+	TBL_IPRECHG,
 	TBL_IINLIM,
 	TBL_VREG,
 	TBL_BOOSTV,
@@ -302,6 +311,13 @@ static const u32 bq25890_boosti_tbl[] = {
 };
 
 #define BQ25890_BOOSTI_TBL_SIZE		ARRAY_SIZE(bq25890_boosti_tbl)
+
+/* The SC89890H has the same field, but its own set of values */
+static const u32 sc89890h_boosti_tbl[] = {
+	500000, 750000, 1200000, 1400000, 1650000, 1875000, 2150000, 2450000
+};
+
+#define SC89890H_BOOSTI_TBL_SIZE	ARRAY_SIZE(sc89890h_boosti_tbl)
 
 /* NTC 10K temperature lookup table in tenths of a degree */
 static const u32 bq25890_tspct_tbl[] = {
@@ -336,14 +352,17 @@ struct bq25890_lookup {
 	u32 size;
 };
 
-static const union {
+union bq25890_tbl {
 	struct bq25890_range  rt;
 	struct bq25890_lookup lt;
-} bq25890_tables[] = {
+};
+
+static const union bq25890_tbl bq25890_tables[] = {
 	/* range tables */
 	/* TODO: BQ25896 has max ICHG 3008 mA */
 	[TBL_ICHG] =	 { .rt = {0,        5056000, 64000} },	 /* uA */
 	[TBL_ITERM] =	 { .rt = {64000,    1024000, 64000} },	 /* uA */
+	[TBL_IPRECHG] =	 { .rt = {64000,    1024000, 64000} },	 /* uA */
 	[TBL_IINLIM] =   { .rt = {100000,   3250000, 50000} },	 /* uA */
 	[TBL_VREG] =	 { .rt = {3840000,  4608000, 16000} },	 /* uV */
 	[TBL_BOOSTV] =	 { .rt = {4550000,  5510000, 64000} },	 /* uV */
@@ -355,6 +374,32 @@ static const union {
 	/* lookup tables */
 	[TBL_TREG] =	{ .lt = {bq25890_treg_tbl, BQ25890_TREG_TBL_SIZE} },
 	[TBL_BOOSTI] =	{ .lt = {bq25890_boosti_tbl, BQ25890_BOOSTI_TBL_SIZE} },
+	[TBL_TSPCT] =	{ .lt = {bq25890_tspct_tbl, BQ25890_TSPCT_TBL_SIZE} }
+};
+
+/*
+ * The SC89890H is register-compatible with the BQ25890 but not value-
+ * compatible: the current fields step in 60 mA rather than 64 mA and start
+ * from different offsets, the boost regulation voltage has its own base and
+ * step, and the input limit tops out at 3.0 A instead of 3.25 A. Everything
+ * not listed here is identical, so those entries are copied verbatim.
+ */
+static const union bq25890_tbl sc89890h_tables[] = {
+	/* range tables */
+	[TBL_ICHG] =	 { .rt = {0,        5040000, 60000} },	 /* uA */
+	[TBL_ITERM] =	 { .rt = {30000,     930000, 60000} },	 /* uA */
+	[TBL_IPRECHG] =	 { .rt = {60000,     960000, 60000} },	 /* uA */
+	[TBL_IINLIM] =   { .rt = {100000,   3000000, 50000} },	 /* uA */
+	[TBL_VREG] =	 { .rt = {3840000,  4608000, 16000} },	 /* uV */
+	[TBL_BOOSTV] =	 { .rt = {3900000,  5400000, 100000} },	 /* uV */
+	[TBL_SYSVMIN] =  { .rt = {3000000,  3700000, 100000} },	 /* uV */
+	[TBL_VBUSV] =	 { .rt = {2600000, 15300000, 100000} },	 /* uV */
+	[TBL_VBATCOMP] = { .rt = {0,         224000, 32000} },	 /* uV */
+	[TBL_RBATCOMP] = { .rt = {0,         140000, 20000} },	 /* uOhm */
+
+	/* lookup tables */
+	[TBL_TREG] =	{ .lt = {bq25890_treg_tbl, BQ25890_TREG_TBL_SIZE} },
+	[TBL_BOOSTI] =	{ .lt = {sc89890h_boosti_tbl, SC89890H_BOOSTI_TBL_SIZE} },
 	[TBL_TSPCT] =	{ .lt = {bq25890_tspct_tbl, BQ25890_TSPCT_TBL_SIZE} }
 };
 
@@ -377,18 +422,19 @@ static int bq25890_field_write(struct bq25890_device *bq,
 	return regmap_field_write(bq->rmap_fields[field_id], val);
 }
 
-static u8 bq25890_find_idx(u32 value, enum bq25890_table_ids id)
+static u8 bq25890_find_idx(struct bq25890_device *bq, u32 value,
+			   enum bq25890_table_ids id)
 {
 	u8 idx;
 
 	if (id >= TBL_TREG) {
-		const u32 *tbl = bq25890_tables[id].lt.tbl;
-		u32 tbl_size = bq25890_tables[id].lt.size;
+		const u32 *tbl = bq->tables[id].lt.tbl;
+		u32 tbl_size = bq->tables[id].lt.size;
 
 		for (idx = 1; idx < tbl_size && tbl[idx] <= value; idx++)
 			;
 	} else {
-		const struct bq25890_range *rtbl = &bq25890_tables[id].rt;
+		const struct bq25890_range *rtbl = &bq->tables[id].rt;
 		u8 rtbl_size;
 
 		rtbl_size = (rtbl->max - rtbl->min) / rtbl->step + 1;
@@ -402,16 +448,17 @@ static u8 bq25890_find_idx(u32 value, enum bq25890_table_ids id)
 	return idx - 1;
 }
 
-static u32 bq25890_find_val(u8 idx, enum bq25890_table_ids id)
+static u32 bq25890_find_val(struct bq25890_device *bq, u8 idx,
+			    enum bq25890_table_ids id)
 {
 	const struct bq25890_range *rtbl;
 
 	/* lookup table? */
 	if (id >= TBL_TREG)
-		return bq25890_tables[id].lt.tbl[idx];
+		return bq->tables[id].lt.tbl[idx];
 
 	/* range table */
-	rtbl = &bq25890_tables[id].rt;
+	rtbl = &bq->tables[id].rt;
 
 	return (rtbl->min + idx * rtbl->step);
 }
@@ -461,7 +508,7 @@ static int bq25890_get_vbus_voltage(struct bq25890_device *bq)
 	if (ret < 0)
 		return ret;
 
-	return bq25890_find_val(ret, TBL_VBUSV);
+	return bq25890_find_val(bq, ret, TBL_VBUSV);
 }
 
 static void bq25890_update_state(struct bq25890_device *bq,
@@ -525,7 +572,8 @@ static int bq25890_power_supply_get_property(struct power_supply *psy,
 		break;
 
 	case POWER_SUPPLY_PROP_MANUFACTURER:
-		val->strval = BQ25890_MANUFACTURER;
+		val->strval = (bq->chip_version == SC89890H) ?
+			SC89890H_MANUFACTURER : BQ25890_MANUFACTURER;
 		break;
 
 	case POWER_SUPPLY_PROP_MODEL_NAME:
@@ -550,11 +598,12 @@ static int bq25890_power_supply_get_property(struct power_supply *psy,
 		break;
 
 	case POWER_SUPPLY_PROP_PRECHARGE_CURRENT:
-		val->intval = bq25890_find_val(bq->init_data.iprechg, TBL_ITERM);
+		val->intval = bq25890_find_val(bq, bq->init_data.iprechg,
+					       TBL_IPRECHG);
 		break;
 
 	case POWER_SUPPLY_PROP_CHARGE_TERM_CURRENT:
-		val->intval = bq25890_find_val(bq->init_data.iterm, TBL_ITERM);
+		val->intval = bq25890_find_val(bq, bq->init_data.iterm, TBL_ITERM);
 		break;
 
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
@@ -562,7 +611,7 @@ static int bq25890_power_supply_get_property(struct power_supply *psy,
 		if (ret < 0)
 			return ret;
 
-		val->intval = bq25890_find_val(ret, TBL_IINLIM);
+		val->intval = bq25890_find_val(bq, ret, TBL_IINLIM);
 		break;
 
 	case POWER_SUPPLY_PROP_CURRENT_NOW:	/* I_BAT now */
@@ -595,7 +644,7 @@ static int bq25890_power_supply_get_property(struct power_supply *psy,
 		ret = bq25890_field_read(bq, F_ICHG);
 		if (ret < 0)
 			return ret;
-		val->intval = bq25890_find_val(ret, TBL_ICHG);
+		val->intval = bq25890_find_val(bq, ret, TBL_ICHG);
 
 		/* When temperature is too low, charge current is decreased */
 		if (bq->state.ntc_fault == NTC_FAULT_COOL) {
@@ -618,7 +667,7 @@ static int bq25890_power_supply_get_property(struct power_supply *psy,
 		 *
 		 * This value is constant for each battery and set from DT.
 		 */
-		val->intval = bq25890_find_val(bq->init_data.ichg, TBL_ICHG);
+		val->intval = bq25890_find_val(bq, bq->init_data.ichg, TBL_ICHG);
 		break;
 
 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:	/* V_BAT now */
@@ -652,7 +701,7 @@ static int bq25890_power_supply_get_property(struct power_supply *psy,
 		if (ret < 0)
 			return ret;
 
-		val->intval = bq25890_find_val(ret, TBL_VREG);
+		val->intval = bq25890_find_val(bq, ret, TBL_VREG);
 		break;
 
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:	/* V_BAT max */
@@ -663,7 +712,7 @@ static int bq25890_power_supply_get_property(struct power_supply *psy,
 		 *
 		 * This value is constant for each battery and set from DT.
 		 */
-		val->intval = bq25890_find_val(bq->init_data.vreg, TBL_VREG);
+		val->intval = bq25890_find_val(bq, bq->init_data.vreg, TBL_VREG);
 		break;
 
 	case POWER_SUPPLY_PROP_TEMP:
@@ -672,7 +721,7 @@ static int bq25890_power_supply_get_property(struct power_supply *psy,
 			return ret;
 
 		/* convert TS percentage into rough temperature */
-		val->intval = bq25890_find_val(ret, TBL_TSPCT);
+		val->intval = bq25890_find_val(bq, ret, TBL_TSPCT);
 		break;
 
 	default:
@@ -693,15 +742,15 @@ static int bq25890_power_supply_set_property(struct power_supply *psy,
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
-		maxval = bq25890_find_val(bq->init_data.ichg, TBL_ICHG);
-		lval = bq25890_find_idx(min(val->intval, maxval), TBL_ICHG);
+		maxval = bq25890_find_val(bq, bq->init_data.ichg, TBL_ICHG);
+		lval = bq25890_find_idx(bq, min(val->intval, maxval), TBL_ICHG);
 		return bq25890_field_write(bq, F_ICHG, lval);
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE:
-		maxval = bq25890_find_val(bq->init_data.vreg, TBL_VREG);
-		lval = bq25890_find_idx(min(val->intval, maxval), TBL_VREG);
+		maxval = bq25890_find_val(bq, bq->init_data.vreg, TBL_VREG);
+		lval = bq25890_find_idx(bq, min(val->intval, maxval), TBL_VREG);
 		return bq25890_field_write(bq, F_VREG, lval);
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
-		lval = bq25890_find_idx(val->intval, TBL_IINLIM);
+		lval = bq25890_find_idx(bq, val->intval, TBL_IINLIM);
 		return bq25890_field_write(bq, F_IINLIM, lval);
 	case POWER_SUPPLY_PROP_ONLINE:
 		ret = bq25890_field_write(bq, F_EN_HIZ, !val->intval);
@@ -737,7 +786,7 @@ static int bq25890_charger_get_scaled_iinlim_regval(struct bq25890_device *bq,
 						    int iinlim_ua)
 {
 	iinlim_ua = iinlim_ua * bq->iinlim_percentage / 100;
-	return bq25890_find_idx(iinlim_ua, TBL_IINLIM);
+	return bq25890_find_idx(bq, iinlim_ua, TBL_IINLIM);
 }
 
 /* On the BQ25892 try to get charger-type info from our supplier */
@@ -1318,10 +1367,17 @@ static int bq25890_get_chip_version(struct bq25890_device *bq)
 		bq->chip_version = BQ25895;
 		break;
 
+	case SC89890H_ID:
+		bq->chip_version = SC89890H;
+		break;
+
 	default:
 		dev_err(bq->dev, "Unknown chip ID %d\n", id);
 		return -ENODEV;
 	}
+
+	bq->tables = (bq->chip_version == SC89890H) ? sc89890h_tables
+						    : bq25890_tables;
 
 	return 0;
 }
@@ -1354,7 +1410,7 @@ static int bq25890_fw_read_u32_props(struct bq25890_device *bq)
 		{"ti,charge-current", false, TBL_ICHG, &init->ichg},
 		{"ti,battery-regulation-voltage", false, TBL_VREG, &init->vreg},
 		{"ti,termination-current", false, TBL_ITERM, &init->iterm},
-		{"ti,precharge-current", false, TBL_ITERM, &init->iprechg},
+		{"ti,precharge-current", false, TBL_IPRECHG, &init->iprechg},
 		{"ti,minimum-sys-voltage", false, TBL_SYSVMIN, &init->sysvmin},
 		{"ti,boost-voltage", false, TBL_BOOSTV, &init->boostv},
 		{"ti,boost-max-current", false, TBL_BOOSTI, &init->boosti},
@@ -1382,7 +1438,7 @@ static int bq25890_fw_read_u32_props(struct bq25890_device *bq)
 			return ret;
 		}
 
-		*props[i].conv_data = bq25890_find_idx(property,
+		*props[i].conv_data = bq25890_find_idx(bq, property,
 						       props[i].tbl_id);
 	}
 
@@ -1633,6 +1689,7 @@ static const struct i2c_device_id bq25890_i2c_ids[] = {
 	{ .name = "bq25892" },
 	{ .name = "bq25895" },
 	{ .name = "bq25896" },
+	{ .name = "sc89890h" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, bq25890_i2c_ids);
@@ -1642,6 +1699,7 @@ static const struct of_device_id bq25890_of_match[] __maybe_unused = {
 	{ .compatible = "ti,bq25892", },
 	{ .compatible = "ti,bq25895", },
 	{ .compatible = "ti,bq25896", },
+	{ .compatible = "southchip,sc89890h", },
 	{ },
 };
 MODULE_DEVICE_TABLE(of, bq25890_of_match);
