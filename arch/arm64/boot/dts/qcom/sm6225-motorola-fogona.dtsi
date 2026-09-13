@@ -730,6 +730,17 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&charger_int_n>;
 
+		/*
+		 * The Type-C port is where the real input limit comes from.
+		 * The charger's own BC1.2 detection only sees D+/D-, so a
+		 * laptop port advertising 3.0 A through Rp while presenting a
+		 * plain SDP signature is charged at 500 mA -- measured here,
+		 * with only ~65 mA of that reaching the battery because the
+		 * SoC takes the rest. The SGM7220 reads the CC pins and
+		 * publishes what was actually promised.
+		 */
+		power-supplies = <&typec>;
+
 		ti,battery-regulation-voltage = <4400000>;
 		ti,charge-current = <3000000>;
 		ti,termination-current = <243000>;
@@ -739,7 +750,7 @@
 		ti,boost-max-current = <1200000>;
 	};
 
-	typec@47 {
+	typec: typec@47 {
 		compatible = "ti,tusb320";
 		reg = <0x47>;
 
