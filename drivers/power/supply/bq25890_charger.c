@@ -23,6 +23,7 @@
 #define BQ25890_MANUFACTURER		"Texas Instruments"
 #define SC89890H_MANUFACTURER		"Southchip"
 #define BQ25890_IRQ_PIN			"bq25890_irq"
+#define BQ25890_TEMP_SUPPLY		"battery-temperature-supply"
 
 #define BQ25890_ID			3
 #define BQ25895_ID			7
@@ -136,6 +137,7 @@ struct bq25890_device {
 	u32 iinlim_percentage;
 	enum bq25890_chip_version chip_version;
 	const union bq25890_tbl *tables;
+	struct power_supply *temp_psy;	/* measures the pack, if the TS pin does not */
 	struct bq25890_init_data init_data;
 	struct bq25890_state state;
 
@@ -716,6 +718,17 @@ static int bq25890_power_supply_get_property(struct power_supply *psy,
 		break;
 
 	case POWER_SUPPLY_PROP_TEMP:
+		/*
+		 * Boards that do not wire the TS pin to the pack thermistor
+		 * name the supply that does measure it, since what this
+		 * property is asked for is the battery temperature and the TS
+		 * reading would be an artefact of whatever the pin floats to.
+		 */
+		if (bq->temp_psy)
+			return power_supply_get_property(bq->temp_psy,
+							 POWER_SUPPLY_PROP_TEMP,
+							 val);
+
 		ret = bq25890_field_read(bq, F_TSPCT);
 		if (ret < 0)
 			return ret;
@@ -1402,6 +1415,31 @@ static int bq25890_get_chip_version(struct bq25890_device *bq)
 	return 0;
 }
 
+/*
+ * Optional: the supply that measures the pack, for boards that do not wire the
+ * TS pin to the battery thermistor. Absent means the TS pin is used, which is
+ * the existing behaviour.
+ */
+static int bq25890_temp_psy_probe(struct bq25890_device *bq)
+{
+	struct device *dev = bq->dev;
+	struct power_supply *psy;
+
+	if (!device_property_present(dev, BQ25890_TEMP_SUPPLY))
+		return 0;
+
+	psy = devm_power_supply_get_by_reference(dev, BQ25890_TEMP_SUPPLY);
+	if (IS_ERR(psy))
+		return dev_err_probe(dev, PTR_ERR(psy),
+				     "getting battery temperature supply\n");
+	if (!psy)
+		return -EPROBE_DEFER;	/* named, but not registered yet */
+
+	bq->temp_psy = psy;
+
+	return 0;
+}
+
 static int bq25890_irq_probe(struct bq25890_device *bq)
 {
 	struct gpio_desc *irq;
@@ -1573,6 +1611,10 @@ static int bq25890_probe(struct i2c_client *client)
 	ret = bq25890_fw_probe(bq);
 	if (ret < 0)
 		return dev_err_probe(dev, ret, "reading device properties\n");
+
+	ret = bq25890_temp_psy_probe(bq);
+	if (ret < 0)
+		return ret;
 
 	ret = bq25890_hw_init(bq);
 	if (ret < 0) {
