@@ -587,6 +587,25 @@
 	vdd-1.8-xo-supply = <&pm6125_l16>;
 	vdd-1.3-rfa-supply = <&pm6125_l17>;
 	vdd-3.3-ch0-supply = <&pm6125_l23>;
+
+	/*
+	 * Names this board's entry in board-2.bin. ath10k asks for
+	 * "bus=snoc,qmi-board-id=ff,qmi-chip-id=150,variant=Motorola_fogona"
+	 * first, then the same name without the variant, then board-id alone --
+	 * so this is not load-bearing here: the board-2.bin that fogona-wlan-bdf
+	 * builds on the handset carries both that name and the bare board-id
+	 * one, and resolves either way.
+	 *
+	 * Declared anyway because it is what every other qcom board in mainline
+	 * does, the two closest relatives included -- sm6115-fxtec-pro1x
+	 * ("Fxtec_QX1050") and sm6115p-lenovo-j606f ("Lenovo_P11"), neither of
+	 * which has an entry in upstream board-2.bin either. The string is the
+	 * key a board file would be submitted under if Motorola ever published a
+	 * redistributable one; today it only picks the more specific of two
+	 * names for the same blob.
+	 */
+	qcom,calibration-variant = "Motorola_fogona";
+
 	status = "okay";
 };
 
