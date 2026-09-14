@@ -777,7 +777,19 @@ static int csid_set_stream(struct v4l2_subdev *sd, int enable)
 			return -ENOLINK;
 	}
 
-	if (csid->phy.need_vc_update) {
+	/*
+	 * need_vc_update exists to skip redundant reprogramming when the
+	 * virtual channel mask has not changed since it was last written. It
+	 * is set when a link is set up and when the device is powered on, and
+	 * cleared by the first configure_stream() that consumes it -- which is
+	 * always the enable. A disable therefore found it already false and
+	 * never reached the hardware at all, so the CSID kept streaming until
+	 * its clocks were cut underneath it rather than halting at a frame
+	 * boundary.
+	 *
+	 * Gate only the enable on the flag; a disable must always be issued.
+	 */
+	if (!enable || csid->phy.need_vc_update) {
 		csid->res->hw_ops->configure_stream(csid, enable);
 		csid->phy.need_vc_update = false;
 	}
