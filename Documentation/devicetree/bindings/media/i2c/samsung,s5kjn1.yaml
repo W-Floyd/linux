@@ -21,7 +21,11 @@ allOf:
 
 properties:
   compatible:
-    const: samsung,s5kjn1
+    enum:
+        # 50MP sensor, model id 0x38e1
+      - samsung,s5kjn1
+        # the same register map under a different model id, 0x38ee
+      - samsung,s5kjns
 
   reg:
     maxItems: 1
