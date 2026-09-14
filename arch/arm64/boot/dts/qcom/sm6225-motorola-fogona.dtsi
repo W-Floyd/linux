@@ -1213,9 +1213,15 @@
 
 &cci_i2c0 {
 	/*
-	 * The upstream samsung,s5kjn1 binding's own example is camera@56 with
-	 * 2.8 V vdda, 1.05 V vddd, 1.8 V vddio and a 2.8 V autofocus rail --
-	 * field for field this module. The driver rejects any MCLK that is not
+	 * An S5KJNS, not the S5KJN1 the module part number suggests: the
+	 * silicon reports model id 0x38ee and the vendor's own sensormodule
+	 * blob declares the same. It shares the S5KJN1's register map -- the
+	 * driver's mode tables drive it and it streams -- so it is the same
+	 * driver under a second compatible.
+	 *
+	 * Otherwise the upstream binding's own example is camera@56 with 2.8 V
+	 * vdda, 1.05 V vddd, 1.8 V vddio and a 2.8 V autofocus rail -- field
+	 * for field this module. The driver rejects any MCLK that is not
 	 * exactly 24 MHz and any lane count that is not 4, both of which match.
 	 *
 	 * power-domains is not decoration: s5kjn1_power_on() runs at probe to
@@ -1225,7 +1231,7 @@
 	 * the sensor never answers.
 	 */
 	camera@56 {
-		compatible = "samsung,s5kjn1";
+		compatible = "samsung,s5kjns";
 		reg = <0x56>;
 
 		clocks = <&gcc GCC_CAMSS_MCLK0_CLK>;
