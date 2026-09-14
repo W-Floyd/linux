@@ -1089,11 +1089,20 @@ static int audioreach_widget_unload(struct snd_soc_component *scomp,
 			struct audioreach_graph_info *info = sg->info;
 
 			idr_remove(&apm->sub_graphs_idr, sg->sub_graph_id);
-			list_del(&sg->node);
-			info->num_sub_graphs--;
+			/*
+			 * A sub-graph is only added to a graph's list, and only
+			 * given an info, if the topology supplied an
+			 * AR_TKN_DAI_INDEX for it. One that did not is still
+			 * allocated and still reaches here, with a zeroed list
+			 * node that must not be unlinked.
+			 */
+			if (info) {
+				list_del(&sg->node);
+				info->num_sub_graphs--;
+			}
 			kfree(sg);
 			/* Check if there are no more sub-graphs left then remove graph info */
-			if (list_empty(&info->sg_list)) {
+			if (info && list_empty(&info->sg_list)) {
 				idr_remove(&apm->graph_info_idr, info->id);
 				kfree(info);
 			}
