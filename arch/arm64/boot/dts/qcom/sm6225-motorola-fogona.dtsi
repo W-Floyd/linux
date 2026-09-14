@@ -30,10 +30,21 @@
 	chassis-type = "handset";
 
 	/*
-	 * Measured, not inherited: /sys/devices/soc0/soc_id = 518, revision 1.0.
-	 * fogona ships two base DTBs differing only in this property (0x24a and
-	 * 0x206); this unit is 0x206 = 518. board-id is the pair carried by the
-	 * dtbo overlay ABL actually selects at runtime.
+	 * These are downstream bootloader DTB-selector properties, kept to the
+	 * upstream convention (msm8953-xiaomi, sm6115-fxtec-pro1x et al. carry
+	 * them). On fogona they are INERT: ABL never boots this tree. It selects a
+	 * stock SoC-level qcom,khaje base and merges Motorola's dtbo overlays onto
+	 * it via ufdt_overlay_do_fixups, which needs a __symbols__ table of the
+	 * downstream labels this tree does not export -- so the merge always fails
+	 * (confirmed in ABL's own binary; see /repo investigations/boot-chain.md).
+	 * In production our DTB is loaded by U-Boot from /boot, and U-Boot matches
+	 * on compatible; the kernel ignores msm-id/board-id. Kept for documentation
+	 * and in case a future bootloader path ever reads them.
+	 *
+	 * soc_id measured, not inherited: /sys/devices/soc0/soc_id = 518 (0x206),
+	 * revision 1.0. fogona's stock base ships two bins, 0x206 and 0x24a; this
+	 * unit is 0x206. board-id 0x41/0xa000 is this board's pair, carried by the
+	 * applicable overlay (dtbo-02); stock base trees themselves use <0 0>.
 	 */
 	qcom,msm-id = <518 0x10000>;
 	qcom,board-id = <0x41 0xa000>;
