@@ -503,12 +503,25 @@ static const struct snd_soc_dapm_widget fogona_dapm_widgets[] = {
 	SND_SOC_DAPM_SPK("Receiver", NULL),
 };
 
+/*
+ * The topology graph and the backend DAI live in different components --
+ * gprsvc:service:2:1 and ...:bedais -- so snd_soc_dapm_link_dai_widgets()
+ * cannot join them: it skips any widget whose dapm context differs from the
+ * DAI's. Without a card-level route bridging the two, DPCM finds no backend
+ * for MultiMedia1 and opening the PCM fails -EINVAL.
+ */
+static const struct snd_soc_dapm_route fogona_dapm_routes[] = {
+	{ "Primary MI2S Playback", NULL, "PRI MI2S RX SINK" },
+};
+
 static const struct qcom_snd_soc_common fogona_priv_data = {
 	.driver_name = "sm6225",
 	.dapm_widgets = fogona_dapm_widgets,
 	.num_dapm_widgets = ARRAY_SIZE(fogona_dapm_widgets),
 	.controls = fogona_controls,
 	.num_controls = ARRAY_SIZE(fogona_controls),
+	.dapm_routes = fogona_dapm_routes,
+	.num_dapm_routes = ARRAY_SIZE(fogona_dapm_routes),
 	.codec_dai_fmt = SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_I2S |
 			 SND_SOC_DAIFMT_BC_FC,
 };
