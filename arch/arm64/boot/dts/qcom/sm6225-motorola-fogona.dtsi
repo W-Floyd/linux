@@ -646,6 +646,27 @@
 };
 
 /*
+ * The primary MI2S bit clock, named so q6apm-lpass-dais can find it.
+ *
+ * This is not an ordinary clock: q6prmcc's provider is the DSP itself, so
+ * clk_set_rate() here becomes a PRM command telling the ADSP how to clock the
+ * LPAIF. Without it of_q6apm_parse_dai_data() leaves the port's bclk NULL,
+ * q6i2s_set_sysclk() silently does nothing, and the DSP is asked to accept a
+ * media format for an interface it has never been told the clock for.
+ */
+&q6apmbedai {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	dai@16 {
+		reg = <PRIMARY_MI2S_RX>;
+		clocks = <&q6prmcc LPASS_CLK_ID_PRI_MI2S_IBIT
+			  LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+		clock-names = "bclk";
+	};
+};
+
+/*
  * Touchscreen: ChipOne ICNL9916C, a TDDI part that drives the panel and the
  * digitizer from one package. The touch half is on SPI SE0, which is how stock
  * has it -- its overlay's fixups resolve fragment@60's target to
