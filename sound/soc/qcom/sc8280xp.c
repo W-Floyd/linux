@@ -522,6 +522,7 @@ static const struct qcom_snd_soc_common fogona_priv_data = {
 	.num_controls = ARRAY_SIZE(fogona_controls),
 	.dapm_routes = fogona_dapm_routes,
 	.num_dapm_routes = ARRAY_SIZE(fogona_dapm_routes),
+	.mi2s_bclk_enable = true,
 	.codec_dai_fmt = SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_I2S |
 			 SND_SOC_DAIFMT_BC_FC,
 };
