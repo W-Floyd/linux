@@ -622,6 +622,32 @@
 };
 
 /*
+ * The modem's data path, and the reason ModemManager can build a modem object
+ * at all: without it MM finishes its QMI probe and then gives up with "Failed
+ * to find a net port in the QMI modem", so there is no data, no calls, and not
+ * even a SIM read.
+ *
+ * The AP loads the GSI firmware here rather than the modem: TZ has the PAS id
+ * (0xf, what downstream's pas-ids says) and msm-firmware-loader surfaces the
+ * whole ipa_fws set out of the modem partition, so there is nothing to defer to
+ * the modem for. pil_ipa_fw_mem is 64 KiB and the image totals ~19 KiB across
+ * its five segments, so it fits with room to spare.
+ *
+ * No firmware-name here, for the same reason as &remoteproc_mpss above: the
+ * driver default is the bare "ipa_fws.mdt", which is exactly the flat link the
+ * loader creates in the firmware search root. Note the ipa_fws.mbn beside it is
+ * a symlink to that same .mdt rather than a single-file image, so the split
+ * .mdt + .b00..b04 path is the only one that exists on this handset.
+ */
+&ipa {
+	memory-region = <&pil_ipa_fw_mem>;
+
+	qcom,gsi-loader = "self";
+
+	status = "okay";
+};
+
+/*
  * The audio DSP. Nothing in the audio subsystem exists without it: the codec
  * macros, the MI2S ports and the sound card all hang off services this
  * remoteproc publishes, and so -- less obviously -- does lpass_tlmm. The LPI
