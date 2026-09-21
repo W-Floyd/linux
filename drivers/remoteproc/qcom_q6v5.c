@@ -123,11 +123,56 @@ int qcom_q6v5_unprepare(struct qcom_q6v5 *q6v5)
 }
 EXPORT_SYMBOL_GPL(qcom_q6v5_unprepare);
 
+/*
+ * The crash reason SMEM item is a fixed-size buffer and the firmware writes
+ * more into it than the summary line: printing it with "%s" stops at the first
+ * NUL and discards whatever follows, which on a stalled init is the part that
+ * says *which* task failed to report in.
+ *
+ * Worth the console noise because this is the only diagnostic channel that
+ * works on a remote processor's *first* life. SMEM is AP-visible shared
+ * memory; the processor's own DDR is XPU-protected, so qcom_pas_coredump()
+ * comes back empty and there is nothing else to read.
+ */
+#define Q6V5_CRASH_DUMP_MAX	512
+
+static void q6v5_report_crash_reason(struct qcom_q6v5 *q6v5, const char *kind)
+{
+	size_t len, summary, last;
+	char *msg;
+
+	msg = qcom_smem_get(QCOM_SMEM_HOST_ANY, q6v5->crash_reason, &len);
+	if (IS_ERR(msg) || !len || !msg[0]) {
+		dev_err(q6v5->dev, "%s without message\n", kind);
+		return;
+	}
+
+	dev_err(q6v5->dev, "%s received: %s\n", kind, msg);
+
+	/*
+	 * Find the last byte the firmware actually wrote. That bounds the dump
+	 * to the written part rather than the whole item -- these are hardirq
+	 * handlers and the console may be a framebuffer -- and reporting it
+	 * says whether Q6V5_CRASH_DUMP_MAX truncated anything, so one crash is
+	 * enough to know if the bound needs raising.
+	 */
+	for (last = len; last > 0; last--)
+		if (msg[last - 1])
+			break;
+
+	summary = strnlen(msg, len);
+	if (last <= summary)
+		return;		/* nothing past the summary but padding */
+
+	dev_err(q6v5->dev, "%s: item is %zu bytes, written up to %zu\n",
+		kind, len, last);
+	print_hex_dump(KERN_ERR, "crash_reason: ", DUMP_PREFIX_OFFSET, 16, 1,
+		       msg, min_t(size_t, last, Q6V5_CRASH_DUMP_MAX), true);
+}
+
 static irqreturn_t q6v5_wdog_interrupt(int irq, void *data)
 {
 	struct qcom_q6v5 *q6v5 = data;
-	size_t len;
-	char *msg;
 
 	/* Sometimes the stop triggers a watchdog rather than a stop-ack */
 	if (!q6v5->running) {
@@ -135,11 +180,7 @@ static irqreturn_t q6v5_wdog_interrupt(int irq, void *data)
 		return IRQ_HANDLED;
 	}
 
-	msg = qcom_smem_get(QCOM_SMEM_HOST_ANY, q6v5->crash_reason, &len);
-	if (!IS_ERR(msg) && len > 0 && msg[0])
-		dev_err(q6v5->dev, "watchdog received: %s\n", msg);
-	else
-		dev_err(q6v5->dev, "watchdog without message\n");
+	q6v5_report_crash_reason(q6v5, "watchdog");
 
 	q6v5->running = false;
 	rproc_report_crash(q6v5->rproc, RPROC_WATCHDOG);
@@ -150,17 +191,11 @@ static irqreturn_t q6v5_wdog_interrupt(int irq, void *data)
 static irqreturn_t q6v5_fatal_interrupt(int irq, void *data)
 {
 	struct qcom_q6v5 *q6v5 = data;
-	size_t len;
-	char *msg;
 
 	if (!q6v5->running)
 		return IRQ_HANDLED;
 
-	msg = qcom_smem_get(QCOM_SMEM_HOST_ANY, q6v5->crash_reason, &len);
-	if (!IS_ERR(msg) && len > 0 && msg[0])
-		dev_err(q6v5->dev, "fatal error received: %s\n", msg);
-	else
-		dev_err(q6v5->dev, "fatal error without message\n");
+	q6v5_report_crash_reason(q6v5, "fatal error");
 
 	q6v5->running = false;
 	rproc_report_crash(q6v5->rproc, RPROC_FATAL_ERROR);
