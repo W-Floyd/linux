@@ -231,7 +231,7 @@ static int announce_servers(struct sockaddr_qrtr *sq)
 			if (ret == -ENODEV)
 				continue;
 
-			pr_err("failed to announce new service\n");
+			pr_err("failed to announce new service: %d\n", ret);
 			return ret;
 		}
 	}
@@ -489,7 +489,7 @@ static int ctrl_cmd_new_server(struct sockaddr_qrtr *from,
 	if (srv->node == qrtr_ns.local_node) {
 		ret = service_announce_new(&qrtr_ns.bcast_sq, srv);
 		if (ret < 0) {
-			pr_err("failed to announce new service\n");
+			pr_err("failed to announce new service: %d\n", ret);
 			return ret;
 		}
 	}
@@ -690,8 +690,8 @@ static void qrtr_ns_worker(struct work_struct *work)
 		}
 
 		if (ret < 0)
-			pr_err_ratelimited("failed while handling packet from %d:%d",
-			       sq.sq_node, sq.sq_port);
+			pr_err_ratelimited("failed while handling packet from %d:%d: %d",
+			       sq.sq_node, sq.sq_port, ret);
 	}
 
 	kfree(recv_buf);
