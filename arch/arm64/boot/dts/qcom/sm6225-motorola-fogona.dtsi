@@ -37,6 +37,18 @@
 	qcom,msm-id = <518 0x10000>;
 	qcom,board-id = <0x41 0xa000>;
 
+	/*
+	 * uart3 is the only GENI UART enabled as a plain (non-console) serdev
+	 * bus on this board -- the Bluetooth link. With no /aliases node at
+	 * all, qcom_geni_serial_probe()'s of_alias_get_highest_id("serial")
+	 * returns -ENODEV and the ida_alloc_range() that follows it fails,
+	 * so the port never registers ("Invalid line -19"). qrb4210-rb2.dts
+	 * hits the same requirement and assigns serial1 to its uart3.
+	 */
+	aliases {
+		serial1 = &uart3;
+	};
+
 	chosen {
 		/*
 		 * The two remaining *_ignore_unused are inherited from the
@@ -304,6 +316,72 @@
 		function = "cam_mclk";
 		drive-strength = <2>;
 		bias-disable;
+	};
+
+	/*
+	 * uart3 (SE3) is the Bluetooth UART, not a spare engine -- see
+	 * investigations/bluetooth.md §1. gpio8-11 is CTS/RTS/TX/RX with flow
+	 * control; groups copied from qrb4210-rb2.dts, the bengal-class board
+	 * on the same SE3/qup3 pins.
+	 */
+	uart3_default: uart3-default-state {
+		cts-pins {
+			pins = "gpio8";
+			function = "qup3";
+			drive-strength = <2>;
+			bias-bus-hold;
+		};
+
+		rts-pins {
+			pins = "gpio9";
+			function = "qup3";
+			drive-strength = <2>;
+			bias-disable;
+		};
+
+		tx-pins {
+			pins = "gpio10";
+			function = "qup3";
+			drive-strength = <2>;
+			bias-disable;
+		};
+
+		rx-pins {
+			pins = "gpio11";
+			function = "qup3";
+			drive-strength = <2>;
+			bias-pull-up;
+		};
+	};
+
+	uart3_sleep: uart3-sleep-state {
+		cts-pins {
+			pins = "gpio8";
+			function = "gpio";
+			drive-strength = <2>;
+			bias-bus-hold;
+		};
+
+		rts-pins {
+			pins = "gpio9";
+			function = "gpio";
+			drive-strength = <2>;
+			bias-pull-down;
+		};
+
+		tx-pins {
+			pins = "gpio10";
+			function = "gpio";
+			drive-strength = <2>;
+			bias-pull-up;
+		};
+
+		rx-pins {
+			pins = "gpio11";
+			function = "gpio";
+			drive-strength = <2>;
+			bias-pull-up;
+		};
 	};
 };
 
@@ -607,6 +685,34 @@
 	qcom,calibration-variant = "Motorola_fogona";
 
 	status = "okay";
+};
+
+/*
+ * Bluetooth: WCN3988, the BT half of the WiFi/BT combo, on uart3's serdev
+ * bus. Rails are the same four the &wifi node above uses -- one combo chip,
+ * shared RF supplies. See investigations/bluetooth.md.
+ *
+ * The second interrupt is the out-of-band wakeup on the RX pin, which lets
+ * the controller wake the AP with the UART clocked down; omitting it is easy
+ * and the symptom would be a link that works until it idles. max-speed
+ * matches both the RB2 reference and a khaje sibling (Lenovo tb128fu).
+ */
+&uart3 {
+	interrupts-extended = <&intc GIC_SPI 330 IRQ_TYPE_LEVEL_HIGH>,
+			      <&tlmm 11 IRQ_TYPE_EDGE_FALLING>;
+	pinctrl-0 = <&uart3_default>;
+	pinctrl-1 = <&uart3_sleep>;
+	pinctrl-names = "default", "sleep";
+	status = "okay";
+
+	bluetooth {
+		compatible = "qcom,wcn3988-bt";
+		vddio-supply = <&pm6125_l9>;
+		vddxo-supply = <&pm6125_l16>;
+		vddrf-supply = <&pm6125_l17>;
+		vddch0-supply = <&pm6125_l23>;
+		max-speed = <3200000>;
+	};
 };
 
 /*
