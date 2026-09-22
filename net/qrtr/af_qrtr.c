@@ -165,6 +165,7 @@ static int qrtr_bcast_enqueue(struct qrtr_node *node, struct sk_buff *skb,
 			      struct sockaddr_qrtr *to);
 static struct qrtr_sock *qrtr_port_lookup(int port);
 static void qrtr_port_put(struct qrtr_sock *ipc);
+static int qrtr_node_send_hello(struct qrtr_node *node);
 
 /* Release node resources and free the node.
  *
@@ -352,8 +353,25 @@ static int qrtr_node_enqueue(struct qrtr_node *node, struct sk_buff *skb,
 	mutex_lock(&node->ep_lock);
 	if (!node->hello_sent && type != QRTR_TYPE_HELLO) {
 		mutex_unlock(&node->ep_lock);
-		kfree_skb(skb);
-		return -EAGAIN;
+
+		/*
+		 * The handshake is normally opened by the say_hello work
+		 * scheduled at endpoint registration, but a packet can get
+		 * here before that work has run: the remote's own HELLO is
+		 * delivered to the name server, which answers by announcing
+		 * every local server. Dropping those with -EAGAIN loses them
+		 * for good, since the name server does not retry, and the
+		 * remote then never learns of any local service. Open the
+		 * handshake inline instead; HELLO-first ordering still holds.
+		 */
+		qrtr_node_send_hello(node);
+
+		mutex_lock(&node->ep_lock);
+		if (!node->hello_sent) {
+			mutex_unlock(&node->ep_lock);
+			kfree_skb(skb);
+			return -EAGAIN;
+		}
 	}
 	mutex_unlock(&node->ep_lock);
 
@@ -591,36 +609,52 @@ static struct sk_buff *qrtr_alloc_ctrl_packet(struct qrtr_ctrl_pkt **pkt,
 	return skb;
 }
 
-static void qrtr_hello_work(struct work_struct *work)
+/* Send the HELLO that opens the handshake with @node.
+ *
+ * Returns 0 once the HELLO has been handed to the endpoint, -EAGAIN while the
+ * name server is not bound yet, -ENOMEM if the packet cannot be allocated, or
+ * the endpoint's own error.
+ */
+static int qrtr_node_send_hello(struct qrtr_node *node)
 {
 	struct sockaddr_qrtr from = {AF_QIPCRTR, 0, QRTR_PORT_CTRL};
 	struct sockaddr_qrtr to = {AF_QIPCRTR, 0, QRTR_PORT_CTRL};
 	struct qrtr_ctrl_pkt *pkt;
-	struct qrtr_node *node;
 	struct qrtr_sock *ctrl;
 	struct sk_buff *skb;
+	int rc;
 
-	node = container_of(to_delayed_work(work), struct qrtr_node, say_hello);
-
-	/* NS must be bound before we can send; retry with backoff if not ready */
+	/* NS must be bound before we can send */
 	ctrl = qrtr_port_lookup(QRTR_PORT_CTRL);
-	if (!ctrl) {
-		schedule_delayed_work(&node->say_hello, msecs_to_jiffies(100));
-		return;
-	}
+	if (!ctrl)
+		return -EAGAIN;
 
 	skb = qrtr_alloc_ctrl_packet(&pkt, GFP_KERNEL);
 	if (!skb) {
 		qrtr_port_put(ctrl);
-		schedule_delayed_work(&node->say_hello, msecs_to_jiffies(100));
-		return;
+		return -ENOMEM;
 	}
 
 	pkt->cmd = cpu_to_le32(QRTR_TYPE_HELLO);
 	from.sq_node = qrtr_local_nid;
 	to.sq_node = node->nid;
-	qrtr_node_enqueue(node, skb, QRTR_TYPE_HELLO, &from, &to);
+	rc = qrtr_node_enqueue(node, skb, QRTR_TYPE_HELLO, &from, &to);
 	qrtr_port_put(ctrl);
+
+	return rc;
+}
+
+static void qrtr_hello_work(struct work_struct *work)
+{
+	struct qrtr_node *node;
+	int rc;
+
+	node = container_of(to_delayed_work(work), struct qrtr_node, say_hello);
+
+	/* Retry with backoff while the NS is not bound or memory is short */
+	rc = qrtr_node_send_hello(node);
+	if (rc == -EAGAIN || rc == -ENOMEM)
+		schedule_delayed_work(&node->say_hello, msecs_to_jiffies(100));
 }
 
 /* Trigger the HELLO handshake after the remote has been reset, eg on resume */
