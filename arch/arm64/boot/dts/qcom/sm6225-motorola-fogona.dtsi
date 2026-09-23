@@ -188,6 +188,9 @@
 	gpio-keys {
 		compatible = "gpio-keys";
 
+		pinctrl-names = "default";
+		pinctrl-0 = <&kypd_vol_up_n>;
+
 		/*
 		 * Volume-up is on the PMIC, not TLMM. The schematic routes
 		 * KYPD_VOLP_N to PM6225 GPIO_05 (pad 21), and the stock dtbo
@@ -207,6 +210,8 @@
 			gpios = <&pm6125_gpios 5 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_VOLUMEUP>;
 			debounce-interval = <15>;
+			linux,can-disable;
+			wakeup-source;
 		};
 	};
 
@@ -394,6 +399,29 @@
 			drive-strength = <2>;
 			bias-pull-up;
 		};
+	};
+};
+
+/*
+ * Volume-up's pad. Without this state the pin keeps whatever the bootloader
+ * left, which on this board is `in high normal vin-0 no pull` (read back from
+ * pinconf-groups): input buffer on, but the bias disabled. KYPD_VOLP_N is a
+ * switch to ground with no external pull-up, so the line floats whenever the
+ * key is not held, and the chatter that follows keeps restarting gpio-keys'
+ * debounce -- mod_delayed_work() in gpio_keys_gpio_isr() defers the report on
+ * every fresh edge -- so a tap registers late, releases later still, and the
+ * compositor's key repeat turns one press into several volume steps.
+ *
+ * The stock dtbo sets exactly this (fragment@8 `key_vol_up_default`), and
+ * qrb4210-rb2.dts carries the same state for the same pad on the same PMIC.
+ */
+&pm6125_gpios {
+	kypd_vol_up_n: kypd-vol-up-n-state {
+		pins = "gpio5";
+		function = "normal";
+		power-source = <0>;
+		bias-pull-up;
+		input-enable;
 	};
 };
 
