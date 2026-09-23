@@ -138,6 +138,15 @@ properties:
       the next warm reset.
     maxItems: 1
 
+patternProperties:
+  "^mode-.*$":
+    maxItems: 1
+    description:
+      Reboot mode magics written into the download-mode register named by
+      qcom,dload-mode, in the form the generic reboot-mode binding uses.
+      "mode-edl = <1>" requests the boot ROM's emergency download mode on
+      the next warm reset.
+
 allOf:
   # Clocks
   - if:

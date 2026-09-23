@@ -27,6 +27,7 @@
 #include <linux/of_platform.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/platform_device.h>
+#include <linux/reboot-mode.h>
 #include <linux/reset-controller.h>
 #include <linux/remoteproc.h>
 #include <linux/sizes.h>
@@ -60,6 +61,7 @@ struct qcom_scm {
 
 	u64 dload_mode_addr;
 	void __iomem *minidump_sram;
+	struct reboot_mode_driver reboot_mode;
 
 	struct qcom_tzmem_pool *mempool;
 	unsigned int wq_cnt;
@@ -143,6 +145,9 @@ static const u8 qcom_scm_cpu_warm_bits[QCOM_SCM_BOOT_MAX_CPUS] = {
 #define QCOM_DLOAD_FULLDUMP	1
 #define QCOM_DLOAD_MINIDUMP	2
 #define QCOM_DLOAD_BOTHDUMP	3
+
+/* Same register: the boot ROM enters emergency download mode when set */
+#define QCOM_EDL_MASK		BIT(0)
 
 /* Minidump destination values written to always-on SRAM for boot firmware */
 #define QCOM_MINIDUMP_DEST_USB		0x0
@@ -574,6 +579,23 @@ static void qcom_scm_set_download_mode(struct qcom_scm *scm, u32 dload_mode)
 	 */
 	if (scm->minidump_sram && (dload_mode & QCOM_DLOAD_MINIDUMP))
 		writel_relaxed(minidump_dest, scm->minidump_sram);
+}
+
+/*
+ * Reboot modes ("reboot edl"): the boot ROM enters emergency download mode
+ * when the EDL bit of the download-mode register is set across a warm
+ * reset, so the mode magic (mode-edl = <1>) is written into that bit. The
+ * register does not survive a PMIC hard reset; the reboot has to be warm.
+ */
+static int qcom_scm_reboot_mode_write(struct reboot_mode_driver *reboot,
+				      unsigned int magic)
+{
+	struct qcom_scm *scm = container_of(reboot, struct qcom_scm, reboot_mode);
+
+	if (!scm->dload_mode_addr)
+		return -EOPNOTSUPP;
+
+	return qcom_scm_io_rmw(scm->dload_mode_addr, QCOM_EDL_MASK, magic);
 }
 
 struct qcom_scm_pas_context *devm_qcom_scm_pas_context_alloc(struct device *dev,
@@ -2812,6 +2834,12 @@ static int qcom_scm_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return dev_err_probe(&pdev->dev, ret,
 				     "Failed to map minidump SRAM\n");
+
+	scm->reboot_mode.dev = &pdev->dev;
+	scm->reboot_mode.write = qcom_scm_reboot_mode_write;
+	ret = devm_reboot_mode_register(&pdev->dev, &scm->reboot_mode);
+	if (ret)
+		dev_err(&pdev->dev, "failed to register reboot modes: %d\n", ret);
 
 	mutex_init(&scm->scm_bw_lock);
 
