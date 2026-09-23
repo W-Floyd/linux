@@ -38,8 +38,23 @@ void ipa_uc_deconfig(struct ipa *ipa);
  * it receives this message, and to do so we take a "proxy" clock
  * reference on its behalf here.  Once we receive the INIT_COMPLETED
  * message (in ipa_uc_response_hdlr()) we drop this power reference.
+ *
+ * The modem's IPA driver also programs IPA hardware early in every boot,
+ * not only the first, so the reference is taken on every modem start.
+ * On later boots the microcontroller is already loaded and sends no
+ * INIT_COMPLETED; the reference is then dropped by ipa_uc_power_release()
+ * once the modem reports its IPA driver ready over QMI.
  */
 void ipa_uc_power(struct ipa *ipa);
+
+/**
+ * ipa_uc_power_release() - Drop the microcontroller proxy power reference
+ * @ipa:	IPA pointer
+ *
+ * Does nothing if the reference taken by ipa_uc_power() was already
+ * dropped.
+ */
+void ipa_uc_power_release(struct ipa *ipa);
 
 /**
  * ipa_uc_panic_notifier()
