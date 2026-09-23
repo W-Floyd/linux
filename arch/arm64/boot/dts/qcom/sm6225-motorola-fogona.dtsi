@@ -257,6 +257,20 @@
 &tlmm {
 	gpio-reserved-ranges = <14 4>;
 
+	/*
+	 * TPS61280A boost converter: VPH_PWR -> QET4101 VDD_BATT -> the 4G PA's
+	 * VPA_APT. The only RF supply the AP owns (FOGONA-BOARD §8). Stock drives
+	 * VSEL (52), RST (59) and EN (60) high at probe and leaves them; its I2C
+	 * registers (APPS_I2C 0x75) retain the stock programming across reboots.
+	 * Hogged high until there is a driver.
+	 */
+	tps61280a_hog: tps61280a-hog {
+		gpio-hog;
+		gpios = <52 GPIO_ACTIVE_HIGH>, <59 GPIO_ACTIVE_HIGH>, <60 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "tps61280a-vsel-rst-en";
+	};
+
 	charger_int_n: charger-int-state {
 		pins = "gpio28";
 		function = "gpio";
