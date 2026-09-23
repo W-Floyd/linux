@@ -20,6 +20,7 @@
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/leds/common.h>
+#include <dt-bindings/regulator/ti,tps61280.h>
 #include "sm6225.dtsi"
 #include "pm6125.dtsi"
 
@@ -258,17 +259,14 @@
 	gpio-reserved-ranges = <14 4>;
 
 	/*
-	 * TPS61280A boost converter: VPH_PWR -> QET4101 VDD_BATT -> the 4G PA's
-	 * VPA_APT. The only RF supply the AP owns (FOGONA-BOARD §8). Stock drives
-	 * VSEL (52), RST (59) and EN (60) high at probe and leaves them; its I2C
-	 * registers (APPS_I2C 0x75) retain the stock programming across reboots.
-	 * Hogged high until there is a driver.
+	 * VSEL, nBYP and EN of the PA boost converter; stock's drive strength.
+	 * No function: the driver requests these as GPIOs, and qcom's pinmux is
+	 * strict, so a state that also muxes them is refused with -EINVAL.
 	 */
-	tps61280a_hog: tps61280a-hog {
-		gpio-hog;
-		gpios = <52 GPIO_ACTIVE_HIGH>, <59 GPIO_ACTIVE_HIGH>, <60 GPIO_ACTIVE_HIGH>;
-		output-high;
-		line-name = "tps61280a-vsel-rst-en";
+	pa_boost_default: pa-boost-default-state {
+		pins = "gpio52", "gpio59", "gpio60";
+		drive-strength = <8>;
+		bias-disable;
 	};
 
 	charger_int_n: charger-int-state {
@@ -1012,6 +1010,37 @@
 				};
 			};
 		};
+	};
+
+	/*
+	 * TPS61280A boost: VPH_PWR -> the QET4101 PA power manager's VDD_BATT,
+	 * and through it the 4G PA's VPA_APT. It is the only RF supply the AP
+	 * owns; the modem cannot reach it (FOGONA-BOARD §8). Stock drives VSEL,
+	 * nBYP and EN high and programs 3.5 V floor / 4.2 V roof with VSEL
+	 * selecting the roof, auto PWM, and the 5 A current limit; that is
+	 * what this node asks for. Always on: RF init on the modem side
+	 * expects the PA supply to be there, and the part idles cheaply.
+	 */
+	pa_boost: regulator@75 {
+		compatible = "ti,tps61280a", "ti,tps61280";
+		reg = <0x75>;
+
+		regulator-name = "qet4101_vdd_batt";
+		regulator-min-microvolt = <4200000>;
+		regulator-max-microvolt = <4200000>;
+		regulator-min-microamp = <5000000>;
+		regulator-max-microamp = <5000000>;
+		regulator-initial-mode = <TPS61280_MODE_NORMAL>;
+		regulator-always-on;
+		regulator-boot-on;
+
+		enable-gpios = <&tlmm 60 GPIO_ACTIVE_HIGH>;
+		ti,vsel-gpios = <&tlmm 52 GPIO_ACTIVE_HIGH>;
+		ti,vsel-state-high;
+		ti,bypass-gpios = <&tlmm 59 GPIO_ACTIVE_LOW>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&pa_boost_default>;
 	};
 };
 
