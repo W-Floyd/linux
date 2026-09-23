@@ -42,6 +42,15 @@ properties:
     minItems: 1
     maxItems: 2
 
+  qcom,warm-reset:
+    description:
+      The PON's software reset (SW_RESET_S2_CTL/GO) is wired so that a warm
+      reset issued through it restarts the SoC with power and the always-on
+      TCSR registers retained. Present on boards whose firmware only offers a
+      cold reset through PSCI SYSTEM_RESET, so that a warm reboot can be
+      performed from the PMIC instead.
+    type: boolean
+
   pwrkey:
     type: object
     $ref: /schemas/input/qcom,pm8941-pwrkey.yaml#
