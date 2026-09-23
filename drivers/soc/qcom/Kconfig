@@ -231,6 +231,16 @@ config QCOM_SPM
 	  to manage cores, L2 low power modes and to configure the internal
 	  Adaptive Voltage Scaler parameters, where supported.
 
+config QCOM_RPM_MASTER_STATS
+	tristate "Qualcomm RPM per-master sleep statistics (debug)"
+	depends on DEBUG_FS
+	depends on ARCH_QCOM || COMPILE_TEST
+	help
+	  Debugfs reader for the per-master sleep records (shutdown/bringup
+	  timestamps, XO shutdown accounting) the RPM firmware keeps in its
+	  message RAM. Address and stride are module parameters; the defaults
+	  are the SM6115/SM6225 values.
+
 config QCOM_STATS
 	tristate "Qualcomm Sleep stats driver"
 	depends on DEBUG_FS || COMPILE_TEST
