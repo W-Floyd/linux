@@ -590,6 +590,26 @@
 };
 
 /*
+ * `systemctl reboot --reboot-argument=edl` with /sys/kernel/reboot/mode set
+ * to warm lands in the boot ROM's emergency download mode (USB 05c6:9008).
+ * The SCM driver writes this magic into the EDL bit of TCSR_BOOT_MISC_DETECT
+ * (qcom,dload-mode in sm6225.dtsi); a PMIC hard reset would clear it, hence
+ * warm -- and this firmware's PSCI SYSTEM_RESET is a cold reset whatever the
+ * PS_HOLD type says (PON_REASON1 reads HARD_RESET after it), so the warm
+ * reset is done through the PON's software reset instead (qcom,warm-reset
+ * below). Only a long Power press leaves EDL again -- there is no signed
+ * Firehose programmer for this handset, so it is a parking mode, not a
+ * flashing route.
+ */
+&scm {
+	mode-edl = <0x1>;
+};
+
+&pm6125_pon {
+	qcom,warm-reset;
+};
+
+/*
  * Fuel gauge: CellWise CW2217 on SE2 I2C, the bus Motorola calls SAR_I2C.
  *
  * Stock declares three gauges on this bus -- cw2217@64, sm5602@71 and
