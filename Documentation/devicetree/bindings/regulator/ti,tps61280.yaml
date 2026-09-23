@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/regulator/ti,tps61280.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: TI TPS61280 boost converter with bypass
+
+maintainers:
+  - William Floyd <git@notmy.space>
+
+description: |
+  Single-channel synchronous boost converter with an I2C interface and a
+  pass-through (bypass) mode. The output is programmable from 2.85 V to
+  4.4 V in 50 mV steps through two registers, VOUTFLOOR and VOUTROOF, and
+  the VSEL pin selects which of the two is in effect. The EN pin enables the
+  converter and the nBYP pin forces pass-through; both can be strapped on the
+  board or driven by the host.
+
+allOf:
+  - $ref: regulator.yaml#
+
+properties:
+  compatible:
+    oneOf:
+      - const: ti,tps61280
+      - items:
+          - const: ti,tps61280a
+          - const: ti,tps61280
+
+  reg:
+    maxItems: 1
+
+  enable-gpios:
+    maxItems: 1
+    description:
+      GPIO connected to the EN pin. Without it the converter is enabled and
+      disabled through the CONFIG register instead.
+
+  ti,vsel-gpios:
+    maxItems: 1
+    description:
+      GPIO connected to the VSEL pin, which selects VOUTROOF (high) or
+      VOUTFLOOR (low) as the active output register.
+
+  ti,vsel-state-high:
+    type: boolean
+    description:
+      The level of the VSEL pin. When ti,vsel-gpios is present the pin is
+      driven to this level; otherwise it is the level the pin is strapped
+      to. Without this property the pin is low and VOUTFLOOR is in effect.
+
+  ti,bypass-gpios:
+    maxItems: 1
+    description:
+      GPIO connected to the nBYP pin, active when the converter is in
+      pass-through mode. The pin is active low, so describe it with
+      GPIO_ACTIVE_LOW.
+
+required:
+  - compatible
+  - reg
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+    #include <dt-bindings/regulator/ti,tps61280.h>
+
+    i2c {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        regulator@75 {
+            compatible = "ti,tps61280a", "ti,tps61280";
+            reg = <0x75>;
+
+            regulator-name = "vdd_pa";
+            regulator-min-microvolt = <3500000>;
+            regulator-max-microvolt = <4200000>;
+            regulator-initial-mode = <TPS61280_MODE_NORMAL>;
+
+            enable-gpios = <&tlmm 60 GPIO_ACTIVE_HIGH>;
+            ti,vsel-gpios = <&tlmm 52 GPIO_ACTIVE_HIGH>;
+            ti,vsel-state-high;
+            ti,bypass-gpios = <&tlmm 59 GPIO_ACTIVE_LOW>;
+        };
+    };
+...
