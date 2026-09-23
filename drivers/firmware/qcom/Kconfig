@@ -28,6 +28,7 @@ config QCOM_SCM
 	tristate "Qualcomm PAS SCM interface driver"
 	select QCOM_PAS
 	select QCOM_TZMEM
+	select REBOOT_MODE
 	default y if ARCH_QCOM
 
 config QCOM_TZMEM
