@@ -209,14 +209,16 @@ void ipa_uc_deconfig(struct ipa *ipa)
 void ipa_uc_power(struct ipa *ipa)
 {
 	struct device *dev = ipa->dev;
-	static bool already;
 	int ret;
 
-	if (already)
+	if (ipa->uc_powered)
 		return;
-	already = true;		/* Only do this on first boot */
 
-	/* This power reference dropped in ipa_uc_response_hdlr() above */
+	/* This power reference is dropped in ipa_uc_response_hdlr() above
+	 * when the microcontroller reports INIT_COMPLETED (first boot), or
+	 * in ipa_uc_power_release() once the modem's IPA driver is ready
+	 * (later boots, when the microcontroller is already loaded).
+	 */
 	ret = pm_runtime_get_sync(dev);
 	if (ret < 0) {
 		pm_runtime_put_noidle(dev);
@@ -224,6 +226,16 @@ void ipa_uc_power(struct ipa *ipa)
 	} else {
 		ipa->uc_powered = true;
 	}
+}
+
+/* Drop the proxy power reference if it is still held */
+void ipa_uc_power_release(struct ipa *ipa)
+{
+	if (!ipa->uc_powered)
+		return;
+
+	(void)pm_runtime_put_autosuspend(ipa->dev);
+	ipa->uc_powered = false;
 }
 
 /* Send a command to the microcontroller */

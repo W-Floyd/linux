@@ -12,6 +12,7 @@
 #include "ipa_mem.h"
 #include "ipa_modem.h"
 #include "ipa_qmi_msg.h"
+#include "ipa_uc.h"
 
 /**
  * DOC: AP/Modem QMI Handshake
@@ -142,6 +143,15 @@ static void ipa_qmi_ready(struct ipa_qmi *ipa_qmi)
 
 	/* We're ready.  Start up normal operation */
 	ipa = container_of(ipa_qmi, struct ipa, qmi);
+
+	/* On a boot after the first the microcontroller is already loaded
+	 * and reports no INIT_COMPLETED, so the proxy power reference taken
+	 * for the modem's boot is dropped here, now that its IPA driver has
+	 * finished initializing.
+	 */
+	if (ipa->uc_loaded)
+		ipa_uc_power_release(ipa);
+
 	ret = ipa_modem_start(ipa);
 	if (ret)
 		dev_err(ipa->dev, "error %d starting modem\n", ret);
