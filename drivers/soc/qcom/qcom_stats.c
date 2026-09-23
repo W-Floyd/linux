@@ -359,7 +359,7 @@ static const struct stats_config rpm_data = {
 	.num_records = 2,
 	.appended_stats_avail = true,
 	.dynamic_offset = true,
-	.subsystem_stats_in_smem = false,
+	.subsystem_stats_in_smem = true,
 };
 
 /* Older RPM firmwares have the stats at a fixed offset instead */
