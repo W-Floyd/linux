@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/soc/qcom/motorola,mmi-unit-info.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Motorola unit info for the modem
+
+maintainers:
+  - William Floyd <git@notmy.space>
+
+description:
+  Motorola's modem firmware takes its RF hardware id from a unit info block
+  the application processor publishes in SMEM item 134 before the modem
+  boots. Motorola's bootloader passes the values as androidboot.device and
+  androidboot.radio kernel arguments to its own kernels; a mainline kernel
+  receives neither. The device name is described here; the radio SKU is
+  detected per unit by the bootloader on some boards (from a hardware id)
+  and is then supplied by the OS instead.
+
+properties:
+  compatible:
+    const: motorola,mmi-unit-info
+
+  motorola,device:
+    $ref: /schemas/types.yaml#/definitions/string
+    description: Device codename, as in androidboot.device.
+
+  motorola,radio:
+    $ref: /schemas/types.yaml#/definitions/string
+    description:
+      Radio SKU, as in androidboot.radio. Only for boards built in a single
+      radio variant; where the bootloader detects it per unit, leave it out
+      and let the OS supply the detected value before the modem boots.
+
+  motorola,carrier:
+    $ref: /schemas/types.yaml#/definitions/string
+    description: Carrier, as in androidboot.carrier. Not needed by all modems.
+
+required:
+  - compatible
+  - motorola,device
+
+additionalProperties: false
+
+examples:
+  - |
+    mmi-unit-info {
+        compatible = "motorola,mmi-unit-info";
+        motorola,device = "fogona";
+    };
