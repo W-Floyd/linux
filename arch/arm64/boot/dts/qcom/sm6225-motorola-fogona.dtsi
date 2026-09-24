@@ -288,6 +288,14 @@
 		bias-pull-up;
 	};
 
+	/* SD_CARD_DET_N; stock reads it as "in high func0 2mA pull up". */
+	sdc2_card_det_n: sd-card-det-n-state {
+		pins = "gpio88";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
 	te_active: te-active-state {
 		pins = "gpio81";
 		function = "mdp_vsync";
@@ -532,6 +540,33 @@
 			regulator-min-microvolt = <3200000>;
 			regulator-max-microvolt = <3400000>;
 		};
+
+		/*
+		 * microSD rails, from the stock device tree's sdhc_2 node:
+		 * vdd (the card, VREG_L22A) at a fixed 2.96 V up to 800 mA,
+		 * vdd-io (the bus, VREG_L5A) switching between 1.8 V and
+		 * 2.96 V for UHS signalling, and vdd-io-bias (VREG_L7A) at
+		 * 1.256 V. The mainline sdhci-msm binding has no supply for
+		 * the bias rail, so L7 is kept on here instead; it draws at
+		 * most 6 mA.
+		 */
+		pm6125_l5: l5 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <2960000>;
+			regulator-allow-set-load;
+		};
+
+		pm6125_l7: l7 {
+			regulator-min-microvolt = <1256000>;
+			regulator-max-microvolt = <1256000>;
+			regulator-always-on;
+		};
+
+		pm6125_l22: l22 {
+			regulator-min-microvolt = <2960000>;
+			regulator-max-microvolt = <2960000>;
+			regulator-allow-set-load;
+		};
 	};
 };
 
@@ -553,6 +588,25 @@
  * "??? sus"; per the datasheet L18 is MIPI_CSI_1P2, so that assignment looks
  * wrong and is not copied here.
  */
+/*
+ * microSD. The card detect is TLMM 88, active high as the stock device tree
+ * declares it (`cd-gpios = <&tlmm 88 0>`). Measured on stock: the line reads
+ * high with a card in and also with the tray in and no card, so it reports
+ * the SIM/SD tray rather than the card; the SD stack then finds out whether a
+ * card is actually there. The slot is SD-only (stock sets no-sdio, no-mmc).
+ */
+&sdhc_2 {
+	cd-gpios = <&tlmm 88 GPIO_ACTIVE_HIGH>;
+	pinctrl-0 = <&sdc2_state_on &sdc2_card_det_n>;
+	pinctrl-1 = <&sdc2_state_off &sdc2_card_det_n>;
+	pinctrl-names = "default", "sleep";
+	vmmc-supply = <&pm6125_l22>;
+	vqmmc-supply = <&pm6125_l5>;
+	no-sdio;
+	no-mmc;
+	status = "okay";
+};
+
 &ufs_mem_hc {
 	vcc-supply = <&pm6125_l24>;
 	vcc-max-microamp = <600000>;
