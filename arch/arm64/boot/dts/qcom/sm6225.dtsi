@@ -367,11 +367,13 @@
 
 		cluster_0_pd: power-domain-cpu-cluster0 {
 			#power-domain-cells = <0>;
+			power-domains = <&mpm>;
 			domain-idle-states = <&cluster_0_sleep_0>, <&cluster_0_sleep_1>;
 		};
 
 		cluster_1_pd: power-domain-cpu-cluster1 {
 			#power-domain-cells = <0>;
+			power-domains = <&mpm>;
 			domain-idle-states = <&cluster_1_sleep_0>, <&cluster_1_sleep_1>;
 		};
 	};
@@ -439,6 +441,31 @@
 					};
 				};
 			};
+		};
+
+		/*
+		 * EXPERIMENT (fogona modem): stock's AP runs the MPM driver
+		 * (qcom,mpm-khaje: vMPM at msg RAM 0x1b8, apcs IPC doorbell,
+		 * GIC SPI 197), mainline had none. Pin map from downstream
+		 * mpm_khaje_gic_chip_data.
+		 */
+		mpm: interrupt-controller {
+			compatible = "qcom,mpm";
+			qcom,rpm-msg-ram = <&apss_mpm>;
+			interrupts = <GIC_SPI 197 IRQ_TYPE_EDGE_RISING>;
+			mboxes = <&apcs_glb 1>;
+			interrupt-controller;
+			#interrupt-cells = <2>;
+			#power-domain-cells = <0>;
+			interrupt-parent = <&intc>;
+			qcom,mpm-pin-count = <96>;
+			qcom,mpm-pin-map = <2 190>,
+					   <5 296>,  /* lpass_irq_out_sdc */
+					   <12 422>, /* usb3_lfps_rxterm_irq */
+					   <24 79>,  /* bi_px_lpi_1_aoss_mx */
+					   <86 183>, /* mpm_wake, spmi_m */
+					   <90 188>, /* eud_p0_dmse_int_mx */
+					   <91 184>; /* eud_p0_dpse_int_mx */
 		};
 	};
 
@@ -1242,6 +1269,13 @@
 		rpm_msg_ram: sram@45f0000 {
 			compatible = "qcom,rpm-msg-ram";
 			reg = <0x0 0x045f0000 0x0 0x7000>;
+			#address-cells = <1>;
+			#size-cells = <1>;
+			ranges = <0 0x0 0x045f0000 0x7000>;
+
+			apss_mpm: sram@1b8 {
+				reg = <0x1b8 0x48>;
+			};
 		};
 
 		sram@4690000 {
