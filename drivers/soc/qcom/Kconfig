@@ -253,6 +253,17 @@ config QCOM_STATS
 	  various SoC level low power modes statistics and export to debugfs
 	  interface.
 
+config QCOM_MMI_UNIT_INFO
+	tristate "Motorola unit info for the modem"
+	depends on QCOM_SMEM
+	help
+	  Motorola's modem firmware reads its RF hardware id from a unit
+	  info block the application processor publishes in SMEM before the
+	  modem boots. Without it the modem never brings RF up. This driver
+	  publishes the block from values described in the devicetree.
+
+	  Say M or Y here if you have a Motorola phone with a Qualcomm SoC.
+
 config QCOM_WCNSS_CTRL
 	tristate "Qualcomm WCNSS control driver"
 	depends on RPMSG
