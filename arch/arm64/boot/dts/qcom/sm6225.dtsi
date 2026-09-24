@@ -3519,6 +3519,25 @@
 			reg = <0x0 0x0c123000 0x0 0x2000>;
 		};
 
+		/*
+		 * EXPERIMENT (fogona modem): stock's kernel writes records here
+		 * (qcom,msm-imem at 0xc125000); mainline wrote none, so
+		 * qcom_pil_info_store() stored nothing. PIL reloc info at stock's
+		 * offset, so each remote's load address is recorded as on stock.
+		 */
+		imem@c125000 {
+			compatible = "qcom,sm6115-imem", "syscon", "simple-mfd";
+			reg = <0x0 0x0c125000 0x0 0x1000>;
+			ranges = <0 0x0 0x0c125000 0x1000>;
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			pil-reloc@94c {
+				compatible = "qcom,pil-reloc-info";
+				reg = <0x94c 0xc8>;
+			};
+		};
+
 		apps_smmu: iommu@c600000 {
 			compatible = "qcom,sm6115-smmu-500", "qcom,smmu-500", "arm,mmu-500";
 			reg = <0x0 0x0c600000 0x0 0x80000>;
