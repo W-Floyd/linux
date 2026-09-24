@@ -491,8 +491,11 @@ static int icnl9916_spi_xact(struct icnl9916_data *data, u16 cmd, void *buf,
 
 	/*
 	 * The reply is validated by its CRC, which covers everything up to the
-	 * CRC itself: payload, error byte and echoed command.  This is the only
-	 * integrity check the vendor driver applies on SPI.
+	 * CRC itself: payload, error byte and echoed command.  The vendor
+	 * driver checks neither -- both the error byte and the CRC test are
+	 * commented out in its cts_tcs_spi_read() -- so it will accept a reply
+	 * the controller clocked out before it was ready.  Checking here is
+	 * what turns that into a clean retry instead of a bogus value.
 	 */
 	if (validate) {
 		crc = icnl9916_crc16(data->rx_buf, rxlen - sizeof(__le16));
