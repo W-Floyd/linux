@@ -134,6 +134,21 @@
 	};
 
 	/*
+	 * Motorola's modem firmware reads its RF hardware id from this unit
+	 * info block in SMEM, published before the modem boots. Without it the
+	 * modem resolves HWID 0 and never brings RF up. The modem needs the
+	 * device name and the radio SKU. fogona ships as ATT or RET, which ABL
+	 * detects per unit from a hardware id and passes only to its own
+	 * kernels (androidboot.radio), so there is no radio here: userspace
+	 * reads ABL's result from the `hw` partition and writes it to this
+	 * device's "radio" attribute before rmtfs starts the modem.
+	 */
+	mmi-unit-info {
+		compatible = "motorola,mmi-unit-info";
+		motorola,device = "fogona";
+	};
+
+	/*
 	 * Persistent kernel log across reboots. CONFIG_PSTORE_RAM is already
 	 * enabled, but without a region the driver is inert -- which is why an
 	 * unexplained reboot leaves nothing behind. That matters more than
