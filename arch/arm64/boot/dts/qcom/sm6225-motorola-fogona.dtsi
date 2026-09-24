@@ -1005,6 +1005,16 @@
 };
 
 /*
+ * EXPERIMENT (fogona modem): stock boots the CDSP every time; mainline never
+ * did. It is its own RPM master and a peer of the modem, so its absence is a
+ * difference in RPM's aggregate state and in the modem's peers that no AP-side
+ * test covered.
+ */
+&remoteproc_cdsp {
+	status = "okay";
+};
+
+/*
  * The primary MI2S bit clock, named so q6apm-lpass-dais can find it.
  *
  * This is not an ordinary clock: q6prmcc's provider is the DSP itself, so
