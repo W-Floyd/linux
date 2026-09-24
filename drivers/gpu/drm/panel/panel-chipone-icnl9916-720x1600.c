@@ -13,6 +13,7 @@
 #include <drm/drm_mipi_dsi.h>
 #include <drm/drm_modes.h>
 #include <drm/drm_panel.h>
+#include <drm/drm_print.h>
 #include <drm/drm_probe_helper.h>
 
 /*
@@ -22,7 +23,8 @@
  * module, so each module needs its own command sequence and timings.
  */
 struct icnl9916_panel_desc {
-	const struct drm_display_mode *mode;
+	const struct drm_display_mode *modes;
+	unsigned int num_modes;
 	unsigned long mode_flags;
 	unsigned long hs_rate;
 	unsigned long lp_rate;
@@ -308,43 +310,73 @@ static int icnl9916_panel_unprepare(struct drm_panel *panel)
 	return 0;
 }
 
-static const struct drm_display_mode icnl9916_panel_mode = {
-	.clock = 96000,
-	.hdisplay = 720,
-	.hsync_start = 720 + 70,
-	.hsync_end = 720 + 70 + 4,
-	.htotal = 720 + 70 + 4 + 80,
-	.vdisplay = 1600,
-	.vsync_start = 1600 + 180,
-	.vsync_end = 1600 + 180 + 4,
-	.vtotal = 1600 + 180 + 4 + 32,
-	.width_mm = 68,
-	.height_mm = 151,
-	.type = DRM_MODE_TYPE_DRIVER,
+static const struct drm_display_mode icnl9916_panel_modes[] = {
+	{
+		.clock = 96000,
+		.hdisplay = 720,
+		.hsync_start = 720 + 70,
+		.hsync_end = 720 + 70 + 4,
+		.htotal = 720 + 70 + 4 + 80,
+		.vdisplay = 1600,
+		.vsync_start = 1600 + 180,
+		.vsync_end = 1600 + 180 + 4,
+		.vtotal = 1600 + 180 + 4 + 32,
+		.width_mm = 68,
+		.height_mm = 151,
+		.type = DRM_MODE_TYPE_DRIVER,
+	},
 };
 
 /*
- * The Tianma module runs at a fixed 60 Hz with an unusually long vertical
- * front porch, which is what puts the pixel clock at 143 MHz rather than the
- * ~80 MHz this resolution would otherwise need: 820 * 2904 * 60.
+ * The Tianma module runs at 60 or 90 Hz off a single pixel clock, which is why
+ * that clock is 143 MHz rather than the ~80 MHz this resolution would
+ * otherwise need.  The vendor device tree describes only the 60 Hz timing and
+ * reaches 90 Hz at runtime with "dfps_immediate_porch_mode_vfp": the link rate
+ * is held constant and the vertical front porch alone is shortened, so the
+ * long porch in the 60 Hz mode below is padding rather than a panel
+ * requirement.
+ *
+ *	820 * 2904 * 60 = 820 * 1936 * 90 = 142,876,800 Hz
+ *
+ * Both rates therefore share one set of DSI PHY timings -- the vendor tree
+ * likewise carries a single qcom,mdss-dsi-panel-phy-timings -- and the panel
+ * needs no command sequence of its own to switch between them.
  */
-static const struct drm_display_mode icnl9916c_tm_panel_mode = {
-	.clock = 142877,
-	.hdisplay = 720,
-	.hsync_start = 720 + 48,
-	.hsync_end = 720 + 48 + 4,
-	.htotal = 720 + 48 + 4 + 48,
-	.vdisplay = 1600,
-	.vsync_start = 1600 + 1268,
-	.vsync_end = 1600 + 1268 + 4,
-	.vtotal = 1600 + 1268 + 4 + 32,
-	.width_mm = 70,
-	.height_mm = 156,
-	.type = DRM_MODE_TYPE_DRIVER,
+static const struct drm_display_mode icnl9916c_tm_panel_modes[] = {
+	{
+		/* 60 Hz, and the boot default. */
+		.clock = 142877,
+		.hdisplay = 720,
+		.hsync_start = 720 + 48,
+		.hsync_end = 720 + 48 + 4,
+		.htotal = 720 + 48 + 4 + 48,
+		.vdisplay = 1600,
+		.vsync_start = 1600 + 1268,
+		.vsync_end = 1600 + 1268 + 4,
+		.vtotal = 1600 + 1268 + 4 + 32,
+		.width_mm = 70,
+		.height_mm = 156,
+		.type = DRM_MODE_TYPE_DRIVER,
+	}, {
+		/* 90 Hz: the same timing with the front porch cut to 300. */
+		.clock = 142877,
+		.hdisplay = 720,
+		.hsync_start = 720 + 48,
+		.hsync_end = 720 + 48 + 4,
+		.htotal = 720 + 48 + 4 + 48,
+		.vdisplay = 1600,
+		.vsync_start = 1600 + 300,
+		.vsync_end = 1600 + 300 + 4,
+		.vtotal = 1600 + 300 + 4 + 32,
+		.width_mm = 70,
+		.height_mm = 156,
+		.type = DRM_MODE_TYPE_DRIVER,
+	},
 };
 
 static const struct icnl9916_panel_desc icnl9916_panel_desc = {
-	.mode = &icnl9916_panel_mode,
+	.modes = icnl9916_panel_modes,
+	.num_modes = ARRAY_SIZE(icnl9916_panel_modes),
 	.mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
 		      MIPI_DSI_MODE_VIDEO_HSE,
 	.hs_rate = 691000000,
@@ -368,7 +400,8 @@ static const char * const icnl9916c_tm_supplies[] = {
 };
 
 static const struct icnl9916_panel_desc icnl9916c_tm_panel_desc = {
-	.mode = &icnl9916c_tm_panel_mode,
+	.modes = icnl9916c_tm_panel_modes,
+	.num_modes = ARRAY_SIZE(icnl9916c_tm_panel_modes),
 	.mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_LPM,
 	.on = icnl9916c_tm_panel_on,
 	.off = icnl9916c_tm_panel_off,
@@ -378,12 +411,41 @@ static const struct icnl9916_panel_desc icnl9916c_tm_panel_desc = {
 	.dcs_backlight = true,
 };
 
+/*
+ * Modes are listed slowest first and modes[0] is marked preferred, so a
+ * userspace that just takes the first mode keeps the 60 Hz behaviour.
+ */
 static int icnl9916_panel_get_modes(struct drm_panel *panel,
 				       struct drm_connector *connector)
 {
 	struct icnl9916_panel *ctx = to_icnl9916_panel(panel);
+	struct drm_device *dev = connector->dev;
+	unsigned int i, count = 0;
 
-	return drm_connector_helper_get_modes_fixed(connector, ctx->desc->mode);
+	for (i = 0; i < ctx->desc->num_modes; i++) {
+		struct drm_display_mode *mode;
+
+		mode = drm_mode_duplicate(dev, &ctx->desc->modes[i]);
+		if (!mode) {
+			drm_err(dev, "Failed to duplicate mode " DRM_MODE_FMT "\n",
+				DRM_MODE_ARG(&ctx->desc->modes[i]));
+			continue;
+		}
+
+		if (mode->name[0] == '\0')
+			drm_mode_set_name(mode);
+
+		if (i == 0)
+			mode->type |= DRM_MODE_TYPE_PREFERRED;
+
+		drm_mode_probed_add(connector, mode);
+		count++;
+	}
+
+	connector->display_info.width_mm = ctx->desc->modes[0].width_mm;
+	connector->display_info.height_mm = ctx->desc->modes[0].height_mm;
+
+	return count;
 }
 
 /*
