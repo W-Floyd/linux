@@ -274,6 +274,31 @@ err:
 	return rc;
 }
 
+static int q6i2s_prepare(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
+{
+	struct q6apm_lpass_dai_data *dai_data = dev_get_drvdata(dai->dev);
+	int rc;
+
+	rc = q6apm_lpass_dai_prepare(substream, dai);
+	if (rc)
+		return rc;
+
+	/*
+	 * When the DSP is the I2S clock provider, the bit and frame clocks
+	 * only run once the port is started. DAPM powers the codecs between
+	 * prepare and trigger, and codecs that check for a clock at power-up
+	 * (aw88261 waits for its PLL to lock) fail if the port is still idle.
+	 */
+	rc = q6apm_graph_start(dai_data->graph[dai->id]);
+	if (rc) {
+		dev_err(dai->dev, "Failed to start APM port %d\n", dai->id);
+		return rc;
+	}
+	dai_data->is_port_started[dai->id] = true;
+
+	return 0;
+}
+
 static int q6apm_lpass_dai_startup(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 {
 	struct q6apm_lpass_dai_data *dai_data = dev_get_drvdata(dai->dev);
@@ -415,7 +440,7 @@ static const struct snd_soc_dai_ops q6dma_ops = {
 };
 
 static const struct snd_soc_dai_ops q6i2s_ops = {
-	.prepare	= q6apm_lpass_dai_prepare,
+	.prepare	= q6i2s_prepare,
 	.startup	= q6i2s_dai_startup,
 	.shutdown	= q6i2s_lpass_dai_shutdown,
 	.set_channel_map  = q6dma_set_channel_map,
