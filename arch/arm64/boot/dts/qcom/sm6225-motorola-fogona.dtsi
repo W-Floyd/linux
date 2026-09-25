@@ -324,12 +324,16 @@
 		reg = <0 3>;
 
 		/*
-		 * WCD9370 TX port 1 (ADC1)       <=> SWR0 port 1
-		 * WCD9370 TX port 2 (ADC2, 3)    <=> SWR0 port 1
-		 * WCD9370 TX port 3 (DMIC, MBHC) <=> SWR0 port 2
-		 * WCD9370 TX port 4 (DMIC4-7)    <=> SWR0 port 3
+		 * WCD9370 TX port 1 (ADC1)       <=> SWR0 port 1 (SWR_MIC0-3)
+		 * WCD9370 TX port 2 (ADC2, 3)    <=> SWR0 port 2 (SWR_MIC4-7)
+		 * WCD9370 TX port 3 (DMIC, MBHC) <=> SWR0 port 3 (SWR_MIC8-11)
+		 * WCD9370 TX port 4 (DMIC4-6)    <=> SWR0 port 3, unused here
+		 *
+		 * As stock's qcom,tx_swr_ch_map: ADC1 on SWRM_TX1, ADC2 on
+		 * SWRM_TX2. Sharing port 1 between ADC1 and ADC2 puts both
+		 * microphones on the same SoundWire channel.
 		 */
-		qcom,tx-port-mapping = <1 1 2 3>;
+		qcom,tx-port-mapping = <1 2 3 3>;
 	};
 };
 
