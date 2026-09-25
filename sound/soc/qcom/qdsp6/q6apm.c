@@ -1006,10 +1006,14 @@ static int voice_poc_start(struct q6apm *apm)
 	static const u32 tx_ch[] = { 0x11c05000, 2 };
 	static const u32 cal_keys[] = { 0x11c05000, 3, 0x08001166, 0,
 					0x080011b6, 0, 0x08001167, 0 };
-	/* MFC output: 48 kHz, 32 bit, 1 channel, channel map 3 (10 bytes) */
-	static const u32 mfc[] = { 48000, 0x00010020, 0x00000003 };
-	/* mic: 48 kHz, 16 bit, 1 channel; LPAIF_RXTX, TX codec DMA 3, mask 5 */
-	static const u32 mic_mf[] = { 48000, 0x00010010, 1 };
+	/*
+	 * MFC output: 48 kHz, 16 bit, 2 channels, channel map FL FR (12 bytes),
+	 * to match the backend SAL's operating format. Stock sends 32 bit mono,
+	 * its earpiece device's format.
+	 */
+	static const u32 mfc[] = { 48000, 0x00020010, 0x00020001 };
+	/* mics: 48 kHz, 16 bit, 2 channels; LPAIF_RXTX, TX codec DMA 3, mask 5 */
+	static const u32 mic_mf[] = { 48000, 0x00020010, 1 };
 	static const u32 mic_dma[] = { 1, 4, 5 };
 	u8 buf[256];
 	size_t n = 0;
@@ -1043,8 +1047,8 @@ static int voice_poc_start(struct q6apm *apm)
 		return rc;
 
 	n = 0;
-	n += voice_poc_rec(buf + n, 0x465b, 0x08001024, mfc, 10);
-	n += voice_poc_rec(buf + n, 0x41dd, 0x08001024, mfc, 10);
+	n += voice_poc_rec(buf + n, 0x465b, 0x08001024, mfc, 12);
+	n += voice_poc_rec(buf + n, 0x41dd, 0x08001024, mfc, 12);
 	rc = voice_poc_send(apm, APM_CMD_SET_CFG, buf, n);
 	if (rc)
 		return rc;
@@ -1064,7 +1068,17 @@ static int voice_poc_start(struct q6apm *apm)
 	rc = VOICE_POC_SG(APM_CMD_GRAPH_PREPARE, voice_poc_tx_sgs);
 	if (rc)
 		return rc;
-	return VOICE_POC_SG(APM_CMD_GRAPH_START, voice_poc_tx_start_sgs);
+	rc = VOICE_POC_SG(APM_CMD_GRAPH_START, voice_poc_tx_start_sgs);
+	if (rc)
+		return rc;
+	/* the mic sub-graph separately, so a failure there keeps the rest */
+	{
+		static const u32 mic_sg[] = { 1, 0xb0000039 };
+
+		if (VOICE_POC_SG(APM_CMD_GRAPH_START, mic_sg))
+			dev_warn(apm->dev, "voice-poc: mic sub-graph did not start\n");
+	}
+	return 0;
 }
 
 static void voice_poc_stop(struct q6apm *apm)
@@ -1097,6 +1111,11 @@ static ssize_t voice_poc_write(struct file *file, const char __user *ubuf,
 			voice_poc_stop(apm);
 	} else if (!strncmp(cmd, "stop", 4)) {
 		voice_poc_stop(apm);
+	} else if (!strncmp(cmd, "mic", 3)) {
+		/* start the mic device sub-graph on a running session, alone */
+		static const u32 mic_sg[] = { 1, 0xb0000039 };
+
+		rc = VOICE_POC_SG(APM_CMD_GRAPH_START, mic_sg);
 	} else {
 		return -EINVAL;
 	}
