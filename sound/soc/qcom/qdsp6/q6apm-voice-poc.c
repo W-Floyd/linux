@@ -37,14 +37,13 @@
 static const u32 voice_poc_rx_sgs[] = {
 	4, 0xb0000045, 0xb0000044, 0xb0000041, 0xb0000040,
 };
-static const u32 voice_poc_tx_sgs[] = {
-	3, 0xb000003f, 0xb00000b1, 0xb0000039,
-};
 /*
- * Started without the mic device sub-graph (0xb0000039): its CODEC_DMA
- * source fails GRAPH_START with no TX macro described in the DT.
+ * Voice TX without stock's mic device sub-graph (0xb0000039): the mics come
+ * from the topology's TX_CODEC_DMA_TX_3 backend, which ALSA keeps running
+ * (arecord on MultiMedia2), and voice-tx-open.bin links its splitter's
+ * output 15 (0x6091, stock's 0x4167) into voice TX.
  */
-static const u32 voice_poc_tx_start_sgs[] = {
+static const u32 voice_poc_tx_sgs[] = {
 	2, 0xb000003f, 0xb00000b1,
 };
 /* TX codec core and NPL clocks (mic); the backend owns the MI2S bit clock */
@@ -348,9 +347,6 @@ static int voice_poc_start(struct q6apm *apm)
 	 * its earpiece device's format.
 	 */
 	static const u32 mfc[] = { 48000, 0x00020010, 0x00020001 };
-	/* mics: 48 kHz, 16 bit, 2 channels; LPAIF_RXTX, TX codec DMA 3, mask 5 */
-	static const u32 mic_mf[] = { 48000, 0x00020010, 1 };
-	static const u32 mic_dma[] = { 1, 4, 5 };
 	u8 buf[256];
 	size_t n = 0;
 	int rc;
@@ -413,26 +409,10 @@ static int voice_poc_start(struct q6apm *apm)
 	if (rc)
 		return rc;
 
-	n = 0;
-	n += voice_poc_rec(buf + n, 0x43af, 0x08001017, mic_mf, sizeof(mic_mf));
-	n += voice_poc_rec(buf + n, 0x43af, 0x08001063, mic_dma, sizeof(mic_dma));
-	rc = voice_poc_send(apm, APM_CMD_SET_CFG, buf, n);
-	if (rc)
-		return rc;
 	rc = VOICE_POC_SG(APM_CMD_GRAPH_PREPARE, voice_poc_tx_sgs);
 	if (rc)
 		return rc;
-	rc = VOICE_POC_SG(APM_CMD_GRAPH_START, voice_poc_tx_start_sgs);
-	if (rc)
-		return rc;
-	/* the mic sub-graph separately, so a failure there keeps the rest */
-	{
-		static const u32 mic_sg[] = { 1, 0xb0000039 };
-
-		if (VOICE_POC_SG(APM_CMD_GRAPH_START, mic_sg))
-			dev_warn(apm->dev, "voice-poc: mic sub-graph did not start\n");
-	}
-	return 0;
+	return VOICE_POC_SG(APM_CMD_GRAPH_START, voice_poc_tx_sgs);
 }
 
 static void voice_poc_stop(struct q6apm *apm)
@@ -468,11 +448,6 @@ static ssize_t voice_poc_write(struct file *file, const char __user *ubuf,
 			voice_poc_stop(apm);
 	} else if (!strncmp(cmd, "stop", 4)) {
 		voice_poc_stop(apm);
-	} else if (!strncmp(cmd, "mic", 3)) {
-		/* start the mic device sub-graph on a running session, alone */
-		static const u32 mic_sg[] = { 1, 0xb0000039 };
-
-		rc = VOICE_POC_SG(APM_CMD_GRAPH_START, mic_sg);
 	} else {
 		return -EINVAL;
 	}
