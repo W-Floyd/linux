@@ -150,6 +150,11 @@ int q6apm_unmap_memory_fixed_region(struct device *dev, unsigned int graph_id);
 int q6apm_send_cmd_sync(struct q6apm *apm, const struct gpr_pkt *pkt,
 			uint32_t rsp_opcode);
 
+/* EXPERIMENT: hooks for q6apm-voice-poc.ko */
+#define Q6APM_POC_MAP_TOKEN	0x7ffe
+extern u32 q6apm_poc_map_handle;
+struct q6apm *q6apm_poc_get(void);
+
 /* Callback for graph specific */
 struct audioreach_module *q6apm_find_module_by_mid(struct q6apm_graph *graph,
 						    uint32_t mid);
