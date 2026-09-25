@@ -379,7 +379,8 @@ static int voice_poc_start(struct q6apm *apm)
 	rc = voice_poc_send_fw(apm, APM_CMD_GRAPH_OPEN, "qcom/sm6225/voice-tx-open.bin");
 	if (rc)
 		return rc;
-	rc = voice_poc_send_fw(apm, APM_CMD_SET_CFG, "qcom/sm6225/voice-tx-cfg.bin");
+	/* ECNS's tuning makes this ~10 KiB: send it in several SET_CFGs */
+	rc = voice_poc_send_fw_chunked(apm, APM_CMD_SET_CFG, "qcom/sm6225/voice-tx-cfg.bin");
 	if (rc)
 		return rc;
 	/* persistent calibration, as stock's REGISTER_CFGs (b000003f, b1) */
