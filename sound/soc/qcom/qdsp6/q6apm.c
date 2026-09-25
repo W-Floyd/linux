@@ -856,6 +856,258 @@ static const struct snd_soc_component_driver q6apm_audio_component = {
 	.remove_order   = SND_SOC_COMP_ORDER_LAST,
 };
 
+/*
+ * EXPERIMENT: voice call proof of concept. Opens stock's voice RX graph on
+ * the ADSP by hand, to see whether the modem's downlink reaches VCPM:
+ *
+ *   echo start > /sys/kernel/debug/q6apm-voice/ctl   (during a call)
+ *   echo stop  > /sys/kernel/debug/q6apm-voice/ctl
+ *
+ * qcom/sm6225/voice-rx4-open.bin is the merged GRAPH_OPEN of stock's four
+ * voice RX sub-graphs (tools/acdb/merge-graph.py), with stock's edges into
+ * its earpiece device sub-graph remapped onto the topology's backend: voice
+ * and DTMF into the backend SAL (0x6004), the mailbox's timing link to the
+ * I2S sink (0x6003). The backend must therefore be running (a playback
+ * stream on MultiMedia1) before start; it also powers the amplifiers and
+ * owns the I2S clock. voice-rx4-cfg.bin / voice-tx-* as before: the VCPM
+ * voice config and calibration sent after each open. The rest follows
+ * stock's call-start sequence (investigations/call-audio.md).
+ */
+#include <dt-bindings/sound/qcom,q6dsp-lpass-ports.h>
+#include <linux/clk.h>
+#include <linux/debugfs.h>
+#include <linux/firmware.h>
+#include <linux/of_clk.h>
+
+static const u32 voice_poc_rx_sgs[] = {
+	4, 0xb0000045, 0xb0000044, 0xb0000041, 0xb0000040,
+};
+static const u32 voice_poc_tx_sgs[] = {
+	3, 0xb000003f, 0xb00000b1, 0xb0000039,
+};
+/*
+ * Started without the mic device sub-graph (0xb0000039): its CODEC_DMA
+ * source fails GRAPH_START with no TX macro described in the DT.
+ */
+static const u32 voice_poc_tx_start_sgs[] = {
+	2, 0xb000003f, 0xb00000b1,
+};
+/* TX codec core and NPL clocks (mic); the backend owns the MI2S bit clock */
+static const struct { u32 id; unsigned long rate; } voice_poc_clk_ids[] = {
+	{ LPASS_CLK_ID_TX_CORE_MCLK, 19200000 },
+	{ LPASS_CLK_ID_TX_CORE_NPL_MCLK, 19200000 },
+};
+static struct clk *voice_poc_clks[ARRAY_SIZE(voice_poc_clk_ids)];
+static struct dentry *voice_poc_dir;
+static bool voice_poc_rx_open, voice_poc_tx_open;
+
+static int voice_poc_send(struct q6apm *apm, u32 opcode, const void *data, size_t len)
+{
+	struct gpr_pkt *pkt;
+	int rc;
+
+	pkt = audioreach_alloc_apm_cmd_pkt(len, opcode, 0);
+	if (IS_ERR(pkt))
+		return PTR_ERR(pkt);
+	memcpy((void *)pkt + GPR_HDR_SIZE + APM_CMD_HDR_SIZE, data, len);
+	rc = q6apm_send_cmd_sync(apm, pkt, 0);
+	kfree(pkt);
+	dev_info(apm->dev, "voice-poc: opcode %#x, %zu bytes -> %d\n", opcode, len, rc);
+	return rc;
+}
+
+static int voice_poc_send_fw(struct q6apm *apm, u32 opcode, const char *name)
+{
+	const struct firmware *fw;
+	int rc;
+
+	rc = request_firmware(&fw, name, apm->dev);
+	if (rc)
+		return rc;
+	rc = voice_poc_send(apm, opcode, fw->data, fw->size);
+	release_firmware(fw);
+	return rc;
+}
+
+/* One param record: header, payload, padded to 8 bytes. */
+static size_t voice_poc_rec(u8 *buf, u32 miid, u32 pid, const void *pl, u32 size)
+{
+	struct apm_module_param_data *p = (void *)buf;
+
+	p->module_instance_id = miid;
+	p->param_id = pid;
+	p->param_size = size;
+	p->error_code = 0;
+	memcpy(buf + sizeof(*p), pl, size);
+	return ALIGN(sizeof(*p) + size, 8);
+}
+
+static int voice_poc_sg_cmd(struct q6apm *apm, u32 opcode, const u32 *list, size_t len)
+{
+	u8 buf[64] = { 0 };
+	size_t n;
+
+	n = voice_poc_rec(buf, APM_MODULE_INSTANCE_ID, APM_PARAM_ID_SUB_GRAPH_LIST,
+			  list, len);
+	return voice_poc_send(apm, opcode, buf, n);
+}
+
+#define VOICE_POC_SG(op, sgs) voice_poc_sg_cmd(apm, op, sgs, sizeof(sgs))
+
+static void voice_poc_put_clks(void)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(voice_poc_clks); i++) {
+		if (!voice_poc_clks[i])
+			continue;
+		clk_disable_unprepare(voice_poc_clks[i]);
+		clk_put(voice_poc_clks[i]);
+		voice_poc_clks[i] = NULL;
+	}
+}
+
+static int voice_poc_get_clks(struct q6apm *apm)
+{
+	struct of_phandle_args args = { .args_count = 2 };
+	struct clk *c;
+	int i, rc;
+
+	args.np = of_find_compatible_node(NULL, NULL, "qcom,q6prm-lpass-clocks");
+	for (i = 0; i < ARRAY_SIZE(voice_poc_clk_ids); i++) {
+		args.args[0] = voice_poc_clk_ids[i].id;
+		args.args[1] = LPASS_CLK_ATTRIBUTE_COUPLE_NO;
+		c = of_clk_get_from_provider(&args);
+		if (IS_ERR(c)) {
+			rc = PTR_ERR(c);
+			goto err;
+		}
+		clk_set_rate(c, voice_poc_clk_ids[i].rate);
+		rc = clk_prepare_enable(c);
+		dev_info(apm->dev, "voice-poc: clk %u -> %d\n", voice_poc_clk_ids[i].id, rc);
+		if (rc) {
+			clk_put(c);
+			goto err;
+		}
+		voice_poc_clks[i] = c;
+	}
+	of_node_put(args.np);
+	return 0;
+err:
+	of_node_put(args.np);
+	voice_poc_put_clks();
+	return rc;
+}
+
+/* Stock's call-start order: open RX, open TX, VCPM params, RX up, TX up. */
+static int voice_poc_start(struct q6apm *apm)
+{
+	static const u32 vsid[] = { 0x11c05000 };
+	static const u32 tx_ch[] = { 0x11c05000, 2 };
+	static const u32 cal_keys[] = { 0x11c05000, 3, 0x08001166, 0,
+					0x080011b6, 0, 0x08001167, 0 };
+	/* MFC output: 48 kHz, 32 bit, 1 channel, channel map 3 (10 bytes) */
+	static const u32 mfc[] = { 48000, 0x00010020, 0x00000003 };
+	/* mic: 48 kHz, 16 bit, 1 channel; LPAIF_RXTX, TX codec DMA 3, mask 5 */
+	static const u32 mic_mf[] = { 48000, 0x00010010, 1 };
+	static const u32 mic_dma[] = { 1, 4, 5 };
+	u8 buf[256];
+	size_t n = 0;
+	int rc;
+
+	rc = voice_poc_get_clks(apm);
+	if (rc)
+		return rc;
+
+	/* Marked open first: an open that times out here may still complete on the DSP. */
+	voice_poc_rx_open = true;
+	rc = voice_poc_send_fw(apm, APM_CMD_GRAPH_OPEN, "qcom/sm6225/voice-rx4-open.bin");
+	if (rc)
+		return rc;
+	rc = voice_poc_send_fw(apm, APM_CMD_SET_CFG, "qcom/sm6225/voice-rx4-cfg.bin");
+	if (rc)
+		return rc;
+	voice_poc_tx_open = true;
+	rc = voice_poc_send_fw(apm, APM_CMD_GRAPH_OPEN, "qcom/sm6225/voice-tx-open.bin");
+	if (rc)
+		return rc;
+	rc = voice_poc_send_fw(apm, APM_CMD_SET_CFG, "qcom/sm6225/voice-tx-cfg.bin");
+	if (rc)
+		return rc;
+
+	n += voice_poc_rec(buf + n, VCPM_MODULE_INSTANCE_ID, 0x080011bc, vsid, sizeof(vsid));
+	n += voice_poc_rec(buf + n, VCPM_MODULE_INSTANCE_ID, 0x08001310, tx_ch, sizeof(tx_ch));
+	n += voice_poc_rec(buf + n, VCPM_MODULE_INSTANCE_ID, 0x0800116b, cal_keys, sizeof(cal_keys));
+	rc = voice_poc_send(apm, APM_CMD_SET_CFG, buf, n);
+	if (rc)
+		return rc;
+
+	n = 0;
+	n += voice_poc_rec(buf + n, 0x465b, 0x08001024, mfc, 10);
+	n += voice_poc_rec(buf + n, 0x41dd, 0x08001024, mfc, 10);
+	rc = voice_poc_send(apm, APM_CMD_SET_CFG, buf, n);
+	if (rc)
+		return rc;
+	rc = VOICE_POC_SG(APM_CMD_GRAPH_PREPARE, voice_poc_rx_sgs);
+	if (rc)
+		return rc;
+	rc = VOICE_POC_SG(APM_CMD_GRAPH_START, voice_poc_rx_sgs);
+	if (rc)
+		return rc;
+
+	n = 0;
+	n += voice_poc_rec(buf + n, 0x43af, 0x08001017, mic_mf, sizeof(mic_mf));
+	n += voice_poc_rec(buf + n, 0x43af, 0x08001063, mic_dma, sizeof(mic_dma));
+	rc = voice_poc_send(apm, APM_CMD_SET_CFG, buf, n);
+	if (rc)
+		return rc;
+	rc = VOICE_POC_SG(APM_CMD_GRAPH_PREPARE, voice_poc_tx_sgs);
+	if (rc)
+		return rc;
+	return VOICE_POC_SG(APM_CMD_GRAPH_START, voice_poc_tx_start_sgs);
+}
+
+static void voice_poc_stop(struct q6apm *apm)
+{
+	if (voice_poc_tx_open) {
+		VOICE_POC_SG(APM_CMD_GRAPH_STOP, voice_poc_tx_sgs);
+		VOICE_POC_SG(APM_CMD_GRAPH_CLOSE, voice_poc_tx_sgs);
+		voice_poc_tx_open = false;
+	}
+	if (voice_poc_rx_open) {
+		VOICE_POC_SG(APM_CMD_GRAPH_STOP, voice_poc_rx_sgs);
+		VOICE_POC_SG(APM_CMD_GRAPH_CLOSE, voice_poc_rx_sgs);
+		voice_poc_rx_open = false;
+	}
+	voice_poc_put_clks();
+}
+
+static ssize_t voice_poc_write(struct file *file, const char __user *ubuf,
+			       size_t count, loff_t *ppos)
+{
+	struct q6apm *apm = file->private_data;
+	char cmd[8] = { 0 };
+	int rc = 0;
+
+	if (copy_from_user(cmd, ubuf, min(count, sizeof(cmd) - 1)))
+		return -EFAULT;
+	if (!strncmp(cmd, "start", 5)) {
+		rc = voice_poc_start(apm);
+		if (rc)
+			voice_poc_stop(apm);
+	} else if (!strncmp(cmd, "stop", 4)) {
+		voice_poc_stop(apm);
+	} else {
+		return -EINVAL;
+	}
+	return rc ? rc : count;
+}
+
+static const struct file_operations voice_poc_fops = {
+	.open = simple_open,
+	.write = voice_poc_write,
+};
+
 static int apm_probe(gpr_device_t *gdev)
 {
 	struct device *dev = &gdev->dev;
@@ -895,11 +1147,16 @@ static int apm_probe(gpr_device_t *gdev)
 	if (ret)
 		snd_soc_unregister_component(dev);
 
+	voice_poc_dir = debugfs_create_dir("q6apm-voice", NULL);
+	debugfs_create_file("ctl", 0200, voice_poc_dir, apm, &voice_poc_fops);
+
 	return ret;
 }
 
 static void apm_remove(gpr_device_t *gdev)
 {
+	voice_poc_stop(dev_get_drvdata(&gdev->dev));
+	debugfs_remove_recursive(voice_poc_dir);
 	of_platform_depopulate(&gdev->dev);
 	snd_soc_unregister_component(&gdev->dev);
 }
