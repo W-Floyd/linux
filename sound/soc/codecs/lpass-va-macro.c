@@ -1508,6 +1508,10 @@ static int va_macro_set_lpass_codec_version(struct va_macro *va)
 		case 0:
 			version = LPASS_CODEC_VERSION_2_0;
 			break;
+		case 2:
+			/* SM6225 reports 2.2; its downstream DT drives it as 2.1 */
+			version = LPASS_CODEC_VERSION_2_1;
+			break;
 		case 5:
 			version = LPASS_CODEC_VERSION_2_5;
 			break;
