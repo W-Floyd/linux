@@ -38,6 +38,20 @@ static const u32 voice_poc_rx_sgs[] = {
 	4, 0xb0000045, 0xb0000044, 0xb0000041, 0xb0000040,
 };
 /*
+ * voice_poc_rx_direct: voice RX without b0000045, its output (0x41dc) linked
+ * straight into the backend SAL (voice-rx5-*.bin). b0000045's container never
+ * got a frame length on a call, so the downlink stopped there.
+ */
+static const u32 voice_poc_rx3_sgs[] = {
+	3, 0xb0000044, 0xb0000041, 0xb0000040,
+};
+static bool voice_poc_rx_direct;
+module_param(voice_poc_rx_direct, bool, 0644);
+MODULE_PARM_DESC(voice_poc_rx_direct, "voice PoC: voice RX without b0000045");
+#define VOICE_POC_RX(op) (voice_poc_rx_direct ? \
+	voice_poc_sg_cmd(apm, op, voice_poc_rx3_sgs, sizeof(voice_poc_rx3_sgs)) : \
+	voice_poc_sg_cmd(apm, op, voice_poc_rx_sgs, sizeof(voice_poc_rx_sgs)))
+/*
  * Voice TX without stock's mic device sub-graph (0xb0000039): the mics come
  * from the topology's TX_CODEC_DMA_TX_3 backend, which ALSA keeps running
  * (arecord on MultiMedia2), and voice-tx-open.bin links its splitter's
@@ -357,10 +371,14 @@ static int voice_poc_start(struct q6apm *apm)
 
 	/* Marked open first: an open that times out here may still complete on the DSP. */
 	voice_poc_rx_open = true;
-	rc = voice_poc_send_fw(apm, APM_CMD_GRAPH_OPEN, "qcom/sm6225/voice-rx4-open.bin");
+	rc = voice_poc_send_fw(apm, APM_CMD_GRAPH_OPEN, voice_poc_rx_direct ?
+			       "qcom/sm6225/voice-rx5-open.bin" :
+			       "qcom/sm6225/voice-rx4-open.bin");
 	if (rc)
 		return rc;
-	rc = voice_poc_send_fw(apm, APM_CMD_SET_CFG, "qcom/sm6225/voice-rx4-cfg.bin");
+	rc = voice_poc_send_fw(apm, APM_CMD_SET_CFG, voice_poc_rx_direct ?
+			       "qcom/sm6225/voice-rx5-cfg.bin" :
+			       "qcom/sm6225/voice-rx4-cfg.bin");
 	if (rc)
 		return rc;
 	/*
@@ -398,15 +416,16 @@ static int voice_poc_start(struct q6apm *apm)
 		return rc;
 
 	n = 0;
-	n += voice_poc_rec(buf + n, 0x465b, 0x08001024, mfc, 12);
+	if (!voice_poc_rx_direct)
+		n += voice_poc_rec(buf + n, 0x465b, 0x08001024, mfc, 12);
 	n += voice_poc_rec(buf + n, 0x41dd, 0x08001024, mfc, 12);
 	rc = voice_poc_send(apm, APM_CMD_SET_CFG, buf, n);
 	if (rc)
 		return rc;
-	rc = VOICE_POC_SG(APM_CMD_GRAPH_PREPARE, voice_poc_rx_sgs);
+	rc = VOICE_POC_RX(APM_CMD_GRAPH_PREPARE);
 	if (rc)
 		return rc;
-	rc = VOICE_POC_SG(APM_CMD_GRAPH_START, voice_poc_rx_sgs);
+	rc = VOICE_POC_RX(APM_CMD_GRAPH_START);
 	if (rc)
 		return rc;
 
@@ -426,8 +445,8 @@ static void voice_poc_stop(struct q6apm *apm)
 		voice_poc_tx_open = false;
 	}
 	if (voice_poc_rx_open) {
-		VOICE_POC_SG(APM_CMD_GRAPH_STOP, voice_poc_rx_sgs);
-		VOICE_POC_SG(APM_CMD_GRAPH_CLOSE, voice_poc_rx_sgs);
+		VOICE_POC_RX(APM_CMD_GRAPH_STOP);
+		VOICE_POC_RX(APM_CMD_GRAPH_CLOSE);
 		voice_poc_rx_open = false;
 	}
 	voice_poc_unmap_pcal(apm);
