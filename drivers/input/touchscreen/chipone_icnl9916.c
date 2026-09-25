@@ -876,10 +876,15 @@ static int icnl9916_probe(struct icnl9916_data *data)
 		return error;
 	}
 
-	input_set_abs_params(input, ABS_MT_POSITION_X, 0,
-			     le16_to_cpu(resolution[0]), 0, 0);
-	input_set_abs_params(input, ABS_MT_POSITION_Y, 0,
-			     le16_to_cpu(resolution[1]), 0, 0);
+	/* A chip whose panel init failed reports 0x0; leave that to the DT. */
+	if (resolution[0] && resolution[1]) {
+		input_set_abs_params(input, ABS_MT_POSITION_X, 0,
+				     le16_to_cpu(resolution[0]), 0, 0);
+		input_set_abs_params(input, ABS_MT_POSITION_Y, 0,
+				     le16_to_cpu(resolution[1]), 0, 0);
+	} else {
+		dev_warn(dev, "chip reports no resolution, using touchscreen-size\n");
+	}
 	touchscreen_parse_properties(input, true, &data->prop);
 
 	error = input_mt_init_slots(input, ICNL9916_MAX_TOUCHES,
