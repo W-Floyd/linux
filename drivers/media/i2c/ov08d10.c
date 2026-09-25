@@ -7,6 +7,7 @@
 #include <linux/i2c.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
+#include <linux/property.h>
 #include <linux/regulator/consumer.h>
 #include <linux/reset.h>
 #include <media/v4l2-ctrls.h>
@@ -577,48 +578,18 @@ struct ov08d10 {
 	/* lanes index */
 	u8 nlanes;
 
-	const struct ov08d10_lane_cfg *priv_lane;
-	u8 modes_size;
+	const struct ov08d10_chip *chip;
 };
 
-struct ov08d10_lane_cfg {
+struct ov08d10_chip {
 	const s64 link_freq_menu[2];
 	const struct ov08d10_link_freq_config link_freq_configs[2];
-	const struct ov08d10_mode sp_modes[3];
+	const struct ov08d10_mode *modes;
+	unsigned int num_modes;
 };
 
-static const struct ov08d10_lane_cfg lane_cfg_2 = {
+static const struct ov08d10_mode ov08d10_modes[] = {
 	{
-		720000000,
-		360000000,
-	},
-	{{
-		.reg_list = {
-		{
-			.num_of_regs =
-				ARRAY_SIZE(mipi_data_rate_720mbps_19_2),
-			.regs = mipi_data_rate_720mbps_19_2,
-		},
-		{
-			.num_of_regs =
-				ARRAY_SIZE(mipi_data_rate_720mbps_24_0),
-			.regs = mipi_data_rate_720mbps_24_0,
-		}}
-	},
-	{
-		.reg_list = {
-		{
-			.num_of_regs =
-				ARRAY_SIZE(mipi_data_rate_360mbps_19_2),
-			.regs = mipi_data_rate_360mbps_19_2,
-		},
-		{
-			.num_of_regs =
-				ARRAY_SIZE(mipi_data_rate_360mbps_24_0),
-			.regs = mipi_data_rate_360mbps_24_0,
-		}}
-	}},
-	{{
 		.width = 3280,
 		.height = 2460,
 		.hts = 1840,
@@ -656,7 +627,42 @@ static const struct ov08d10_lane_cfg lane_cfg_2 = {
 		},
 		.link_freq_index = 1,
 		.data_lanes = 2,
-	}}
+	},
+};
+
+static const struct ov08d10_chip ov08d10_chip = {
+	.link_freq_menu = {
+		720000000,
+		360000000,
+	},
+	.link_freq_configs = {{
+		.reg_list = {
+		{
+			.num_of_regs =
+				ARRAY_SIZE(mipi_data_rate_720mbps_19_2),
+			.regs = mipi_data_rate_720mbps_19_2,
+		},
+		{
+			.num_of_regs =
+				ARRAY_SIZE(mipi_data_rate_720mbps_24_0),
+			.regs = mipi_data_rate_720mbps_24_0,
+		}}
+	},
+	{
+		.reg_list = {
+		{
+			.num_of_regs =
+				ARRAY_SIZE(mipi_data_rate_360mbps_19_2),
+			.regs = mipi_data_rate_360mbps_19_2,
+		},
+		{
+			.num_of_regs =
+				ARRAY_SIZE(mipi_data_rate_360mbps_24_0),
+			.regs = mipi_data_rate_360mbps_24_0,
+		}}
+	}},
+	.modes = ov08d10_modes,
+	.num_modes = ARRAY_SIZE(ov08d10_modes),
 };
 
 static u32 ov08d10_get_format_code(struct ov08d10 *ov08d10)
@@ -667,19 +673,6 @@ static u32 ov08d10_get_format_code(struct ov08d10 *ov08d10)
 	};
 
 	return codes[ov08d10->vflip->val][ov08d10->hflip->val];
-}
-
-static unsigned int ov08d10_modes_num(const struct ov08d10 *ov08d10)
-{
-	unsigned int i, count = 0;
-
-	for (i = 0; i < ARRAY_SIZE(ov08d10->priv_lane->sp_modes); i++) {
-		if (ov08d10->priv_lane->sp_modes[i].width == 0)
-			break;
-		count++;
-	}
-
-	return count;
 }
 
 static u64 to_rate(const s64 *link_freq_menu,
@@ -979,17 +972,17 @@ static int ov08d10_init_controls(struct ov08d10 *ov08d10)
 		return ret;
 
 	ctrl_hdlr->lock = &ov08d10->mutex;
-	link_freq_size = ARRAY_SIZE(ov08d10->priv_lane->link_freq_menu);
+	link_freq_size = ARRAY_SIZE(ov08d10->chip->link_freq_menu);
 	ov08d10->link_freq =
 		v4l2_ctrl_new_int_menu(ctrl_hdlr, &ov08d10_ctrl_ops,
 				       V4L2_CID_LINK_FREQ,
 				       link_freq_size - 1,
 				       0,
-				       ov08d10->priv_lane->link_freq_menu);
+				       ov08d10->chip->link_freq_menu);
 	if (ov08d10->link_freq)
 		ov08d10->link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
-	pixel_rate_max = to_rate(ov08d10->priv_lane->link_freq_menu, 0,
+	pixel_rate_max = to_rate(ov08d10->chip->link_freq_menu, 0,
 				 ov08d10->cur_mode->data_lanes);
 	ov08d10->pixel_rate =
 		v4l2_ctrl_new_std(ctrl_hdlr, &ov08d10_ctrl_ops,
@@ -1005,7 +998,7 @@ static int ov08d10_init_controls(struct ov08d10 *ov08d10)
 				  OV08D10_VTS_MAX - mode->height, 1,
 				  vblank_def);
 
-	h_blank = to_pixels_per_line(ov08d10->priv_lane->link_freq_menu,
+	h_blank = to_pixels_per_line(ov08d10->chip->link_freq_menu,
 				     mode->hts, mode->link_freq_index,
 				     mode->data_lanes) -
 				     mode->width;
@@ -1077,7 +1070,7 @@ static int ov08d10_start_streaming(struct ov08d10 *ov08d10)
 
 	link_freq_index = ov08d10->cur_mode->link_freq_index;
 	reg_list =
-		&ov08d10->priv_lane->link_freq_configs[link_freq_index]
+		&ov08d10->chip->link_freq_configs[link_freq_index]
 			 .reg_list[ov08d10->xvclk_index];
 
 	/* soft reset */
@@ -1194,8 +1187,8 @@ static int ov08d10_set_format(struct v4l2_subdev *sd,
 	s32 vblank_def, h_blank;
 	s64 pixel_rate;
 
-	mode = v4l2_find_nearest_size(ov08d10->priv_lane->sp_modes,
-				      ov08d10->modes_size,
+	mode = v4l2_find_nearest_size(ov08d10->chip->modes,
+				      ov08d10->chip->num_modes,
 				      width, height, fmt->format.width,
 				      fmt->format.height);
 
@@ -1207,7 +1200,7 @@ static int ov08d10_set_format(struct v4l2_subdev *sd,
 	} else {
 		ov08d10->cur_mode = mode;
 		__v4l2_ctrl_s_ctrl(ov08d10->link_freq, mode->link_freq_index);
-		pixel_rate = to_rate(ov08d10->priv_lane->link_freq_menu,
+		pixel_rate = to_rate(ov08d10->chip->link_freq_menu,
 				     mode->link_freq_index,
 				     ov08d10->cur_mode->data_lanes);
 		__v4l2_ctrl_s_ctrl_int64(ov08d10->pixel_rate, pixel_rate);
@@ -1219,7 +1212,7 @@ static int ov08d10_set_format(struct v4l2_subdev *sd,
 					 OV08D10_VTS_MAX - mode->height, 1,
 					 vblank_def);
 		__v4l2_ctrl_s_ctrl(ov08d10->vblank, vblank_def);
-		h_blank = to_pixels_per_line(ov08d10->priv_lane->link_freq_menu,
+		h_blank = to_pixels_per_line(ov08d10->chip->link_freq_menu,
 					     mode->hts,
 					     mode->link_freq_index,
 					     ov08d10->cur_mode->data_lanes)
@@ -1274,7 +1267,7 @@ static int ov08d10_enum_frame_size(struct v4l2_subdev *sd,
 {
 	struct ov08d10 *ov08d10 = to_ov08d10(sd);
 
-	if (fse->index >= ov08d10->modes_size)
+	if (fse->index >= ov08d10->chip->num_modes)
 		return -EINVAL;
 
 	mutex_lock(&ov08d10->mutex);
@@ -1284,9 +1277,9 @@ static int ov08d10_enum_frame_size(struct v4l2_subdev *sd,
 	}
 	mutex_unlock(&ov08d10->mutex);
 
-	fse->min_width = ov08d10->priv_lane->sp_modes[fse->index].width;
+	fse->min_width = ov08d10->chip->modes[fse->index].width;
 	fse->max_width = fse->min_width;
-	fse->min_height = ov08d10->priv_lane->sp_modes[fse->index].height;
+	fse->min_height = ov08d10->chip->modes[fse->index].height;
 	fse->max_height = fse->min_height;
 
 	return 0;
@@ -1297,7 +1290,7 @@ static int ov08d10_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	struct ov08d10 *ov08d10 = to_ov08d10(sd);
 
 	mutex_lock(&ov08d10->mutex);
-	ov08d10_update_pad_format(ov08d10, &ov08d10->priv_lane->sp_modes[0],
+	ov08d10_update_pad_format(ov08d10, &ov08d10->chip->modes[0],
 				  v4l2_subdev_state_get_format(fh->state, 0));
 	mutex_unlock(&ov08d10->mutex);
 
@@ -1441,25 +1434,22 @@ static int ov08d10_get_hwcfg(struct ov08d10 *ov08d10)
 
 	dev_dbg(dev, "Using %u data lanes\n", ov08d10->cur_mode->data_lanes);
 
-	ov08d10->priv_lane = &lane_cfg_2;
-	ov08d10->modes_size = ov08d10_modes_num(ov08d10);
-
 	if (!bus_cfg.nr_of_link_frequencies) {
 		dev_err(dev, "no link frequencies defined\n");
 		ret = -EINVAL;
 		goto check_hwcfg_error;
 	}
 
-	for (i = 0; i < ARRAY_SIZE(ov08d10->priv_lane->link_freq_menu); i++) {
+	for (i = 0; i < ARRAY_SIZE(ov08d10->chip->link_freq_menu); i++) {
 		for (j = 0; j < bus_cfg.nr_of_link_frequencies; j++) {
-			if (ov08d10->priv_lane->link_freq_menu[i] ==
+			if (ov08d10->chip->link_freq_menu[i] ==
 			    bus_cfg.link_frequencies[j])
 				break;
 		}
 
 		if (j == bus_cfg.nr_of_link_frequencies) {
 			dev_err(dev, "no link frequency %lld supported\n",
-				ov08d10->priv_lane->link_freq_menu[i]);
+				ov08d10->chip->link_freq_menu[i]);
 			ret = -EINVAL;
 			goto check_hwcfg_error;
 		}
@@ -1499,6 +1489,9 @@ static int ov08d10_probe(struct i2c_client *client)
 		return -ENOMEM;
 
 	ov08d10->dev = &client->dev;
+	ov08d10->chip = device_get_match_data(ov08d10->dev);
+	if (!ov08d10->chip)
+		return -ENODEV;
 
 	ov08d10->clk = devm_v4l2_sensor_clk_get(ov08d10->dev, NULL);
 	if (IS_ERR(ov08d10->clk))
@@ -1553,7 +1546,7 @@ static int ov08d10_probe(struct i2c_client *client)
 	}
 
 	mutex_init(&ov08d10->mutex);
-	ov08d10->cur_mode = &ov08d10->priv_lane->sp_modes[0];
+	ov08d10->cur_mode = &ov08d10->chip->modes[0];
 	ret = ov08d10_init_controls(ov08d10);
 	if (ret) {
 		dev_err(ov08d10->dev, "failed to init controls: %d\n", ret);
@@ -1604,7 +1597,7 @@ static DEFINE_RUNTIME_DEV_PM_OPS(ov08d10_pm_ops,
 
 #ifdef CONFIG_ACPI
 static const struct acpi_device_id ov08d10_acpi_ids[] = {
-	{ "OVTI08D1" },
+	{ "OVTI08D1", (kernel_ulong_t)&ov08d10_chip },
 	{ /* sentinel */ }
 };
 
@@ -1612,7 +1605,7 @@ MODULE_DEVICE_TABLE(acpi, ov08d10_acpi_ids);
 #endif
 
 static const struct of_device_id ov08d10_of_match[] = {
-	{ .compatible = "ovti,ov08d10" },
+	{ .compatible = "ovti,ov08d10", .data = &ov08d10_chip },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, ov08d10_of_match);
