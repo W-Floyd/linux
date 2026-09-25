@@ -443,6 +443,13 @@
 		bias-disable;
 	};
 
+	cam_mclk1_default: cam-mclk1-state {
+		pins = "gpio21";
+		function = "cam_mclk";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
 	/*
 	 * uart3 (SE3) is the Bluetooth UART, not a spare engine -- see
 	 * investigations/bluetooth.md §1. gpio8-11 is CTS/RTS/TX/RX with flow
@@ -1627,6 +1634,13 @@
 				remote-endpoint = <&s5kjn1_ep>;
 			};
 		};
+
+		port@2 {
+			csiphy2_ep: endpoint {
+				data-lanes = <0 1>;
+				remote-endpoint = <&ov08f10_ep>;
+			};
+		};
 	};
 };
 
@@ -1680,6 +1694,45 @@
 				data-lanes = <1 2 3 4>;
 				link-frequencies = /bits/ 64 <700000000>;
 				remote-endpoint = <&csiphy0_ep>;
+			};
+		};
+	};
+};
+
+&cci_i2c1 {
+	/*
+	 * The front camera. Stock supports two modules here, a Sunny S5K4H7
+	 * at 0x2d and a TS-Precision OV08F10 at 0x10; this unit has the
+	 * OV08F10 (only 0x10 acknowledges, and it reports chip ID 0x5608 with
+	 * variant 0x46). MCLK1, reset on TLMM 19, the 8M rails and CSIPHY 2
+	 * are stock's front sensor wiring.
+	 */
+	camera@10 {
+		compatible = "ovti,ov08f10";
+		reg = <0x10>;
+
+		clocks = <&gcc GCC_CAMSS_MCLK1_CLK>;
+		assigned-clocks = <&gcc GCC_CAMSS_MCLK1_CLK>;
+		assigned-clock-rates = <24000000>;
+
+		pinctrl-0 = <&cam_mclk1_default>;
+		pinctrl-names = "default";
+
+		reset-gpios = <&tlmm 19 GPIO_ACTIVE_LOW>;
+
+		avdd-supply = <&camera_ldo_8m_avdd>;
+		dvdd-supply = <&camera_ldo_8m_dvdd>;
+		dovdd-supply = <&camera_ldo_iovdd>;
+
+		orientation = <0>; /* Front facing */
+		rotation = <90>;
+
+		port {
+			ov08f10_ep: endpoint {
+				data-lanes = <1 2>;
+				/* 720 MHz full resolution, 360 MHz binned */
+				link-frequencies = /bits/ 64 <720000000 360000000>;
+				remote-endpoint = <&csiphy2_ep>;
 			};
 		};
 	};
