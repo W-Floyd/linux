@@ -245,6 +245,13 @@
 	sound {
 		compatible = "motorola,fogona-sndcard";
 		model = "Moto-G-Play-2024";
+		/*
+		 * Each amplifier drives its own output, so the card's "Speaker"
+		 * and "Receiver" pin switches can power one without the other:
+		 * the earpiece alone for calls, both for media.
+		 */
+		audio-routing = "Speaker", "Speaker DAC Output",
+				"Receiver", "Receiver DAC Output";
 
 		pinctrl-0 = <&lpi_i2s1_active>;
 		pinctrl-names = "default";
