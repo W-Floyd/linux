@@ -1672,6 +1672,9 @@
 		vddio-supply = <&camera_ldo_iovdd>;
 		afvdd-supply = <&camera_ldo_50m_afvdd>;
 
+		orientation = <1>; /* Rear facing */
+		rotation = <90>;
+
 		port {
 			s5kjn1_ep: endpoint {
 				data-lanes = <1 2 3 4>;
