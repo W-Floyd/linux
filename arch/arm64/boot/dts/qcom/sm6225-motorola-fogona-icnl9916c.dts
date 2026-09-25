@@ -37,6 +37,14 @@
 		touchscreen-reset-gpios = <&tlmm 86 GPIO_ACTIVE_LOW>;
 
 		/*
+		 * The panel's size. The chip reports its resolution too, but
+		 * after a failed panel init it answers 0x0, and libinput then
+		 * rejects the device (min == max on ABS_X).
+		 */
+		touchscreen-size-x = <720>;
+		touchscreen-size-y = <1600>;
+
+		/*
 		 * ts_int_default only. ts_reset_default muxes GPIO_86, which is
 		 * touchscreen-reset-gpios above -- the same GPIO-vs-pinctrl
 		 * collision that killed the avdd regulator and then the panel
