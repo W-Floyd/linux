@@ -272,6 +272,80 @@
 			};
 		};
 	};
+
+	/*
+	 * Headset/mic codec, on the LPASS SoundWire masters (TX on swr0, RX on
+	 * swr1). Values from the stock DT: reset on GPIO 92, VDD_BUCK from
+	 * L14, RX/TX and IO from L9, three analog mic biases at 2.8 V. Stock
+	 * names no mic-bias supply; the WCD9370 has only three biases, the
+	 * binding wants a fourth value.
+	 */
+	wcd9370: audio-codec {
+		compatible = "qcom,wcd9370-codec";
+
+		reset-gpios = <&tlmm 92 GPIO_ACTIVE_LOW>;
+
+		vdd-buck-supply = <&pm6125_l14>;
+		vdd-rxtx-supply = <&pm6125_l9>;
+		vdd-px-supply = <&pm6125_l9>;
+
+		qcom,micbias1-microvolt = <2800000>;
+		qcom,micbias2-microvolt = <2800000>;
+		qcom,micbias3-microvolt = <2800000>;
+		qcom,micbias4-microvolt = <2800000>;
+
+		qcom,rx-device = <&wcd937x_rx>;
+		qcom,tx-device = <&wcd937x_tx>;
+
+		#sound-dai-cells = <1>;
+	};
+};
+
+&rxmacro {
+	status = "okay";
+};
+
+&txmacro {
+	status = "okay";
+};
+
+&vamacro {
+	status = "okay";
+};
+
+&swr0 {
+	pinctrl-0 = <&lpass_tx_swr_active>;
+	pinctrl-names = "default";
+
+	status = "okay";
+
+	wcd937x_tx: codec@0,3 {
+		compatible = "sdw20217010a00";
+		reg = <0 3>;
+
+		/*
+		 * WCD9370 TX port 1 (ADC1)       <=> SWR0 port 1
+		 * WCD9370 TX port 2 (ADC2, 3)    <=> SWR0 port 1
+		 * WCD9370 TX port 3 (DMIC, MBHC) <=> SWR0 port 2
+		 * WCD9370 TX port 4 (DMIC4-7)    <=> SWR0 port 3
+		 */
+		qcom,tx-port-mapping = <1 1 2 3>;
+	};
+};
+
+&swr1 {
+	pinctrl-0 = <&lpass_rx_swr_active>;
+	pinctrl-names = "default";
+
+	status = "okay";
+
+	wcd937x_rx: codec@0,4 {
+		compatible = "sdw20217010a00";
+		reg = <0 4>;
+
+		/* HPH, CLSH, COMP, LO, DSD, one to one */
+		qcom,rx-port-mapping = <1 2 3 4 5>;
+	};
 };
 
 /*
@@ -513,6 +587,12 @@
 		pm6125_l12: l12 {
 			regulator-min-microvolt = <1620000>;
 			regulator-max-microvolt = <1980000>;
+		};
+
+		/* WCD9370 VDD_BUCK (board sheet; stock DT: cdc-vdd-buck) */
+		pm6125_l14: l14 {
+			regulator-min-microvolt = <1700000>;
+			regulator-max-microvolt = <1900000>;
 		};
 
 		pm6125_l15: l15 {
