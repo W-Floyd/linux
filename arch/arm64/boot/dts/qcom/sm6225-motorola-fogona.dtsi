@@ -251,7 +251,11 @@
 		 * the earpiece alone for calls, both for media.
 		 */
 		audio-routing = "Speaker", "Speaker DAC Output",
-				"Receiver", "Receiver DAC Output";
+				"Receiver", "Receiver DAC Output",
+				"AMIC1", "MIC BIAS1",
+				"AMIC3", "MIC BIAS3",
+				/* EXPERIMENT: needs the mic capture topology */
+				"TX CDC DMA TX3 SRC", "TX_CODEC_DMA_TX_3 Capture";
 
 		pinctrl-0 = <&lpi_i2s1_active>;
 		pinctrl-names = "default";
@@ -265,6 +269,22 @@
 
 			cpu {
 				sound-dai = <&q6apmbedai PRIMARY_MI2S_RX>;
+			};
+
+			platform {
+				sound-dai = <&q6apm>;
+			};
+		};
+
+		mic-dai-link {
+			link-name = "Mic Capture";
+
+			codec {
+				sound-dai = <&wcd9370 1>, <&swr0 0>, <&txmacro 0>;
+			};
+
+			cpu {
+				sound-dai = <&q6apmbedai TX_CODEC_DMA_TX_3>;
 			};
 
 			platform {
