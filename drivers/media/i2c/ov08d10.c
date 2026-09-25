@@ -961,6 +961,8 @@ static const struct v4l2_ctrl_ops ov08d10_ctrl_ops = {
 
 static int ov08d10_init_controls(struct ov08d10 *ov08d10)
 {
+	struct i2c_client *client = v4l2_get_subdevdata(&ov08d10->sd);
+	struct v4l2_fwnode_device_properties props;
 	struct v4l2_ctrl_handler *ctrl_hdlr;
 	u8 link_freq_size;
 	s64 exposure_max;
@@ -972,7 +974,7 @@ static int ov08d10_init_controls(struct ov08d10 *ov08d10)
 	int ret;
 
 	ctrl_hdlr = &ov08d10->ctrl_handler;
-	ret = v4l2_ctrl_handler_init(ctrl_hdlr, 8);
+	ret = v4l2_ctrl_handler_init(ctrl_hdlr, 10);
 	if (ret)
 		return ret;
 
@@ -1042,6 +1044,12 @@ static int ov08d10_init_controls(struct ov08d10 *ov08d10)
 					   V4L2_CID_VFLIP, 0, 1, 1, 0);
 	if (ov08d10->vflip)
 		ov08d10->vflip->flags |= V4L2_CTRL_FLAG_MODIFY_LAYOUT;
+
+	ret = v4l2_fwnode_device_parse(&client->dev, &props);
+	if (ret)
+		return ret;
+
+	v4l2_ctrl_new_fwnode_properties(ctrl_hdlr, &ov08d10_ctrl_ops, &props);
 
 	if (ctrl_hdlr->error)
 		return ctrl_hdlr->error;
