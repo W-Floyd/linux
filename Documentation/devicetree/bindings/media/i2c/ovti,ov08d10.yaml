@@ -4,7 +4,7 @@
 $id: http://devicetree.org/schemas/media/i2c/ovti,ov08d10.yaml#
 $schema: http://devicetree.org/meta-schemas/core.yaml#
 
-title: Omnivision OV08D10 1/4-Inch 8MP CMOS color image sensor
+title: Omnivision OV08D10 and OV08F10 8MP CMOS color image sensors
 
 maintainers:
   - Matthias Fend <matthias.fend@emfend.at>
@@ -13,13 +13,17 @@ description:
   The Omnivision OV08D10 is a 1/4-Inch 8MP CMOS color image sensor with an
   active array size of 3280 x 2464. It is programmable through I2C
   interface. Image data is transmitted via MIPI CSI-2 using 2 lanes.
+  The OV08F10 is a sibling with the same register interface and chip ID
+  but its own sensor settings, told apart by a variant register.
 
 allOf:
   - $ref: /schemas/media/video-interface-devices.yaml#
 
 properties:
   compatible:
-    const: ovti,ov08d10
+    enum:
+      - ovti,ov08d10
+      - ovti,ov08f10
 
   reg:
     maxItems: 1
