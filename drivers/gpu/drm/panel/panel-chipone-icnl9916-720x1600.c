@@ -291,6 +291,30 @@ static int icnl9916_panel_prepare(struct drm_panel *panel)
 	ctx->desc->reset(ctx->reset);
 
 	ret = ctx->desc->on(ctx->dsi);
+	/*
+	 * EXPERIMENT: some boots time out (-110) on the very first command of
+	 * this sequence and never recover, which leaves the screen dark and
+	 * the fbdev client stalled on vblank
+	 * (investigations/display-vblank-boot-stall.md). Power-cycle the panel
+	 * and try again, logging each attempt: if a retry works, the panel or
+	 * the link wanted a second chance; if every attempt fails alike, the
+	 * DSI host is what is stuck.
+	 */
+	for (int attempt = 2; ret < 0 && attempt <= 3; attempt++) {
+		dev_warn(dev, "panel init failed (%d); power-cycling for attempt %d\n",
+			 ret, attempt);
+		gpiod_set_value_cansleep(ctx->reset, 1);
+		regulator_bulk_disable(ctx->desc->num_supplies, ctx->supplies);
+		msleep(20);
+		ret = regulator_bulk_enable(ctx->desc->num_supplies, ctx->supplies);
+		if (ret < 0) {
+			dev_err(dev, "Failed to enable regulators: %d\n", ret);
+			return ret;
+		}
+		ctx->desc->reset(ctx->reset);
+		ret = ctx->desc->on(ctx->dsi);
+		dev_warn(dev, "panel init attempt %d: %d\n", attempt, ret);
+	}
 	if (ret < 0) {
 		dev_err(dev, "Failed to initialize panel: %d\n", ret);
 		gpiod_set_value_cansleep(ctx->reset, 1);
@@ -535,7 +559,7 @@ static int icnl9916_panel_bl_update_status(struct backlight_device *bl)
 	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
 
 	ctx->bl_want = brightness;
-	mod_delayed_work(system_wq, &ctx->bl_check, msecs_to_jiffies(1000));
+	mod_delayed_work(system_dfl_wq, &ctx->bl_check, msecs_to_jiffies(1000));
 
 	return ret < 0 ? ret : 0;
 }
