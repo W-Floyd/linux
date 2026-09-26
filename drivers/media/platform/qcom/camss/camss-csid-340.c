@@ -83,6 +83,13 @@ static void __csid_configure_rx(struct csid_device *csid, struct csid_phy_config
 	writel_relaxed(val, csid->base + CSID_CSI2_RX_CFG1);
 }
 
+/* EXPERIMENT: RX packet capture control override (0x108), 0 = the port's VC/DT */
+static uint csid_dbg_capture;
+module_param(csid_dbg_capture, uint, 0644);
+/* EXPERIMENT: override the VC the PD port matches, -1 = frame descriptor's */
+static int csid_dbg_vc = -1;
+module_param(csid_dbg_vc, int, 0644);
+
 static const struct csid_format_info *csid_port_format(struct csid_device *csid, u8 port)
 {
 	struct v4l2_mbus_framefmt *input_format = &csid->fmt[MSM_CSID_PAD_FIRST_SRC + port];
@@ -116,6 +123,28 @@ static void __csid_configure_stream(struct csid_device *csid, u8 enable, u8 port
 				 csid->id, irq);
 	}
 
+	/* EXPERIMENT: what the path and the receiver saw, as camera.md §38 */
+	if (iface != CSID_IFACE_PIX) {
+		void __iomem *b = csid->base + CSID_CFG0(iface);
+
+		if (!enable)
+			dev_warn(csid->camss->dev,
+				 "CSID%u port %u: irq %08x status %08x bytes %u/%u rx irq %08x long %08x %08x short %08x %08x\n",
+				 csid->id, port,
+				 readl_relaxed(csid->base + 0x30 + 0x10 * iface),
+				 readl_relaxed(b + 0x50), readl_relaxed(b + 0xe0),
+				 readl_relaxed(b + 0xe4),
+				 readl_relaxed(csid->base + 0x20),
+				 readl_relaxed(csid->base + 0x130),
+				 readl_relaxed(csid->base + 0x134),
+				 readl_relaxed(csid->base + 0x128),
+				 readl_relaxed(csid->base + 0x12c));
+		else
+			writel_relaxed(csid_dbg_capture ? csid_dbg_capture :
+				       BIT(0) | BIT(1) | (dt << 4) | (vc << 10) | (vc << 12),
+				       csid->base + 0x108);
+	}
+
 	/*
 	 * DT_ID is a two bit bitfield that is concatenated with
 	 * the four least significant bits of the five bit VC
@@ -141,6 +170,10 @@ static void __csid_configure_stream(struct csid_device *csid, u8 enable, u8 port
 
 	if (enable)
 		val |= CSID_CFG0_ENABLE;
+
+	/* EXPERIMENT: byte counter and timestamps */
+	if (enable && iface != CSID_IFACE_PIX)
+		val |= BIT(0) | BIT(2);
 
 	dev_dbg(csid->camss->dev, "CSID%u: Stream %s (dt:0x%x df=0x%x port=%u vc=%u)\n",
 		csid->id, enable ? "enable" : "disable", dt,
@@ -176,6 +209,8 @@ static void csid_configure_rx(struct csid_device *csid)
  */
 static void csid_enable_stream(struct csid_device *csid, u32 stream_id, u8 vc, u8 dt)
 {
+	if (csid_dbg_vc >= 0 && stream_id)
+		vc = csid_dbg_vc;
 	__csid_configure_stream(csid, 1, stream_id, vc, dt);
 }
 

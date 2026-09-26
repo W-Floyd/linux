@@ -89,6 +89,10 @@ enum {
 
 #define to_s5kjn1(_sd)			container_of(_sd, struct s5kjn1, sd)
 
+/* EXPERIMENT: 0x0110 (CSI channel identifier) override, -1 = mode table */
+static int s5kjn1_dbg_chan = -1;
+module_param_named(dbg_chan, s5kjn1_dbg_chan, int, 0644);
+
 static const s64 s5kjn1_link_freq_menu[] = {
 	S5KJN1_LINK_FREQ_700MHZ,
 };
@@ -988,6 +992,10 @@ static int s5kjn1_enable_streams(struct v4l2_subdev *sd,
 			    reg_list->num_regs, &ret);
 	if (ret)
 		goto error;
+
+	/* EXPERIMENT: CSI channel identifier override */
+	if (s5kjn1_dbg_chan >= 0)
+		cci_write(s5kjn1->regmap, CCI_REG8(0x0110), s5kjn1_dbg_chan, &ret);
 
 	ret = __v4l2_ctrl_handler_setup(s5kjn1->sd.ctrl_handler);
 
