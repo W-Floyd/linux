@@ -480,6 +480,32 @@ static const struct csid_format_info formats_gen2[] = {
 		14,
 		1,
 	},
+	/*
+	 * Line based metadata. Its data type is the transmitter's choice
+	 * (embedded data, or a user defined type for phase detection data),
+	 * so it comes from the frame descriptor: 0 here means none implied.
+	 */
+	{
+		MEDIA_BUS_FMT_META_8,
+		0,
+		DECODE_FORMAT_UNCOMPRESSED_8_BIT,
+		8,
+		1,
+	},
+	{
+		MEDIA_BUS_FMT_META_10,
+		0,
+		DECODE_FORMAT_UNCOMPRESSED_10_BIT,
+		10,
+		1,
+	},
+	{
+		MEDIA_BUS_FMT_META_12,
+		0,
+		DECODE_FORMAT_UNCOMPRESSED_12_BIT,
+		12,
+		1,
+	},
 };
 
 const struct csid_formats csid_formats_4_1 = {
@@ -1427,7 +1453,8 @@ csid_get_stream_vc_dt(struct csid_device *csid, struct v4l2_subdev_state *state,
 		return desc_csi2;
 	}
 
-	if (desc_csi2.dt != format_dt)
+	/* Metadata formats imply no data type, only the frame descriptor has it */
+	if (format_dt && desc_csi2.dt != format_dt)
 		dev_warn(csid->camss->dev,
 			 "Sink stream %u frame desc dt=%u differs from format dt=%u, using dt=%u\n",
 			 sink_stream, desc_csi2.dt, format_dt, desc_csi2.dt);

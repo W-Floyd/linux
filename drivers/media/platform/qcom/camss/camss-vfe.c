@@ -172,6 +172,13 @@ static const struct camss_format_info formats_rdi_845[] = {
 	  PER_PLANE_DATA(0, 1, 1, 1, 1, 10) },
 	{ MEDIA_BUS_FMT_Y10_2X8_PADHI_LE, 16, V4L2_PIX_FMT_Y10, 1,
 	  PER_PLANE_DATA(0, 1, 1, 1, 1, 16) },
+	/* Line based metadata, written as it arrives on the bus */
+	{ MEDIA_BUS_FMT_META_8, 8, V4L2_META_FMT_GENERIC_8, 1,
+	  PER_PLANE_DATA(0, 1, 1, 1, 1, 8) },
+	{ MEDIA_BUS_FMT_META_10, 10, V4L2_META_FMT_GENERIC_CSI2_10, 1,
+	  PER_PLANE_DATA(0, 1, 1, 1, 1, 10) },
+	{ MEDIA_BUS_FMT_META_12, 12, V4L2_META_FMT_GENERIC_CSI2_12, 1,
+	  PER_PLANE_DATA(0, 1, 1, 1, 1, 12) },
 };
 
 static const struct camss_format_info formats_pix_8x16[] = {
