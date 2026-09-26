@@ -231,6 +231,20 @@ static irqreturn_t vfe_isr(int irq, void *dev)
 						    "VFE%u: Input data violation, clients 0x%08x\n",
 						    vfe->id, viol);
 
+			/* EXPERIMENT: the TFE's own view of each RDI input */
+			for (i = 0; i < 3; i++) {
+				u32 d0 = readl_relaxed(vfe->base + 0x400 + i * 0x200 + 0x1f4);
+
+				dev_err_ratelimited(vfe->camss->dev,
+						    "VFE%u: RDI%u cfg %08x debug1 %08x height %u width %u, irq1 %08x viol %08x\n",
+						    vfe->id, i,
+						    readl_relaxed(vfe->base + 0x460 + i * 0x200),
+						    readl_relaxed(vfe->base + 0x400 + i * 0x200 + 0x1f0),
+						    (d0 >> 16) & 0x1fff, d0 & 0x1fff,
+						    readl_relaxed(vfe->base + 0x050),
+						    readl_relaxed(vfe->base + 0x070));
+			}
+
 			if (bus_status & TFE_BUS_IRQ_MASK_0_IMG_VIOL)
 				dev_err_ratelimited(vfe->camss->dev,
 						    "VFE%u: Image size violation, 0x%08x\n",
