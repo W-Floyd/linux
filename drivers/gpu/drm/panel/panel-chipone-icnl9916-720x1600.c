@@ -9,12 +9,15 @@
 #include <linux/module.h>
 #include <linux/gpio/consumer.h>
 #include <linux/regulator/consumer.h>
+#include <linux/workqueue.h>
 
 #include <drm/drm_mipi_dsi.h>
 #include <drm/drm_modes.h>
 #include <drm/drm_panel.h>
 #include <drm/drm_print.h>
 #include <drm/drm_probe_helper.h>
+
+#include <video/mipi_display.h>
 
 /*
  * The ICNL9916 is a TDDI controller: the same part drives the panel over DSI
@@ -43,6 +46,10 @@ struct icnl9916_panel {
 	struct gpio_desc *reset;
 	struct regulator_bulk_data *supplies;
 	const struct icnl9916_panel_desc *desc;
+	/* EXPERIMENT: the settled read-back after a brightness write. */
+	struct delayed_work bl_check;
+	u16 bl_want;
+	bool on;
 };
 
 static inline
@@ -291,6 +298,7 @@ static int icnl9916_panel_prepare(struct drm_panel *panel)
 		return ret;
 	}
 
+	ctx->on = true;
 	return 0;
 }
 
@@ -299,6 +307,10 @@ static int icnl9916_panel_unprepare(struct drm_panel *panel)
 	struct icnl9916_panel *ctx = to_icnl9916_panel(panel);
 	struct device *dev = &ctx->dsi->dev;
 	int ret;
+
+	/* No read-back from a panel that is about to lose power. */
+	ctx->on = false;
+	cancel_delayed_work_sync(&ctx->bl_check);
 
 	ret = ctx->desc->off(ctx->dsi);
 	if (ret < 0)
@@ -455,15 +467,69 @@ static int icnl9916_panel_get_modes(struct drm_panel *panel,
  */
 #define ICNL9916C_TM_MAX_BRIGHTNESS	1637
 
+/*
+ * EXPERIMENT: have the panel report what it took. Some boots come up with
+ * the panel scanning out and touch working but the backlight dark, and a
+ * blank/unblank lights it; nothing checks this write (the backlight core
+ * drops update_status() errors). After each write, read back the
+ * brightness (0x52), the control bits (0x54: BCTRL, DD, BL) and the power
+ * mode (0x0A: 0x9c is booster on, sleep out, normal, display on), and log
+ * all of it with the write's own result. A dark boot whose read-backs are
+ * right is a fault past the registers; one whose read-backs are wrong says
+ * which write was lost.
+ *
+ * The on-sequence sets DD (dimming) in 0x53, so the panel fades to a new
+ * brightness rather than jumping: a read straight after the write returns
+ * where the fade is, not the target. The verdict is a second read a
+ * second later, when the fade is over.
+ */
+static void icnl9916_panel_bl_read(struct mipi_dsi_device *dsi, const char *when,
+				   u16 want, int wret, bool judge)
+{
+	u16 got = 0;
+	u8 ctrl = 0, mode = 0;
+	int bret, cret, mret;
+
+	bret = mipi_dsi_dcs_get_display_brightness_large(dsi, &got);
+	cret = mipi_dsi_dcs_read(dsi, MIPI_DCS_GET_CONTROL_DISPLAY, &ctrl, 1);
+	mret = mipi_dsi_dcs_get_power_mode(dsi, &mode);
+
+	dev_info(&dsi->dev,
+		 "bl: %s %u (%d) -> 0x52=%u (%d) 0x54=%#04x (%d) 0x0a=%#04x (%d)%s\n",
+		 when, want, wret, got, bret, ctrl, cret, mode, mret,
+		 judge && (wret || bret || got != want || cret != 1 ||
+			   (ctrl & 0x24) != 0x24 || mret || mode != 0x9c) ?
+		 " MISMATCH" : "");
+}
+
+static void icnl9916_panel_bl_check(struct work_struct *work)
+{
+	struct icnl9916_panel *ctx = container_of(to_delayed_work(work),
+						  struct icnl9916_panel, bl_check);
+	struct mipi_dsi_device *dsi = ctx->dsi;
+
+	if (!ctx->on)
+		return;
+	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
+	icnl9916_panel_bl_read(dsi, "settled, want", ctx->bl_want, 0, true);
+	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
+}
+
 static int icnl9916_panel_bl_update_status(struct backlight_device *bl)
 {
 	struct mipi_dsi_device *dsi = bl_get_data(bl);
+	struct icnl9916_panel *ctx = mipi_dsi_get_drvdata(dsi);
 	u16 brightness = backlight_get_brightness(bl);
 	int ret;
 
 	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
 	ret = mipi_dsi_dcs_set_display_brightness_large(dsi, brightness);
+	icnl9916_panel_bl_read(dsi, "set (fade under way)", brightness,
+			       ret < 0 ? ret : 0, false);
 	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
+
+	ctx->bl_want = brightness;
+	mod_delayed_work(system_wq, &ctx->bl_check, msecs_to_jiffies(1000));
 
 	return ret < 0 ? ret : 0;
 }
@@ -534,6 +600,7 @@ static int icnl9916_panel_probe(struct mipi_dsi_device *dsi)
 
 	ctx->dsi = dsi;
 	mipi_dsi_set_drvdata(dsi, ctx);
+	INIT_DELAYED_WORK(&ctx->bl_check, icnl9916_panel_bl_check);
 
 	ctx->reset = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
 	if (IS_ERR(ctx->reset))
