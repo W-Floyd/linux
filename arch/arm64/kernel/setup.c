@@ -170,11 +170,25 @@ static void __init smp_build_mpidr_hash(void)
 static void __init setup_machine_fdt(phys_addr_t dt_phys)
 {
 	int size = 0;
-	void *dt_virt = fixmap_remap_fdt(dt_phys, &size, PAGE_KERNEL);
+	void *dt_virt;
 	const char *name;
 
-	if (dt_virt)
-		memblock_reserve(dt_phys, size);
+	if (IS_ENABLED(CONFIG_BUILTIN_DTB)) {
+		/*
+		 * Ignore the boot loader's tree and use the one linked into
+		 * the image. It sits in init data, already mapped and covered
+		 * by the kernel's own memblock reservation, so it needs
+		 * neither the fixmap nor a reservation of its own; it is
+		 * copied out before init memory is freed (see setup_arch()).
+		 */
+		dt_virt = __dtb_start;
+		dt_phys = __pa_symbol(__dtb_start);
+		size = __dtb_end - __dtb_start;
+	} else {
+		dt_virt = fixmap_remap_fdt(dt_phys, &size, PAGE_KERNEL);
+		if (dt_virt)
+			memblock_reserve(dt_phys, size);
+	}
 
 	/*
 	 * dt_virt is a fixmap address, hence __pa(dt_virt) can't be used.
@@ -197,7 +211,8 @@ static void __init setup_machine_fdt(phys_addr_t dt_phys)
 	}
 
 	/* Early fixups are done, map the FDT as read-only now */
-	fixmap_remap_fdt(dt_phys, &size, PAGE_KERNEL_RO);
+	if (!IS_ENABLED(CONFIG_BUILTIN_DTB))
+		fixmap_remap_fdt(dt_phys, &size, PAGE_KERNEL_RO);
 
 	name = of_flat_dt_get_machine_name();
 	if (!name)
@@ -338,8 +353,13 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	/* Parse the ACPI tables for possible boot-time configuration */
 	acpi_boot_table_init();
 
-	if (acpi_disabled)
-		unflatten_device_tree();
+	if (acpi_disabled) {
+		/* The built-in blob lives in init data, which is freed later. */
+		if (IS_ENABLED(CONFIG_BUILTIN_DTB))
+			unflatten_and_copy_device_tree();
+		else
+			unflatten_device_tree();
+	}
 
 	bootmem_init();
 
