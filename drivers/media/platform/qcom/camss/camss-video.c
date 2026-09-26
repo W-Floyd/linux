@@ -470,18 +470,20 @@ static int __video_try_fmt(struct camss_video *video, struct v4l2_format *f)
 	u32 sizeimage[3] = { 0 };
 	u32 width, height;
 	u32 bpl, lines;
+	u32 max_height = video->line_based ? CAMSS_FRAME_MAX_HEIGHT_PIX :
+					     CAMSS_FRAME_MAX_HEIGHT_RDI;
 	int i, j;
 
 	pix_mp = &f->fmt.pix_mp;
 
-	if (video->line_based)
+	if (video->bpl_configurable)
 		for (i = 0; i < pix_mp->num_planes && i < 3; i++) {
 			p = &pix_mp->plane_fmt[i];
 			bytesperline[i] = clamp_t(u32, p->bytesperline,
 						  1, 65528);
 			sizeimage[i] = clamp_t(u32, p->sizeimage,
 					       bytesperline[i],
-					       bytesperline[i] * CAMSS_FRAME_MAX_HEIGHT_PIX);
+					       bytesperline[i] * max_height);
 		}
 
 	for (j = 0; j < video->nformats; j++)
@@ -521,14 +523,14 @@ static int __video_try_fmt(struct camss_video *video, struct v4l2_format *f)
 					pix_mp->colorspace, pix_mp->ycbcr_enc);
 	pix_mp->xfer_func = V4L2_MAP_XFER_FUNC_DEFAULT(pix_mp->colorspace);
 
-	if (video->line_based)
+	if (video->bpl_configurable)
 		for (i = 0; i < pix_mp->num_planes; i++) {
 			p = &pix_mp->plane_fmt[i];
 			p->bytesperline = clamp_t(u32, p->bytesperline,
 						  1, 65528);
 			p->sizeimage = clamp_t(u32, p->sizeimage,
 					       p->bytesperline,
-					       p->bytesperline * CAMSS_FRAME_MAX_HEIGHT_PIX);
+					       p->bytesperline * max_height);
 			lines = p->sizeimage / p->bytesperline;
 
 			if (p->bytesperline < bytesperline[i])

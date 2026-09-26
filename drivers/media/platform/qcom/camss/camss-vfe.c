@@ -2024,6 +2024,17 @@ static int vfe_bpl_align_rdi(struct vfe_device *vfe)
 	return ret;
 }
 
+/* Whether the RDI write masters run line based, with a programmed stride */
+static bool vfe_rdi_bpl_configurable(struct vfe_device *vfe)
+{
+	switch (vfe->camss->res->version) {
+	case CAMSS_2290:
+		return true;
+	default:
+		return false;
+	}
+}
+
 static int vfe_bpl_align_pix(struct vfe_device *vfe)
 {
 	int ret = 16;
@@ -2111,9 +2122,11 @@ int msm_vfe_register_entities(struct vfe_device *vfe,
 		if (i == VFE_LINE_PIX) {
 			video_out->bpl_alignment = vfe_bpl_align_pix(vfe);
 			video_out->line_based = 1;
+			video_out->bpl_configurable = 1;
 		} else {
 			video_out->bpl_alignment = vfe_bpl_align_rdi(vfe);
 			video_out->line_based = 0;
+			video_out->bpl_configurable = vfe_rdi_bpl_configurable(vfe);
 		}
 
 		video_out->nformats = vfe->line[i].nformats;

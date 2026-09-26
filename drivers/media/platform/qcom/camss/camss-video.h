@@ -46,6 +46,8 @@ struct camss_video {
 	struct mutex q_lock;
 	unsigned int bpl_alignment;
 	unsigned int line_based;
+	/* The write master takes a line stride: honour a larger bytesperline */
+	unsigned int bpl_configurable;
 	const struct camss_format_info *formats;
 	unsigned int nformats;
 };
