@@ -35,6 +35,11 @@ properties:
   vdd-supply:
     description: VDD power supply
 
+  vin-supply:
+    description:
+      Digital I/O voltage supply, for boards where the I2C bus is referenced
+      to a rail other than VDD.
+
   dongwoon,sac-mode:
     description: |
       Slew Rate Control mode to use: direct, LSC (Linear Slope Control) or
