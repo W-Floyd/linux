@@ -88,7 +88,7 @@
 &cci { status = "disabled"; };
 
 /*
- * Touch runs, for the recovery UI. It shares the panel's silicon (TDDI),
+ * Touch runs, for the boot manager. It shares the panel's silicon (TDDI),
  * and the driver follows the panel: the panel's power-down on the kexec
  * handover resets the touch half too, and the next kernel's driver
  * downloads its firmware again when its panel comes up, so nothing of the
