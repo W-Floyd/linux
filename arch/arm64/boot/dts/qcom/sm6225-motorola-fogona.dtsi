@@ -1691,6 +1691,29 @@
 
 &cci_i2c0 {
 	/*
+	 * The rear module's autofocus actuator, a Giantec GT9764BA (the
+	 * vendor sensormodule blob names mot_gt9764ba at 8-bit address 0x18).
+	 * The blob's init writes 0x02 = 0x00, 0x02 = 0x02, 0x06 = 0x80,
+	 * 0x07 = 0x62: the DW9800K sequence with SAC mode 2 and prescale 0x62.
+	 * The blob's second-source (Sunny) module differs only in prescale
+	 * (0x6e); this unit's module is the Q-tech one.
+	 *
+	 * The CCI pull-ups are on camera_ldo_iovdd, which the sensor drops
+	 * when it suspends; without vin-supply every actuator transfer then
+	 * times out, starting with its own autosuspend.
+	 */
+	rear_vcm: actuator@c {
+		compatible = "giantec,gt9764", "dongwoon,dw9800k";
+		reg = <0x0c>;
+
+		vdd-supply = <&camera_ldo_50m_afvdd>;
+		vin-supply = <&camera_ldo_iovdd>;
+
+		dongwoon,sac-mode = <2>;
+		dongwoon,vcm-prescale = <0x62>;
+	};
+
+	/*
 	 * An S5KJNS, not the S5KJN1 the module part number suggests: the
 	 * silicon reports model id 0x38ee and the vendor's own sensormodule
 	 * blob declares the same. It shares the S5KJN1's register map -- the
@@ -1726,6 +1749,8 @@
 		vddd-supply = <&camera_ldo_50m_dvdd>;
 		vddio-supply = <&camera_ldo_iovdd>;
 		afvdd-supply = <&camera_ldo_50m_afvdd>;
+
+		lens-focus = <&rear_vcm>;
 
 		orientation = <1>; /* Rear facing */
 		rotation = <90>;
