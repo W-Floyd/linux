@@ -38,7 +38,17 @@ struct camss_video {
 	struct vb2_queue vb2_q;
 	struct video_device vdev;
 	struct media_pad pad;
+	/*
+	 * The format of the buffer type the queue is set to, which is what the
+	 * hardware is programmed from. A node that can capture line based
+	 * metadata as well as images keeps the format of each buffer type in
+	 * video_fmt and meta_fmt (both in v4l2_pix_format_mplane form), and
+	 * active_fmt follows the queue's type.
+	 */
 	struct v4l2_format active_fmt;
+	struct v4l2_format video_fmt;
+	struct v4l2_format meta_fmt;
+	bool meta;
 	enum v4l2_buf_type type;
 	struct media_pipeline pipe;
 	const struct camss_video_ops *ops;

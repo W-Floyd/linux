@@ -29,6 +29,44 @@
  */
 
 /*
+ * video_is_meta_format - Tell whether a format is line based metadata
+ * @pixelformat: V4L2 pixel or metadata format
+ *
+ * Line based metadata (a sensor's embedded data, or its phase detection
+ * pixels) is captured through the same RDI write path as raw images, byte
+ * for byte, but is presented on a V4L2_BUF_TYPE_META_CAPTURE queue.
+ */
+static bool video_is_meta_format(u32 pixelformat)
+{
+	switch (pixelformat) {
+	case V4L2_META_FMT_GENERIC_8:
+	case V4L2_META_FMT_GENERIC_CSI2_10:
+	case V4L2_META_FMT_GENERIC_CSI2_12:
+		return true;
+	default:
+		return false;
+	}
+}
+
+/*
+ * video_default_format - Find the first format of one kind in the table
+ * @video: struct camss_video
+ * @meta: find a metadata format rather than an image format
+ *
+ * Return the table index, or 0 if the table has none of that kind
+ */
+static unsigned int video_default_format(struct camss_video *video, bool meta)
+{
+	unsigned int i;
+
+	for (i = 0; i < video->nformats; i++)
+		if (video_is_meta_format(video->formats[i].pixelformat) == meta)
+			return i;
+
+	return 0;
+}
+
+/*
  * video_mbus_to_pix_mp - Convert v4l2_mbus_framefmt to v4l2_pix_format_mplane
  * @mbus: v4l2_mbus_framefmt format (input)
  * @pix: v4l2_pix_format_mplane format (output)
@@ -436,10 +474,11 @@ static int video_querycap(struct file *file, void *fh,
 static int video_enum_fmt(struct file *file, void *fh, struct v4l2_fmtdesc *f)
 {
 	struct camss_video *video = video_drvdata(file);
+	bool meta = f->type == V4L2_BUF_TYPE_META_CAPTURE;
 	int i, j, k;
 	u32 mcode = f->mbus_code;
 
-	if (f->type != video->type)
+	if (f->type != video->type && !(meta && video->meta))
 		return -EINVAL;
 
 	if (f->index >= video->nformats)
@@ -461,9 +500,13 @@ static int video_enum_fmt(struct file *file, void *fh, struct v4l2_fmtdesc *f)
 	for (i = 0; i < video->nformats; i++) {
 		if (mcode != 0 && video->formats[i].code != mcode)
 			continue;
+		if (video_is_meta_format(video->formats[i].pixelformat) != meta)
+			continue;
 
 		for (j = 0; j < i; j++) {
 			if (mcode != 0 && video->formats[j].code != mcode)
+				continue;
+			if (video_is_meta_format(video->formats[j].pixelformat) != meta)
 				continue;
 			if (video->formats[i].pixelformat ==
 					video->formats[j].pixelformat)
@@ -524,12 +567,13 @@ static int video_g_fmt(struct file *file, void *fh, struct v4l2_format *f)
 {
 	struct camss_video *video = video_drvdata(file);
 
-	*f = video->active_fmt;
+	*f = video->video_fmt;
 
 	return 0;
 }
 
-static int __video_try_fmt(struct camss_video *video, struct v4l2_format *f)
+static int __video_try_fmt(struct camss_video *video, struct v4l2_format *f,
+			   bool meta)
 {
 	unsigned int alignment = video->bpl_alignment;
 	struct v4l2_pix_format_mplane *pix_mp;
@@ -554,11 +598,12 @@ static int __video_try_fmt(struct camss_video *video, struct v4l2_format *f)
 		}
 
 	for (j = 0; j < video->nformats; j++)
-		if (pix_mp->pixelformat == video->formats[j].pixelformat)
+		if (pix_mp->pixelformat == video->formats[j].pixelformat &&
+		    video_is_meta_format(video->formats[j].pixelformat) == meta)
 			break;
 
 	if (j == video->nformats)
-		j = 0; /* default format */
+		j = video_default_format(video, meta);
 
 	fi = &video->formats[j];
 	width = pix_mp->width;
@@ -617,7 +662,7 @@ static int video_try_fmt(struct file *file, void *fh, struct v4l2_format *f)
 {
 	struct camss_video *video = video_drvdata(file);
 
-	return __video_try_fmt(video, f);
+	return __video_try_fmt(video, f, false);
 }
 
 static int video_s_fmt(struct file *file, void *fh, struct v4l2_format *f)
@@ -628,13 +673,149 @@ static int video_s_fmt(struct file *file, void *fh, struct v4l2_format *f)
 	if (vb2_is_busy(&video->vb2_q))
 		return -EBUSY;
 
-	ret = __video_try_fmt(video, f);
+	ret = __video_try_fmt(video, f, false);
 	if (ret < 0)
 		return ret;
 
-	video->active_fmt = *f;
+	video->video_fmt = *f;
+	if (video->vb2_q.type != V4L2_BUF_TYPE_META_CAPTURE)
+		video->active_fmt = *f;
 
 	return 0;
+}
+
+static void video_pix_mp_to_meta(const struct v4l2_pix_format_mplane *pix,
+				 struct v4l2_meta_format *meta)
+{
+	memset(meta, 0, sizeof(*meta));
+	meta->dataformat = pix->pixelformat;
+	meta->buffersize = pix->plane_fmt[0].sizeimage;
+	meta->width = pix->width;
+	meta->height = pix->height;
+	meta->bytesperline = pix->plane_fmt[0].bytesperline;
+}
+
+/*
+ * __video_try_fmt_meta - Try a line based metadata format
+ * @video: struct camss_video
+ * @f: V4L2_BUF_TYPE_META_CAPTURE format (in and out)
+ * @pix: the same format in v4l2_pix_format_mplane form (out)
+ *
+ * The RDI path writes metadata lines exactly as it writes raw image lines,
+ * so the format is worked out as an image of the same width, height and
+ * bit depth.
+ */
+static void __video_try_fmt_meta(struct camss_video *video, struct v4l2_format *f,
+				 struct v4l2_format *pix)
+{
+	memset(pix, 0, sizeof(*pix));
+	pix->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+	pix->fmt.pix_mp.pixelformat = f->fmt.meta.dataformat;
+	pix->fmt.pix_mp.width = f->fmt.meta.width;
+	pix->fmt.pix_mp.height = f->fmt.meta.height;
+
+	__video_try_fmt(video, pix, true);
+
+	video_pix_mp_to_meta(&pix->fmt.pix_mp, &f->fmt.meta);
+}
+
+static int video_g_fmt_meta(struct file *file, void *fh, struct v4l2_format *f)
+{
+	struct camss_video *video = video_drvdata(file);
+
+	video_pix_mp_to_meta(&video->meta_fmt.fmt.pix_mp, &f->fmt.meta);
+
+	return 0;
+}
+
+static int video_try_fmt_meta(struct file *file, void *fh, struct v4l2_format *f)
+{
+	struct camss_video *video = video_drvdata(file);
+	struct v4l2_format pix;
+
+	__video_try_fmt_meta(video, f, &pix);
+
+	return 0;
+}
+
+static int video_s_fmt_meta(struct file *file, void *fh, struct v4l2_format *f)
+{
+	struct camss_video *video = video_drvdata(file);
+	struct v4l2_format pix;
+
+	if (vb2_is_busy(&video->vb2_q))
+		return -EBUSY;
+
+	__video_try_fmt_meta(video, f, &pix);
+
+	video->meta_fmt = pix;
+	if (video->vb2_q.type == V4L2_BUF_TYPE_META_CAPTURE)
+		video->active_fmt = pix;
+
+	return 0;
+}
+
+/*
+ * video_set_queue_type - Switch the queue between images and metadata
+ * @video: struct camss_video
+ * @type: buffer type requested
+ *
+ * A node that can capture both switches its vb2 queue to the buffer type of
+ * the first REQBUFS or CREATE_BUFS, as long as no buffers are allocated, and
+ * programs the hardware from that type's format.
+ *
+ * Return 0 on success or a negative error code otherwise
+ */
+static int video_set_queue_type(struct camss_video *video, u32 type)
+{
+	struct vb2_queue *q = &video->vb2_q;
+	int ret;
+
+	if (type != video->type &&
+	    !(video->meta && type == V4L2_BUF_TYPE_META_CAPTURE))
+		return -EINVAL;
+
+	ret = vb2_queue_change_type(q, type);
+	if (ret)
+		return ret;
+
+	q->is_multiplanar = V4L2_TYPE_IS_MULTIPLANAR(type);
+	q->is_output = V4L2_TYPE_IS_OUTPUT(type);
+
+	video->active_fmt = type == V4L2_BUF_TYPE_META_CAPTURE ?
+			    video->meta_fmt : video->video_fmt;
+
+	return 0;
+}
+
+static int video_reqbufs(struct file *file, void *priv,
+			 struct v4l2_requestbuffers *p)
+{
+	struct camss_video *video = video_drvdata(file);
+	int ret;
+
+	if (!vb2_is_busy(&video->vb2_q)) {
+		ret = video_set_queue_type(video, p->type);
+		if (ret)
+			return ret;
+	}
+
+	return vb2_ioctl_reqbufs(file, priv, p);
+}
+
+static int video_create_bufs(struct file *file, void *priv,
+			     struct v4l2_create_buffers *p)
+{
+	struct camss_video *video = video_drvdata(file);
+	int ret;
+
+	if (!vb2_is_busy(&video->vb2_q)) {
+		ret = video_set_queue_type(video, p->format.type);
+		if (ret)
+			return ret;
+	}
+
+	return vb2_ioctl_create_bufs(file, priv, p);
 }
 
 static int video_enum_input(struct file *file, void *fh,
@@ -668,12 +849,16 @@ static const struct v4l2_ioctl_ops msm_vid_ioctl_ops = {
 	.vidioc_g_fmt_vid_cap_mplane	= video_g_fmt,
 	.vidioc_s_fmt_vid_cap_mplane	= video_s_fmt,
 	.vidioc_try_fmt_vid_cap_mplane	= video_try_fmt,
-	.vidioc_reqbufs			= vb2_ioctl_reqbufs,
+	.vidioc_enum_fmt_meta_cap	= video_enum_fmt,
+	.vidioc_g_fmt_meta_cap		= video_g_fmt_meta,
+	.vidioc_s_fmt_meta_cap		= video_s_fmt_meta,
+	.vidioc_try_fmt_meta_cap	= video_try_fmt_meta,
+	.vidioc_reqbufs			= video_reqbufs,
 	.vidioc_querybuf		= vb2_ioctl_querybuf,
 	.vidioc_qbuf			= vb2_ioctl_qbuf,
 	.vidioc_expbuf			= vb2_ioctl_expbuf,
 	.vidioc_dqbuf			= vb2_ioctl_dqbuf,
-	.vidioc_create_bufs		= vb2_ioctl_create_bufs,
+	.vidioc_create_bufs		= video_create_bufs,
 	.vidioc_prepare_buf		= vb2_ioctl_prepare_buf,
 	.vidioc_streamon		= vb2_ioctl_streamon,
 	.vidioc_streamoff		= vb2_ioctl_streamoff,
@@ -729,15 +914,29 @@ static int msm_video_init_format(struct camss_video *video)
 		.fmt.pix_mp = {
 			.width = 1920,
 			.height = 1080,
-			.pixelformat = video->formats[0].pixelformat,
+			.pixelformat = video->formats[video_default_format(video, false)].pixelformat,
 		},
 	};
 
-	ret = __video_try_fmt(video, &format);
+	ret = __video_try_fmt(video, &format, false);
 	if (ret < 0)
 		return ret;
 
 	video->active_fmt = format;
+	video->video_fmt = format;
+
+	if (video->meta) {
+		struct v4l2_format meta = {
+			.type = V4L2_BUF_TYPE_META_CAPTURE,
+			.fmt.meta = {
+				.dataformat = video->formats[video_default_format(video, true)].pixelformat,
+				.width = 1920,
+				.height = 1,
+			},
+		};
+
+		__video_try_fmt_meta(video, &meta, &video->meta_fmt);
+	}
 
 	return 0;
 }
@@ -792,6 +991,10 @@ int msm_video_register(struct camss_video *video, struct v4l2_device *v4l2_dev,
 
 	mutex_init(&video->lock);
 
+	/* Only the RDI (frame based) paths write metadata as it arrives */
+	video->meta = !video->line_based &&
+		      video_is_meta_format(video->formats[video_default_format(video, true)].pixelformat);
+
 	ret = msm_video_init_format(video);
 	if (ret < 0) {
 		dev_err(v4l2_dev->dev, "Failed to init format: %d\n", ret);
@@ -801,6 +1004,8 @@ int msm_video_register(struct camss_video *video, struct v4l2_device *v4l2_dev,
 	vdev->fops = &msm_vid_fops;
 	vdev->device_caps = V4L2_CAP_VIDEO_CAPTURE_MPLANE | V4L2_CAP_STREAMING
 			  | V4L2_CAP_READWRITE | V4L2_CAP_IO_MC;
+	if (video->meta)
+		vdev->device_caps |= V4L2_CAP_META_CAPTURE;
 	vdev->ioctl_ops = &msm_vid_ioctl_ops;
 	vdev->release = msm_video_release;
 	vdev->v4l2_dev = v4l2_dev;
