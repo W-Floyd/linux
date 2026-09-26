@@ -482,6 +482,12 @@ static int icnl9916_panel_get_modes(struct drm_panel *panel,
  * brightness rather than jumping: a read straight after the write returns
  * where the fade is, not the target. The verdict is a second read a
  * second later, when the fade is over.
+ *
+ * Nor does the settled value equal the target: the on-sequence also turns
+ * CABC on (0x55 = 0x03, moving image), so the panel scales the backlight
+ * by the content and 0x52 reports the scaled value -- measured settling at
+ * 82-86 % of what was written. A write counts as taken when it reads back
+ * non-zero with BCTRL and BL set and the display on.
  */
 static void icnl9916_panel_bl_read(struct mipi_dsi_device *dsi, const char *when,
 				   u16 want, int wret, bool judge)
@@ -497,7 +503,7 @@ static void icnl9916_panel_bl_read(struct mipi_dsi_device *dsi, const char *when
 	dev_info(&dsi->dev,
 		 "bl: %s %u (%d) -> 0x52=%u (%d) 0x54=%#04x (%d) 0x0a=%#04x (%d)%s\n",
 		 when, want, wret, got, bret, ctrl, cret, mode, mret,
-		 judge && (wret || bret || got != want || cret != 1 ||
+		 judge && (wret || bret || (want && !got) || cret != 1 ||
 			   (ctrl & 0x24) != 0x24 || mret || mode != 0x9c) ?
 		 " MISMATCH" : "");
 }
