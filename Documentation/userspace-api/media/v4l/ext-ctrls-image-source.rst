@@ -184,6 +184,9 @@ Image Source Control IDs
     * - V4L2_METADATA_LAYOUT_OV2740
       - :ref:`OV2740 embedded data <media-metadata-layout-ov2740>`
       - 2
+    * - V4L2_METADATA_LAYOUT_S5KJN1_PDAF
+      - :ref:`S5KJN1 phase detection data <media-metadata-layout-s5kjn1-pdaf>`
+      - 3
 
 .. _image_source_control_binning_factors:
 

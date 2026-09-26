@@ -112,3 +112,70 @@ level 1.
     * - 89
       - 8
       - Frame counter (starts at 1, wraps to 0 after 255)
+
+.. _media-metadata-layout-s5kjn1-pdaf:
+
+Samsung S5KJN1 Phase Detection Data Layout (``V4L2_METADATA_LAYOUT_S5KJN1_PDAF``)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The Samsung S5KJN1 (and the S5KJNS, which shares its register map) has phase
+detection (PD) pixels: pairs of pixels shielded to see opposite halves of the
+lens pupil, called left (L) and right (R) pixels here. In its 4080x3072 mode it
+sends the values of those pixels, as it reads them out, in a stream of their
+own next to the image, indicated by the ``V4L2_METADATA_LAYOUT_S5KJN1_PDAF``
+metadata layout. The phase difference between the L and R signals of a region
+is proportional to its defocus; computing it is left to the user space.
+
+The PD pixels sit on a grid of 8x8 pixel blocks, the first block starting at
+column 8 and row 8 of the 4080x3072 output image, 508 blocks across and 382
+down. Each block has four L/R pairs. Relative to the block's top left pixel:
+
+.. flat-table:: S5KJN1 PD pixel positions within a block (column, row)
+    :header-rows: 1
+
+    * - Pair
+      - R pixel
+      - L pixel
+    * - 0
+      - (2, 0)
+      - (3, 0)
+    * - 1
+      - (0, 3)
+      - (1, 3)
+    * - 2
+      - (4, 4)
+      - (5, 4)
+    * - 3
+      - (6, 7)
+      - (7, 7)
+
+The PD stream is 508 samples wide and 3056 (8 x 382) lines high, with 10 bits
+per sample, packed as :ref:`V4L2_META_FMT_GENERIC_CSI2_10
+<v4l2-meta-fmt-generic-csi2-10>` (MIPI CSI-2 RAW10 packing). Sample ``x`` of a
+line is the PD pixel of block column ``x``. Lines come in groups of eight, one
+group per block row, in this order:
+
+.. flat-table:: S5KJN1 PD stream lines within a group of eight
+    :header-rows: 1
+
+    * - Line
+      - Content
+    * - 0
+      - R pixel of pair 0
+    * - 1
+      - L pixel of pair 0
+    * - 2
+      - R pixel of pair 1
+    * - 3
+      - L pixel of pair 1
+    * - 4
+      - R pixel of pair 2
+    * - 5
+      - L pixel of pair 2
+    * - 6
+      - R pixel of pair 3
+    * - 7
+      - L pixel of pair 3
+
+The pixel positions are given for the image with neither flip applied. The
+values include the sensor's black level.
