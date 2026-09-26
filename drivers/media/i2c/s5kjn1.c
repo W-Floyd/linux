@@ -10,6 +10,7 @@
 #include <linux/property.h>
 #include <linux/regulator/consumer.h>
 #include <linux/units.h>
+#include <media/mipi-csi2.h>
 #include <media/v4l2-cci.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
@@ -61,6 +62,31 @@
 
 #define S5KJN1_REG_TEST_PATTERN		CCI_REG16(0x0600)
 
+/*
+ * Phase detection (PD) output. With the PD registers of the 4080x3072 mode
+ * table (0x0d00 = 0x0101, 0x0d02 = 0x0101, 0x0d04 = 0x0102) the sensor sends
+ * the values of its PD pixels as a second stream, 508 samples by 3056 lines
+ * of RAW10 packed data on data type 0x30 (user defined 1), the layout
+ * documented as V4L2_METADATA_LAYOUT_S5KJN1_PDAF. It comes on virtual channel
+ * 1, the image on virtual channel 0 (the channel identifier in 0x0110 being
+ * 0), as the vendor's module description also has it; a CSI-2 receiver's
+ * packet capture shows 635-byte long packets on VC 1, DT 0x30.
+ */
+#define S5KJN1_PDAF_DT			MIPI_CSI2_DT_USER_DEFINED(0)
+#define S5KJN1_PDAF_VC			1
+
+enum {
+	S5KJN1_PAD_SOURCE,
+	S5KJN1_PAD_IMAGE,
+	S5KJN1_PAD_PDAF,
+	S5KJN1_NUM_PADS,
+};
+
+enum {
+	S5KJN1_STREAM_IMAGE,
+	S5KJN1_STREAM_PDAF,
+};
+
 #define to_s5kjn1(_sd)			container_of(_sd, struct s5kjn1, sd)
 
 static const s64 s5kjn1_link_freq_menu[] = {
@@ -85,6 +111,8 @@ struct s5kjn1_mode {
 	u32 vts;			/* Default vertical timing size */
 	u32 exposure;			/* Default exposure value */
 	u32 exposure_margin;		/* Exposure margin */
+	u32 pdaf_width;			/* PD stream width, 0 if none */
+	u32 pdaf_height;		/* PD stream height */
 
 	const struct s5kjn1_reg_list reg_list;	/* Sensor register setting */
 };
@@ -110,7 +138,8 @@ struct s5kjn1 {
 	u16 chip_id;			/* Model id this compatible expects */
 
 	struct v4l2_subdev sd;
-	struct media_pad pad;
+	struct media_pad pads[S5KJN1_NUM_PADS];
+	u64 enabled_streams;		/* Streams enabled on the source pad */
 
 	struct v4l2_ctrl_handler ctrl_handler;
 	struct v4l2_ctrl *link_freq;
@@ -732,6 +761,8 @@ static const struct s5kjn1_mode s5kjn1_supported_modes[] = {
 		.vts = 4288,
 		.exposure = 3840,
 		.exposure_margin = 22,
+		.pdaf_width = 508,
+		.pdaf_height = 3056,
 		.reg_list = {
 			.regs = s5kjn1_4080x3072_30fps_mode,
 			.num_regs = ARRAY_SIZE(s5kjn1_4080x3072_30fps_mode),
@@ -826,7 +857,7 @@ static int s5kjn1_init_controls(struct s5kjn1 *s5kjn1)
 	struct v4l2_fwnode_device_properties props;
 	int ret;
 
-	v4l2_ctrl_handler_init(ctrl_hdlr, 9);
+	v4l2_ctrl_handler_init(ctrl_hdlr, 10);
 
 	s5kjn1->link_freq = v4l2_ctrl_new_int_menu(ctrl_hdlr, &s5kjn1_ctrl_ops,
 					V4L2_CID_LINK_FREQ,
@@ -870,6 +901,12 @@ static int s5kjn1_init_controls(struct s5kjn1 *s5kjn1)
 				     ARRAY_SIZE(s5kjn1_test_pattern_menu) - 1,
 				     0, 0, s5kjn1_test_pattern_menu);
 
+	/* The metadata stream carries the phase detection pixels */
+	v4l2_ctrl_new_std(ctrl_hdlr, NULL, V4L2_CID_METADATA_LAYOUT,
+			  V4L2_METADATA_LAYOUT_S5KJN1_PDAF,
+			  V4L2_METADATA_LAYOUT_S5KJN1_PDAF, 1,
+			  V4L2_METADATA_LAYOUT_S5KJN1_PDAF);
+
 	s5kjn1->hflip = v4l2_ctrl_new_std(ctrl_hdlr, &s5kjn1_ctrl_ops,
 					  V4L2_CID_HFLIP, 0, 1, 1, 0);
 	if (s5kjn1->hflip)
@@ -906,6 +943,19 @@ static int s5kjn1_enable_streams(struct v4l2_subdev *sd,
 	struct s5kjn1 *s5kjn1 = to_s5kjn1(sd);
 	const struct s5kjn1_reg_list *reg_list = &s5kjn1->mode->reg_list;
 	int ret;
+
+	if ((streams_mask & BIT_ULL(S5KJN1_STREAM_PDAF)) && !s5kjn1->mode->pdaf_width)
+		return -EINVAL;
+
+	/*
+	 * Both routes are immutable: once streaming, the sensor sends the image
+	 * and, in a mode that has it, the phase detection data, whichever of
+	 * them the receiver asked for. So only the first stream starts it.
+	 */
+	if (s5kjn1->enabled_streams) {
+		s5kjn1->enabled_streams |= streams_mask;
+		return 0;
+	}
 
 	ret = pm_runtime_resume_and_get(s5kjn1->dev);
 	if (ret)
@@ -946,6 +996,8 @@ static int s5kjn1_enable_streams(struct v4l2_subdev *sd,
 	if (ret)
 		goto error;
 
+	s5kjn1->enabled_streams = streams_mask;
+
 	return 0;
 
 error:
@@ -961,6 +1013,10 @@ static int s5kjn1_disable_streams(struct v4l2_subdev *sd,
 {
 	struct s5kjn1 *s5kjn1 = to_s5kjn1(sd);
 	int ret;
+
+	s5kjn1->enabled_streams &= ~streams_mask;
+	if (s5kjn1->enabled_streams)
+		return 0;
 
 	ret = cci_write(s5kjn1->regmap, S5KJN1_REG_CTRL_MODE, 0x0, NULL);
 	if (ret)
@@ -994,6 +1050,50 @@ static void s5kjn1_update_pad_format(struct s5kjn1 *s5kjn1,
 	fmt->xfer_func = V4L2_XFER_FUNC_NONE;
 }
 
+static void s5kjn1_update_pdaf_format(const struct s5kjn1_mode *mode,
+				      struct v4l2_mbus_framefmt *fmt)
+{
+	/* A mode without PD data keeps a nominal format for the static route */
+	const struct s5kjn1_mode *pd_mode = mode->pdaf_width ?
+					    mode : &s5kjn1_supported_modes[0];
+
+	fmt->code = MEDIA_BUS_FMT_META_10;
+	fmt->width = pd_mode->pdaf_width;
+	fmt->height = pd_mode->pdaf_height;
+	fmt->field = V4L2_FIELD_NONE;
+	fmt->colorspace = V4L2_COLORSPACE_DEFAULT;
+	fmt->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
+	fmt->quantization = V4L2_QUANTIZATION_DEFAULT;
+	fmt->xfer_func = V4L2_XFER_FUNC_DEFAULT;
+}
+
+/*
+ * The image and phase detection streams each have an internal sink pad, the
+ * source of their data inside the sensor, routed to their own stream on the
+ * source pad. All four formats follow the sensor mode, which is chosen by
+ * setting the image format on the source pad.
+ */
+static void s5kjn1_update_formats(struct s5kjn1 *s5kjn1,
+				  struct v4l2_subdev_state *state,
+				  const struct v4l2_mbus_framefmt *image)
+{
+	const struct s5kjn1_mode *mode;
+	struct v4l2_mbus_framefmt *fmt;
+
+	mode = v4l2_find_nearest_size(s5kjn1_supported_modes,
+				      ARRAY_SIZE(s5kjn1_supported_modes),
+				      width, height, image->width, image->height);
+
+	*v4l2_subdev_state_get_format(state, S5KJN1_PAD_SOURCE,
+				      S5KJN1_STREAM_IMAGE) = *image;
+	*v4l2_subdev_state_get_format(state, S5KJN1_PAD_IMAGE) = *image;
+
+	fmt = v4l2_subdev_state_get_format(state, S5KJN1_PAD_PDAF);
+	s5kjn1_update_pdaf_format(mode, fmt);
+	*v4l2_subdev_state_get_format(state, S5KJN1_PAD_SOURCE,
+				      S5KJN1_STREAM_PDAF) = *fmt;
+}
+
 static int s5kjn1_set_pad_format(struct v4l2_subdev *sd,
 				 const struct v4l2_subdev_client_info *ci,
 				 struct v4l2_subdev_state *state,
@@ -1002,6 +1102,13 @@ static int s5kjn1_set_pad_format(struct v4l2_subdev *sd,
 	struct s5kjn1 *s5kjn1 = to_s5kjn1(sd);
 	s64 hblank, vblank, exposure_max;
 	const struct s5kjn1_mode *mode;
+
+	/* The mode is chosen on the source pad's image stream only */
+	if (fmt->pad != S5KJN1_PAD_SOURCE || fmt->stream != S5KJN1_STREAM_IMAGE)
+		return v4l2_subdev_get_fmt(sd, state, fmt);
+
+	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE && s5kjn1->enabled_streams)
+		return -EBUSY;
 
 	mode = v4l2_find_nearest_size(s5kjn1_supported_modes,
 				      ARRAY_SIZE(s5kjn1_supported_modes),
@@ -1035,9 +1142,15 @@ static int s5kjn1_set_pad_format(struct v4l2_subdev *sd,
 	s5kjn1->mode = mode;
 
 set_format:
-	*v4l2_subdev_state_get_format(state, 0) = fmt->format;
+	s5kjn1_update_formats(s5kjn1, state, &fmt->format);
 
 	return 0;
+}
+
+static bool s5kjn1_is_pdaf(u32 pad, u32 stream)
+{
+	return pad == S5KJN1_PAD_PDAF ||
+	       (pad == S5KJN1_PAD_SOURCE && stream == S5KJN1_STREAM_PDAF);
 }
 
 static int s5kjn1_enum_mbus_code(struct v4l2_subdev *sd,
@@ -1050,7 +1163,10 @@ static int s5kjn1_enum_mbus_code(struct v4l2_subdev *sd,
 	if (code->index > 0)
 		return -EINVAL;
 
-	code->code = s5kjn1_get_format_code(s5kjn1);
+	if (s5kjn1_is_pdaf(code->pad, code->stream))
+		code->code = MEDIA_BUS_FMT_META_10;
+	else
+		code->code = s5kjn1_get_format_code(s5kjn1);
 
 	return 0;
 }
@@ -1060,6 +1176,21 @@ static int s5kjn1_enum_frame_size(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_frame_size_enum *fse)
 {
 	struct s5kjn1 *s5kjn1 = to_s5kjn1(sd);
+
+	if (s5kjn1_is_pdaf(fse->pad, fse->stream)) {
+		struct v4l2_mbus_framefmt fmt;
+
+		if (fse->index > 0 || fse->code != MEDIA_BUS_FMT_META_10)
+			return -EINVAL;
+
+		s5kjn1_update_pdaf_format(&s5kjn1_supported_modes[0], &fmt);
+		fse->min_width = fmt.width;
+		fse->max_width = fmt.width;
+		fse->min_height = fmt.height;
+		fse->max_height = fmt.height;
+
+		return 0;
+	}
 
 	if (fse->index >= ARRAY_SIZE(s5kjn1_supported_modes))
 		return -EINVAL;
@@ -1100,19 +1231,84 @@ static int s5kjn1_get_selection(struct v4l2_subdev *sd,
 	return 0;
 }
 
+static int s5kjn1_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
+				 struct v4l2_mbus_frame_desc *fd)
+{
+	struct s5kjn1 *s5kjn1 = to_s5kjn1(sd);
+	struct v4l2_subdev_state *state;
+	u32 code;
+
+	if (pad != S5KJN1_PAD_SOURCE)
+		return -EINVAL;
+
+	state = v4l2_subdev_lock_and_get_active_state(sd);
+	code = v4l2_subdev_state_get_format(state, S5KJN1_PAD_SOURCE,
+					    S5KJN1_STREAM_IMAGE)->code;
+	v4l2_subdev_unlock_state(state);
+
+	fd->type = V4L2_MBUS_FRAME_DESC_TYPE_CSI2;
+	fd->num_entries = 1;
+
+	fd->entry[0].pixelcode = code;
+	fd->entry[0].stream = S5KJN1_STREAM_IMAGE;
+	fd->entry[0].bus.csi2.vc = 0;
+	fd->entry[0].bus.csi2.dt = MIPI_CSI2_DT_RAW10;
+
+	if (!s5kjn1->mode->pdaf_width)
+		return 0;
+
+	fd->num_entries = 2;
+	fd->entry[1].pixelcode = MEDIA_BUS_FMT_META_10;
+	fd->entry[1].stream = S5KJN1_STREAM_PDAF;
+	fd->entry[1].bus.csi2.vc = S5KJN1_PDAF_VC;
+	fd->entry[1].bus.csi2.dt = S5KJN1_PDAF_DT;
+
+	return 0;
+}
+
 static int s5kjn1_init_state(struct v4l2_subdev *sd,
 			     struct v4l2_subdev_state *state)
 {
 	struct s5kjn1 *s5kjn1 = to_s5kjn1(sd);
+	struct v4l2_subdev_route routes[] = {
+		{
+			.sink_pad = S5KJN1_PAD_IMAGE,
+			.sink_stream = 0,
+			.source_pad = S5KJN1_PAD_SOURCE,
+			.source_stream = S5KJN1_STREAM_IMAGE,
+			.flags = V4L2_SUBDEV_ROUTE_FL_ACTIVE |
+				 V4L2_SUBDEV_ROUTE_FL_IMMUTABLE |
+				 V4L2_SUBDEV_ROUTE_FL_STATIC,
+		}, {
+			.sink_pad = S5KJN1_PAD_PDAF,
+			.sink_stream = 0,
+			.source_pad = S5KJN1_PAD_SOURCE,
+			.source_stream = S5KJN1_STREAM_PDAF,
+			.flags = V4L2_SUBDEV_ROUTE_FL_ACTIVE |
+				 V4L2_SUBDEV_ROUTE_FL_IMMUTABLE |
+				 V4L2_SUBDEV_ROUTE_FL_STATIC,
+		},
+	};
+	struct v4l2_subdev_krouting routing = {
+		.len_routes = ARRAY_SIZE(routes),
+		.num_routes = ARRAY_SIZE(routes),
+		.routes = routes,
+	};
 	struct v4l2_subdev_format fmt = {
 		.which = V4L2_SUBDEV_FORMAT_TRY,
-		.pad = 0,
+		.pad = S5KJN1_PAD_SOURCE,
+		.stream = S5KJN1_STREAM_IMAGE,
 		.format = {
 			/* Media bus code depends on current flip controls */
 			.width = s5kjn1->mode->width,
 			.height = s5kjn1->mode->height,
 		},
 	};
+	int ret;
+
+	ret = v4l2_subdev_set_routing(sd, state, &routing);
+	if (ret)
+		return ret;
 
 	s5kjn1_set_pad_format(sd, NULL, state, &fmt);
 
@@ -1129,6 +1325,7 @@ static const struct v4l2_subdev_pad_ops s5kjn1_pad_ops = {
 	.get_selection = s5kjn1_get_selection,
 	.enum_mbus_code = s5kjn1_enum_mbus_code,
 	.enum_frame_size = s5kjn1_enum_frame_size,
+	.get_frame_desc = s5kjn1_get_frame_desc,
 	.enable_streams = s5kjn1_enable_streams,
 	.disable_streams = s5kjn1_disable_streams,
 };
@@ -1404,12 +1601,17 @@ static int s5kjn1_probe(struct i2c_client *client)
 
 	s5kjn1->sd.state_lock = s5kjn1->ctrl_handler.lock;
 	s5kjn1->sd.internal_ops = &s5kjn1_internal_ops;
-	s5kjn1->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+	s5kjn1->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_STREAMS;
 	s5kjn1->sd.entity.ops = &s5kjn1_subdev_entity_ops;
 	s5kjn1->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
-	s5kjn1->pad.flags = MEDIA_PAD_FL_SOURCE;
+	s5kjn1->pads[S5KJN1_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
+	s5kjn1->pads[S5KJN1_PAD_IMAGE].flags = MEDIA_PAD_FL_SINK |
+					       MEDIA_PAD_FL_INTERNAL;
+	s5kjn1->pads[S5KJN1_PAD_PDAF].flags = MEDIA_PAD_FL_SINK |
+					      MEDIA_PAD_FL_INTERNAL;
 
-	ret = media_entity_pads_init(&s5kjn1->sd.entity, 1, &s5kjn1->pad);
+	ret = media_entity_pads_init(&s5kjn1->sd.entity, S5KJN1_NUM_PADS,
+				     s5kjn1->pads);
 	if (ret) {
 		dev_err_probe(s5kjn1->dev, ret,
 			      "failed to init media entity pads\n");
