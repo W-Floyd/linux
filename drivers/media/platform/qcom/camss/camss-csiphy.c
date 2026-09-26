@@ -850,6 +850,85 @@ static int csiphy_link_setup(struct media_entity *entity,
 	return 0;
 }
 
+static const struct v4l2_mbus_framefmt csiphy_default_format = {
+	.code = MEDIA_BUS_FMT_UYVY8_1X16,
+	.width = 1920,
+	.height = 1080,
+	.field = V4L2_FIELD_NONE,
+	.colorspace = V4L2_COLORSPACE_SRGB,
+};
+
+/*
+ * csiphy_streams_sync_fmt - Mirror stream 0 of the active state into
+ *			     csiphy->fmt[]
+ * @csiphy: CSIPHY device
+ * @state: Active V4L2 subdevice state
+ *
+ * With the streams API the formats live in the subdev state, one per stream.
+ * The hardware code reads csiphy->fmt[] (the sink format's bits per pixel
+ * sets the lane rate), so keep it in step with stream 0.
+ */
+static void csiphy_streams_sync_fmt(struct csiphy_device *csiphy,
+				    struct v4l2_subdev_state *state)
+{
+	struct v4l2_mbus_framefmt *fmt;
+
+	fmt = v4l2_subdev_state_get_format(state, MSM_CSIPHY_PAD_SINK, 0);
+	if (fmt)
+		csiphy->fmt[MSM_CSIPHY_PAD_SINK] = *fmt;
+
+	fmt = v4l2_subdev_state_get_format(state, MSM_CSIPHY_PAD_SRC, 0);
+	if (fmt)
+		csiphy->fmt[MSM_CSIPHY_PAD_SRC] = *fmt;
+}
+
+/*
+ * csiphy_streams_set_format - Set the format of one stream
+ * @sd: CSIPHY V4L2 subdevice
+ * @ci: V4L2 subdevice client info
+ * @state: V4L2 subdevice state
+ * @fmt: pointer to v4l2 subdev format structure
+ *
+ * Each sink stream keeps its own format, and the CSIPHY passes it through
+ * unchanged to the source stream it is routed to. Source formats cannot be
+ * set on their own.
+ *
+ * Return 0 on success or a negative error code otherwise
+ */
+static int csiphy_streams_set_format(struct v4l2_subdev *sd,
+				     const struct v4l2_subdev_client_info *ci,
+				     struct v4l2_subdev_state *state,
+				     struct v4l2_subdev_format *fmt)
+{
+	struct csiphy_device *csiphy = v4l2_get_subdevdata(sd);
+	struct v4l2_mbus_framefmt *format;
+
+	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE &&
+	    csiphy->enabled_streams[MSM_CSIPHY_PAD_SINK])
+		return -EBUSY;
+
+	if (fmt->pad == MSM_CSIPHY_PAD_SRC)
+		return v4l2_subdev_get_fmt(sd, state, fmt);
+
+	format = v4l2_subdev_state_get_format(state, fmt->pad, fmt->stream);
+	if (!format)
+		return -EINVAL;
+
+	csiphy_try_format(csiphy, state, MSM_CSIPHY_PAD_SINK, &fmt->format,
+			  fmt->which);
+	*format = fmt->format;
+
+	format = v4l2_subdev_state_get_opposite_stream_format(state, fmt->pad,
+							      fmt->stream);
+	if (format)
+		*format = fmt->format;
+
+	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
+		csiphy_streams_sync_fmt(csiphy, state);
+
+	return 0;
+}
+
 static int csiphy_init_state(struct v4l2_subdev *sd,
 			     struct v4l2_subdev_state *state)
 {
@@ -875,7 +954,8 @@ static int csiphy_init_state(struct v4l2_subdev *sd,
 	 * multi-VC sensor is supported by userspace adding further routes via
 	 * .set_routing; this default covers the common single-VC case.
 	 */
-	return v4l2_subdev_set_routing(sd, state, &routing);
+	return v4l2_subdev_set_routing_with_fmt(sd, state, &routing,
+						&csiphy_default_format);
 }
 
 /*
@@ -912,7 +992,15 @@ static int csiphy_set_routing(struct v4l2_subdev *sd,
 	if (ret)
 		return ret;
 
-	return v4l2_subdev_set_routing(sd, state, routing);
+	ret = v4l2_subdev_set_routing_with_fmt(sd, state, routing,
+					       &csiphy_default_format);
+	if (ret)
+		return ret;
+
+	if (which == V4L2_SUBDEV_FORMAT_ACTIVE)
+		csiphy_streams_sync_fmt(csiphy, state);
+
+	return 0;
 }
 
 static const struct v4l2_subdev_core_ops csiphy_core_ops = {
@@ -939,8 +1027,8 @@ static const struct v4l2_subdev_ops csiphy_v4l2_ops = {
 static const struct v4l2_subdev_pad_ops csiphy_streams_pad_ops = {
 	.enum_mbus_code = csiphy_enum_mbus_code,
 	.enum_frame_size = csiphy_enum_frame_size,
-	.get_fmt = csiphy_get_format,
-	.set_fmt = csiphy_set_format,
+	.get_fmt = v4l2_subdev_get_fmt,
+	.set_fmt = csiphy_streams_set_format,
 	.get_frame_desc = v4l2_subdev_get_frame_desc_passthrough,
 	.set_routing = csiphy_set_routing,
 	.enable_streams = csiphy_pad_enable_streams,
