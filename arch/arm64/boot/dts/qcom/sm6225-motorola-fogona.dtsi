@@ -1714,6 +1714,19 @@
 	};
 
 	/*
+	 * The rear module's calibration EEPROM (the vendor blob's
+	 * mot_gt24p256c_s5kjns_eeprom at 8-bit 0xa0): per-unit focus
+	 * actuator codes and calibration points, white balance, lens
+	 * shading and PDAF data, in Motorola's layout. Read-only.
+	 */
+	eeprom@50 {
+		compatible = "giantec,gt24p256c", "atmel,24c256";
+		reg = <0x50>;
+		vcc-supply = <&camera_ldo_iovdd>;
+		read-only;
+	};
+
+	/*
 	 * An S5KJNS, not the S5KJN1 the module part number suggests: the
 	 * silicon reports model id 0x38ee and the vendor's own sensormodule
 	 * blob declares the same. It shares the S5KJN1's register map -- the
