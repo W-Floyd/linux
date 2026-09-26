@@ -1,0 +1,109 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/*
+ * Motorola Moto G Play (2024) -- "fogona", as a LinuxBoot stage.
+ *
+ * This tree is linked into a kernel that ABL starts directly from boot_a
+ * (CONFIG_BUILTIN_DTB), with a u-root initramfs built in. u-root finds the
+ * real kernel on the rootfs and kexecs it. The stage leaves the hardware it
+ * does not need as ABL left it, so that the next kernel finds it that way
+ * rather than as a first kernel left it: kexec runs each driver's shutdown
+ * hook at most, and none of the remote processors has one.
+ *
+ * What runs: the display, the microSD slot, USB, the PMIC keys, and what
+ * those depend on (RPM, the apps SMMU, TLMM).
+ *
+ * Copyright (c) 2026 William Floyd
+ */
+
+#include "sm6225-motorola-fogona-icnl9916c.dts"
+
+/ {
+	model = "Motorola Moto G Play (2024) (LinuxBoot)";
+
+	chosen {
+		/*
+		 * Nothing fills this in under CONFIG_BUILTIN_DTB. The held
+		 * hardware below has no driver to claim its clocks, power
+		 * domains and supplies, and the unused-resource cleanup would
+		 * switch them off under it: hence the *_ignore_unused. panic=5
+		 * so that a stage that falls over reboots rather than hangs.
+		 */
+		bootargs = "console=tty0 loglevel=7 ignore_loglevel fbcon=map:0,font:6x10 clk_ignore_unused pd_ignore_unused regulator_ignore_unused panic=5 androidboot.slot_suffix=_a";
+	};
+
+	/*
+	 * The ranges ABL writes into its own tree, copied from the live stock
+	 * tree (out/stockdt/stock.dtb), as on exp-direct-boot. u-root copies
+	 * these into the next kernel's tree, as U-Boot does.
+	 */
+	/delete-node/ memory@80000000;
+
+	memory@40000000 {
+		device_type = "memory";
+		reg = <0x0 0x40000000 0x0 0x3dd00000>,
+		      <0x0 0x80000000 0x0 0xc0000000>;
+	};
+};
+
+/*
+ * Held, not disabled. These keep their status but get a compatible nothing
+ * matches, so no driver touches the hardware -- and they stay consumers
+ * that never bind. fw_devlink's default strict sync_state policy then
+ * keeps rpmpd, the interconnect providers and the GDSCs they use at the
+ * boot-time maximums ABL left, for as long as the stage runs.
+ *
+ * Disabled instead, they would stop being consumers: sync_state would fire
+ * as soon as the rest had probed and drop VDDCX and the interconnects to
+ * what the stage's own drivers vote for, while the hardware ABL started
+ * keeps running at its rates -- a state the next kernel would then inherit.
+ */
+&ufs_mem_hc { compatible = "fogona,linuxboot-held"; };
+&ufs_mem_phy { compatible = "fogona,linuxboot-held"; };
+&remoteproc_mpss { compatible = "fogona,linuxboot-held"; };
+&remoteproc_adsp { compatible = "fogona,linuxboot-held"; };
+&remoteproc_cdsp { compatible = "fogona,linuxboot-held"; };
+&ipa { compatible = "fogona,linuxboot-held"; };
+&wifi { compatible = "fogona,linuxboot-held"; };
+
+/*
+ * MDSS is not held: msm drives the panel here as in pmOS. On simplefb alone
+ * the splash went black a few seconds into boot, held or not, for a reason
+ * not found; with msm the stage has a console.
+ */
+&gpu { compatible = "fogona,linuxboot-held"; };
+&gmu_wrapper { compatible = "fogona,linuxboot-held"; };
+&venus { compatible = "fogona,linuxboot-held"; };
+&camss { compatible = "fogona,linuxboot-held"; };
+
+/* Rides on the ADSP, which is held. */
+&q6apmbedai { status = "disabled"; };
+&rxmacro { status = "disabled"; };
+&txmacro { status = "disabled"; };
+&vamacro { status = "disabled"; };
+&swr0 { status = "disabled"; };
+&swr1 { status = "disabled"; };
+
+/* The GPU's SMMU and the camera's I2C. */
+&adreno_smmu { status = "disabled"; };
+&cci { status = "disabled"; };
+
+/* Touch (shares the panel), Bluetooth, the amplifiers and the gauge. */
+&spi0 { status = "disabled"; };
+&uart3 { status = "disabled"; };
+&i2c2 { status = "disabled"; };
+
+/*
+ * i2c1 stays enabled for the Type-C chip alone; the charger and the PA
+ * boost on it are left as ABL set them. The gadget does not need it --
+ * dwc3 starts in the device role -- and with geni I2C built as a module
+ * nothing on this bus probes in the stage at all.
+ */
+&i2c1 {
+	charger@6a {
+		status = "disabled";
+	};
+
+	regulator@75 {
+		status = "disabled";
+	};
+};
