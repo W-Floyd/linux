@@ -2519,6 +2519,29 @@ config CMDLINE_FORCE
 
 endchoice
 
+config BUILTIN_DTB
+	bool "Use a device tree built into the kernel image"
+	depends on OF
+	select GENERIC_BUILTIN_DTB
+	help
+	  Link the device tree named by BUILTIN_DTB_NAME into the kernel
+	  image and use it instead of the one the boot loader passes in x0,
+	  which is ignored.
+
+	  For boot loaders that insist on handing the kernel their own
+	  device tree and cannot be told otherwise, such as some Qualcomm
+	  Android boot loaders. The built-in tree must then describe
+	  everything the boot loader would normally fill in: /memory,
+	  /chosen/bootargs and so on. Say N unless you know you need it.
+
+config BUILTIN_DTB_NAME
+	string "Built-in device tree source"
+	depends on BUILTIN_DTB
+	help
+	  DTS file path, without the suffix and relative to
+	  arch/arm64/boot/dts, for the device tree linked into the kernel,
+	  for example "qcom/sm6225-motorola-fogona-icnl9916c".
+
 config EFI_STUB
 	bool
 
