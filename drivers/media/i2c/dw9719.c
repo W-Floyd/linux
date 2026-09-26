@@ -313,6 +313,15 @@ static int dw9719_resume(struct device *dev)
 		usleep_range(DW9719_CTRL_DELAY_US, DW9719_CTRL_DELAY_US + 10);
 	}
 
+	/*
+	 * The ramp stops one step short, and writes nothing at all for a
+	 * position below one step; the chip's reset value is not
+	 * necessarily 0.
+	 */
+	ret = dw9719_t_focus_abs(dw9719, current_focus);
+	if (ret)
+		goto err_power_down;
+
 	return 0;
 
 err_power_down:
