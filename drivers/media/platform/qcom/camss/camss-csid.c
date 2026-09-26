@@ -1611,6 +1611,9 @@ static const struct v4l2_mbus_framefmt csid_default_format = {
 	.colorspace = V4L2_COLORSPACE_SRGB,
 };
 
+static void csid_streams_sync_fmt(struct csid_device *csid,
+				  struct v4l2_subdev_state *state);
+
 /*
  * csid_set_routing - Handle setting of routing table
  * @sd: CSID V4L2 subdevice
@@ -1643,67 +1646,51 @@ static int csid_set_routing(struct v4l2_subdev *sd,
 	if (ret)
 		return ret;
 
-	return v4l2_subdev_set_routing_with_fmt(sd, state, routing, &csid_default_format);
-}
+	ret = v4l2_subdev_set_routing_with_fmt(sd, state, routing, &csid_default_format);
+	if (ret)
+		return ret;
 
-/*
- * __csid_get_stream_format - Get pointer to per-stream format structure
- * @csid: CSID device
- * @sd_state: V4L2 subdev state
- * @pad: pad from which format is requested
- * @stream: stream from which format is requested
- * @which: TRY or ACTIVE format
- *
- * Same as __csid_get_format(), but honors @stream for TRY-state lookups.
- * For ACTIVE state, csid->fmt[] is indexed by pad + stream. @stream is
- * always 0 and @pad selects the RDI channel (0-3).
- *
- * Return pointer to TRY or ACTIVE format structure
- */
-static struct v4l2_mbus_framefmt *
-__csid_get_stream_format(struct csid_device *csid,
-			 struct v4l2_subdev_state *sd_state,
-			 unsigned int pad, u32 stream,
-			 enum v4l2_subdev_format_whence which)
-{
-	if (which == V4L2_SUBDEV_FORMAT_TRY)
-		return v4l2_subdev_state_get_format(sd_state, pad, stream);
-
-	if (pad == MSM_CSID_PAD_SINK)
-		return &csid->fmt[MSM_CSID_PAD_SINK];
-
-	return &csid->fmt[pad + stream];
-}
-
-/*
- * csid_streams_get_format - Handle get format by pads subdev method
- * @sd: CSID V4L2 subdevice
- * @sd_state: V4L2 subdev state
- * @fmt: pointer to v4l2 subdev format structure
- *
- * Return -EINVAL or zero on success
- */
-static int csid_streams_get_format(struct v4l2_subdev *sd,
-				   struct v4l2_subdev_state *sd_state,
-				   struct v4l2_subdev_format *fmt)
-{
-	struct csid_device *csid = v4l2_get_subdevdata(sd);
-	struct v4l2_mbus_framefmt *format;
-
-	format = __csid_get_stream_format(csid, sd_state, fmt->pad, fmt->stream, fmt->which);
-	if (!format)
-		return -EINVAL;
-
-	fmt->format = *format;
+	if (which == V4L2_SUBDEV_FORMAT_ACTIVE)
+		csid_streams_sync_fmt(csid, state);
 
 	return 0;
 }
 
 /*
+ * csid_streams_sync_fmt - Mirror the active state's formats into csid->fmt[]
+ * @csid: CSID device
+ * @state: Active V4L2 subdevice state
+ *
+ * With the streams API the formats live in the subdev state, one per stream.
+ * The hardware code reads csid->fmt[]: the sink format (for the clock rate)
+ * and each source pad's format (for the data type and decode format of its
+ * RDI or PIX port). Every source pad carries a single stream, so stream 0 of
+ * each pad is what the hardware sees.
+ */
+static void csid_streams_sync_fmt(struct csid_device *csid,
+				  struct v4l2_subdev_state *state)
+{
+	struct v4l2_mbus_framefmt *fmt;
+	unsigned int i;
+
+	for (i = 0; i < csid->subdev.entity.num_pads; i++) {
+		fmt = v4l2_subdev_state_get_format(state, i, 0);
+		if (fmt)
+			csid->fmt[i] = *fmt;
+	}
+}
+
+/*
  * csid_streams_set_format - Handle set format by pads subdev method
  * @sd: CSID V4L2 subdevice
+ * @ci: V4L2 subdevice client info
  * @sd_state: V4L2 subdev state
  * @fmt: pointer to v4l2 subdev format structure
+ *
+ * Every sink stream has a format of its own (a multi-stream source such as a
+ * sensor sending image data and phase detection data on two data types),
+ * which is propagated unchanged to the source streams it is routed to.
+ * Source formats follow their sink stream and cannot be set on their own.
  *
  * Return -EINVAL or zero on success
  */
@@ -1719,7 +1706,10 @@ static int csid_streams_set_format(struct v4l2_subdev *sd,
 	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE && csid->enabled_streams[MSM_CSID_PAD_SINK])
 		return -EBUSY;
 
-	format = __csid_get_stream_format(csid, sd_state, fmt->pad, fmt->stream, fmt->which);
+	if (fmt->pad != MSM_CSID_PAD_SINK)
+		return v4l2_subdev_get_fmt(sd, sd_state, fmt);
+
+	format = v4l2_subdev_state_get_format(sd_state, fmt->pad, fmt->stream);
 	if (!format)
 		return -EINVAL;
 
@@ -1733,14 +1723,14 @@ static int csid_streams_set_format(struct v4l2_subdev *sd,
 		if (route->sink_pad != fmt->pad || route->sink_stream != fmt->stream)
 			continue;
 
-		src_format = __csid_get_stream_format(csid, sd_state, route->source_pad,
-						      route->source_stream, fmt->which);
-		if (!src_format)
-			continue;
-
-		*src_format = fmt->format;
-		csid_try_format(csid, sd_state, route->source_pad, src_format, fmt->which);
+		src_format = v4l2_subdev_state_get_format(sd_state, route->source_pad,
+							  route->source_stream);
+		if (src_format)
+			*src_format = fmt->format;
 	}
+
+	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
+		csid_streams_sync_fmt(csid, sd_state);
 
 	return 0;
 }
@@ -1748,7 +1738,7 @@ static int csid_streams_set_format(struct v4l2_subdev *sd,
 static const struct v4l2_subdev_pad_ops csid_streams_pad_ops = {
 	.enum_mbus_code = csid_enum_mbus_code,
 	.enum_frame_size = csid_enum_frame_size,
-	.get_fmt = csid_streams_get_format,
+	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = csid_streams_set_format,
 	.set_routing = csid_set_routing,
 	.enable_streams = csid_pad_enable_streams,
