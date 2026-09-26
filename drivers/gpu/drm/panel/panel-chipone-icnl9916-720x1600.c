@@ -38,6 +38,8 @@ struct icnl9916_panel_desc {
 	unsigned int num_supplies;
 	/* Brightness is set with DCS rather than by a separate backlight. */
 	bool dcs_backlight;
+	/* The 0x0a power mode the on-sequence ends in; 0 to not check. */
+	u8 on_power_mode;
 };
 
 struct icnl9916_panel {
@@ -276,6 +278,35 @@ static int icnl9916c_tm_panel_off(struct mipi_dsi_device *dsi)
 	return dsi_ctx.accum_err;
 }
 
+/*
+ * Reset the panel and run its on-sequence, then, where the panel's
+ * description gives the power mode it should end in, read 0x0a back and
+ * count anything else as a failed init. In LP mode a write that returns 0
+ * was only transmitted, not taken; stock checks the same register, for
+ * the same reason, as its ESD check.
+ */
+static int icnl9916_panel_init(struct icnl9916_panel *ctx)
+{
+	struct device *dev = &ctx->dsi->dev;
+	u8 mode = 0;
+	int ret;
+
+	ctx->desc->reset(ctx->reset);
+	ret = ctx->desc->on(ctx->dsi);
+	if (ret < 0 || !ctx->desc->on_power_mode)
+		return ret;
+
+	ret = mipi_dsi_dcs_get_power_mode(ctx->dsi, &mode);
+	if (ret < 0)
+		return ret;
+	if (mode != ctx->desc->on_power_mode) {
+		dev_warn(dev, "panel did not take its init: 0x0a = %#04x, want %#04x\n",
+			 mode, ctx->desc->on_power_mode);
+		return -EIO;
+	}
+	return 0;
+}
+
 static int icnl9916_panel_prepare(struct drm_panel *panel)
 {
 	struct icnl9916_panel *ctx = to_icnl9916_panel(panel);
@@ -288,17 +319,17 @@ static int icnl9916_panel_prepare(struct drm_panel *panel)
 		return ret;
 	}
 
-	ctx->desc->reset(ctx->reset);
-
-	ret = ctx->desc->on(ctx->dsi);
+	ret = icnl9916_panel_init(ctx);
 	/*
-	 * EXPERIMENT: some boots time out (-110) on the very first command of
-	 * this sequence and never recover, which leaves the screen dark and
-	 * the fbdev client stalled on vblank
-	 * (investigations/display-vblank-boot-stall.md). Power-cycle the panel
-	 * and try again, logging each attempt: if a retry works, the panel or
-	 * the link wanted a second chance; if every attempt fails alike, the
-	 * DSI host is what is stuck.
+	 * EXPERIMENT: the panel does not always come up, in two ways, both
+	 * seen on 2026-09-26: the very first command of the sequence times out
+	 * (-110) and every transfer after it fails alike
+	 * (investigations/display-vblank-boot-stall.md); or every command goes
+	 * out without error and the panel acts on none of them -- it reads back
+	 * as just reset, asleep with its booster off (0x0a = 0x0c) -- and stays
+	 * dark. Power-cycle it and try again, logging each attempt: a retry
+	 * that works says the panel or the link wanted a second chance; every
+	 * attempt failing alike says the DSI host is what is stuck.
 	 */
 	for (int attempt = 2; ret < 0 && attempt <= 3; attempt++) {
 		dev_warn(dev, "panel init failed (%d); power-cycling for attempt %d\n",
@@ -311,8 +342,7 @@ static int icnl9916_panel_prepare(struct drm_panel *panel)
 			dev_err(dev, "Failed to enable regulators: %d\n", ret);
 			return ret;
 		}
-		ctx->desc->reset(ctx->reset);
-		ret = ctx->desc->on(ctx->dsi);
+		ret = icnl9916_panel_init(ctx);
 		dev_warn(dev, "panel init attempt %d: %d\n", attempt, ret);
 	}
 	if (ret < 0) {
@@ -445,6 +475,8 @@ static const struct icnl9916_panel_desc icnl9916c_tm_panel_desc = {
 	.supplies = icnl9916c_tm_supplies,
 	.num_supplies = ARRAY_SIZE(icnl9916c_tm_supplies),
 	.dcs_backlight = true,
+	/* Booster on, sleep out, normal mode, display on. */
+	.on_power_mode = 0x9c,
 };
 
 /*
