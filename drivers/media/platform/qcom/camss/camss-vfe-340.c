@@ -298,12 +298,30 @@ static u32 vfe_packer_format(struct vfe_device *vfe, u32 pixelformat)
 	}
 }
 
+/*
+ * Line width, in the 64-bit words the RDI write master's PLAIN64 packer
+ * writes, of a line of pixelformat; 0 if the format is unknown.
+ */
+static u32 vfe_rdi_line_words(struct vfe_line *line, u32 pixelformat, u32 width)
+{
+	const struct camss_video *video = &line->video_out;
+	unsigned int i;
+
+	for (i = 0; i < video->nformats; i++)
+		if (video->formats[i].pixelformat == pixelformat)
+			return DIV_ROUND_UP(width * video->formats[i].bpp[0],
+					    BITS_PER_TYPE(u64));
+
+	return 0;
+}
+
 static void vfe_wm_start(struct vfe_device *vfe, u8 wm, struct vfe_line *line)
 {
 	struct v4l2_pix_format_mplane *pix = &line->video_out.active_fmt.fmt.pix_mp;
 	u32 stride = pix->plane_fmt[0].bytesperline;
 	u8 client = tfe_wm_client_map[wm];
 	u32 cfg = TFE_BUS_CLIENT_CFG_EN;
+	u32 words = vfe_rdi_line_words(line, pix->pixelformat, pix->width);
 
 	if (client == TFE_CLI_BAYER) { /* PIX - Line based */
 		struct v4l2_rect *crop = &line->crop;
@@ -327,6 +345,18 @@ static void vfe_wm_start(struct vfe_device *vfe, u8 wm, struct vfe_line *line)
 			       vfe->base + TFE_BUS_PACKER_CFG(client));
 
 		cfg |= TFE_BUS_CLIENT_CFG_AUTORECOVER;
+	} else if (words) {
+		/*
+		 * RDI - Line based: the width in 64-bit words and the line
+		 * stride are programmed, so lines land at bytesperline.
+		 */
+		writel_relaxed(words | (pix->height << 16),
+			       vfe->base + TFE_BUS_IMAGE_CFG_0(client));
+		writel_relaxed(0u, vfe->base + TFE_BUS_IMAGE_CFG_1(client));
+		writel_relaxed(stride, vfe->base + TFE_BUS_IMAGE_CFG_2(client));
+		writel_relaxed(stride * pix->height, vfe->base + TFE_BUS_FRAME_INCR(client));
+		writel_relaxed(TFE_BUS_PACKER_CFG_FMT_PLAIN64,
+			       vfe->base + TFE_BUS_PACKER_CFG(client));
 	} else { /* RDI - Frame based */
 		writel_relaxed(TFE_BUS_IMAGE_CFG_0_DEFAULT,
 			       vfe->base + TFE_BUS_IMAGE_CFG_0(client));
