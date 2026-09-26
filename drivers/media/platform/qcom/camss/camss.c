@@ -946,6 +946,12 @@ static const struct camss_subdev_resources csid_res_6225[] = {
 	}
 };
 
+/*
+ * "axi" is gcc_camss_axi_clk, the TFEs' write path to memory. Left alone it
+ * stays at 19.2 MHz and a full-resolution RAW10 stream overflows the CSID's
+ * RDI output FIFO; listing gcc_camss_axi_clk_src's rates has camss scale it
+ * with the pixel rate, as stock's CPAS does by bandwidth.
+ */
 static const struct camss_subdev_resources vfe_res_6225[] = {
 	/* VFE0 */
 	{
@@ -953,7 +959,7 @@ static const struct camss_subdev_resources vfe_res_6225[] = {
 		.clock = { "top_ahb", "ahb", "axi", "vfe0", "camnoc_rt_axi", "camnoc_nrt_axi" },
 		.clock_rate = { { 0 },
 				{ 0 },
-				{ 0 },
+				{ 19200000, 150000000, 240000000, 300000000 },
 				{ 19200000, 153600000, 192000000, 256000000, 384000000, 460800000 },
 				{ 0 },
 				{ 0 }, },
@@ -973,7 +979,7 @@ static const struct camss_subdev_resources vfe_res_6225[] = {
 		.clock = { "top_ahb", "ahb", "axi", "vfe1", "camnoc_rt_axi", "camnoc_nrt_axi" },
 		.clock_rate = { { 0 },
 				{ 0 },
-				{ 0 },
+				{ 19200000, 150000000, 240000000, 300000000 },
 				{ 19200000, 153600000, 192000000, 256000000, 384000000, 460800000 },
 				{ 0 },
 				{ 0 }, },
@@ -993,7 +999,7 @@ static const struct camss_subdev_resources vfe_res_6225[] = {
 		.clock = { "top_ahb", "ahb", "axi", "vfe2", "camnoc_rt_axi", "camnoc_nrt_axi" },
 		.clock_rate = { { 0 },
 				{ 0 },
-				{ 0 },
+				{ 19200000, 150000000, 240000000, 300000000 },
 				{ 19200000, 153600000, 192000000, 256000000, 384000000, 460800000 },
 				{ 0 },
 				{ 0 }, },
