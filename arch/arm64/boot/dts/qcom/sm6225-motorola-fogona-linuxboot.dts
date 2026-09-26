@@ -9,8 +9,8 @@
  * rather than as a first kernel left it: kexec runs each driver's shutdown
  * hook at most, and none of the remote processors has one.
  *
- * What runs: the display, the microSD slot, USB, the PMIC keys, and what
- * those depend on (RPM, the apps SMMU, TLMM).
+ * What runs: the display and its touchscreen, the microSD slot, USB, the
+ * PMIC keys, and what those depend on (RPM, the apps SMMU, TLMM).
  *
  * Copyright (c) 2026 William Floyd
  */
@@ -87,8 +87,16 @@
 &adreno_smmu { status = "disabled"; };
 &cci { status = "disabled"; };
 
-/* Touch (shares the panel), Bluetooth, the amplifiers and the gauge. */
-&spi0 { status = "disabled"; };
+/*
+ * Touch runs, for the recovery UI. It shares the panel's silicon (TDDI),
+ * and the driver follows the panel: the panel's power-down on the kexec
+ * handover resets the touch half too, and the next kernel's driver
+ * downloads its firmware again when its panel comes up, so nothing of the
+ * stage's touch state survives into pmOS. The firmware is in the
+ * initramfs (tools/linuxboot/build.sh).
+ */
+
+/* Bluetooth, the amplifiers and the gauge. */
 &uart3 { status = "disabled"; };
 &i2c2 { status = "disabled"; };
 
