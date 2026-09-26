@@ -83,12 +83,18 @@ static void __csid_configure_rx(struct csid_device *csid, struct csid_phy_config
 	writel_relaxed(val, csid->base + CSID_CSI2_RX_CFG1);
 }
 
-static void __csid_configure_stream(struct csid_device *csid, u8 enable, u8 port, u8 vc)
+static const struct csid_format_info *csid_port_format(struct csid_device *csid, u8 port)
 {
 	struct v4l2_mbus_framefmt *input_format = &csid->fmt[MSM_CSID_PAD_FIRST_SRC + port];
-	const struct csid_format_info *format = csid_get_fmt_entry(csid->res->formats->formats,
-								   csid->res->formats->nformats,
-								   input_format->code);
+
+	return csid_get_fmt_entry(csid->res->formats->formats,
+				  csid->res->formats->nformats,
+				  input_format->code);
+}
+
+static void __csid_configure_stream(struct csid_device *csid, u8 enable, u8 port, u8 vc, u8 dt)
+{
+	const struct csid_format_info *format = csid_port_format(csid, port);
 	enum csid_iface iface = csid_port_iface_map[port];
 
 	u8 dt_id;
@@ -129,7 +135,7 @@ static void __csid_configure_stream(struct csid_device *csid, u8 enable, u8 port
 	else /* RDI is raw, no decoding */
 		val = CSID_CFG0_DECODE_FORMAT_NOP;
 
-	val |= FIELD_PREP(CSID_CFG0_DT_MASK, format->data_type);
+	val |= FIELD_PREP(CSID_CFG0_DT_MASK, dt);
 	val |= FIELD_PREP(CSID_CFG0_VC_MASK, vc);
 	val |= FIELD_PREP(CSID_CFG0_DTID_MASK, dt_id);
 
@@ -137,7 +143,7 @@ static void __csid_configure_stream(struct csid_device *csid, u8 enable, u8 port
 		val |= CSID_CFG0_ENABLE;
 
 	dev_dbg(csid->camss->dev, "CSID%u: Stream %s (dt:0x%x df=0x%x port=%u vc=%u)\n",
-		csid->id, enable ? "enable" : "disable", format->data_type,
+		csid->id, enable ? "enable" : "disable", dt,
 		format->decode_format, port, vc);
 
 	writel_relaxed(val, csid->base + CSID_CFG0(iface));
@@ -152,8 +158,30 @@ static void csid_configure_streams(struct csid_device *csid, u8 enable)
 
 	for (i = 0; i < MSM_CSID_MAX_SRC_STREAMS; i++) {
 		if (csid->phy.en_vc & BIT(i))
-			__csid_configure_stream(csid, !!enable, i, 0);
+			__csid_configure_stream(csid, !!enable, i, 0,
+						csid_port_format(csid, i)->data_type);
 	}
+}
+
+static void csid_configure_rx(struct csid_device *csid)
+{
+	__csid_configure_rx(csid, &csid->phy);
+}
+
+/*
+ * With the streams API the virtual channel and data type of each port come
+ * from the transmitter's frame descriptor, so one CSI-2 link can feed several
+ * ports with different data: a sensor's image data to RDI0 and its phase
+ * detection data to RDI1, for instance. stream_id is the port.
+ */
+static void csid_enable_stream(struct csid_device *csid, u32 stream_id, u8 vc, u8 dt)
+{
+	__csid_configure_stream(csid, 1, stream_id, vc, dt);
+}
+
+static void csid_disable_stream(struct csid_device *csid, u32 stream_id)
+{
+	__csid_configure_stream(csid, 0, stream_id, 0, 0);
 }
 
 static int csid_reset(struct csid_device *csid)
@@ -211,6 +239,9 @@ static void csid_subdev_init(struct csid_device *csid) {}
 const struct csid_hw_ops csid_ops_340 = {
 	.configure_testgen_pattern = csid_configure_testgen_pattern,
 	.configure_stream = csid_configure_streams,
+	.configure_rx = csid_configure_rx,
+	.enable_stream = csid_enable_stream,
+	.disable_stream = csid_disable_stream,
 	.hw_version = csid_hw_version,
 	.isr = csid_isr,
 	.reset = csid_reset,
