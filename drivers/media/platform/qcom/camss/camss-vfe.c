@@ -2030,6 +2030,7 @@ static bool vfe_rdi_bpl_configurable(struct vfe_device *vfe)
 {
 	switch (vfe->camss->res->version) {
 	case CAMSS_2290:
+	case CAMSS_6225:
 		return true;
 	default:
 		return false;
