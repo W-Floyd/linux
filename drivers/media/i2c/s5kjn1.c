@@ -104,6 +104,15 @@ static const u32 s5kjn1_mbus_formats[] = {
 	MEDIA_BUS_FMT_SBGGR10_1X10,	MEDIA_BUS_FMT_SGBRG10_1X10,
 };
 
+/*
+ * Common raw sensor model: the internal image pad models the pixel array,
+ * with the colour pattern agnostic MEDIA_BUS_FMT_RAW_10 and the pattern in
+ * V4L2_CID_CFA_PATTERN. Both modes read the whole array (the 4080x3072 one
+ * bins it 2x2), so the analogue crop is the full array in either.
+ */
+#define S5KJN1_PIXEL_ARRAY_WIDTH	8160
+#define S5KJN1_PIXEL_ARRAY_HEIGHT	6144
+
 struct s5kjn1_reg_list {
 	const struct cci_reg_sequence *regs;
 	unsigned int num_regs;
@@ -862,7 +871,7 @@ static int s5kjn1_init_controls(struct s5kjn1 *s5kjn1)
 	struct v4l2_fwnode_device_properties props;
 	int ret;
 
-	v4l2_ctrl_handler_init(ctrl_hdlr, 10);
+	v4l2_ctrl_handler_init(ctrl_hdlr, 13);
 
 	s5kjn1->link_freq = v4l2_ctrl_new_int_menu(ctrl_hdlr, &s5kjn1_ctrl_ops,
 					V4L2_CID_LINK_FREQ,
@@ -911,6 +920,18 @@ static int s5kjn1_init_controls(struct s5kjn1 *s5kjn1)
 			  V4L2_METADATA_LAYOUT_S5KJN1_PDAF,
 			  V4L2_METADATA_LAYOUT_S5KJN1_PDAF, 1,
 			  V4L2_METADATA_LAYOUT_S5KJN1_PDAF);
+
+	/* Native pattern, unflipped; either flip changes it */
+	v4l2_ctrl_new_std(ctrl_hdlr, NULL, V4L2_CID_CFA_PATTERN,
+			  V4L2_CFA_PATTERN_GRBG, V4L2_CFA_PATTERN_GRBG, 1,
+			  V4L2_CFA_PATTERN_GRBG);
+	/* Bitmask controls: minimum and step 0 */
+	v4l2_ctrl_new_std(ctrl_hdlr, NULL, V4L2_CID_CFA_PATTERN_FLIP,
+			  0, V4L2_CFA_PATTERN_FLIP_BOTH, 0,
+			  V4L2_CFA_PATTERN_FLIP_BOTH);
+	v4l2_ctrl_new_std(ctrl_hdlr, NULL, V4L2_CID_CONFIG_MODEL,
+			  0, V4L2_CONFIG_MODEL_COMMON_RAW_SENSOR, 0,
+			  V4L2_CONFIG_MODEL_COMMON_RAW_SENSOR);
 
 	s5kjn1->hflip = v4l2_ctrl_new_std(ctrl_hdlr, &s5kjn1_ctrl_ops,
 					  V4L2_CID_HFLIP, 0, 1, 1, 0);
@@ -1045,11 +1066,13 @@ static u32 s5kjn1_get_format_code(struct s5kjn1 *s5kjn1)
 	return s5kjn1_mbus_formats[i];
 }
 
+/* The source's image stream offers the flip-dependent code and RAW_10 */
 static void s5kjn1_update_pad_format(struct s5kjn1 *s5kjn1,
 				     const struct s5kjn1_mode *mode,
 				     struct v4l2_mbus_framefmt *fmt)
 {
-	fmt->code = s5kjn1_get_format_code(s5kjn1);
+	if (fmt->code != MEDIA_BUS_FMT_RAW_10)
+		fmt->code = s5kjn1_get_format_code(s5kjn1);
 	fmt->width = mode->width;
 	fmt->height = mode->height;
 	fmt->field = V4L2_FIELD_NONE;
@@ -1095,7 +1118,14 @@ static void s5kjn1_update_formats(struct s5kjn1 *s5kjn1,
 
 	*v4l2_subdev_state_get_format(state, S5KJN1_PAD_SOURCE,
 				      S5KJN1_STREAM_IMAGE) = *image;
-	*v4l2_subdev_state_get_format(state, S5KJN1_PAD_IMAGE) = *image;
+
+	/* The image pad models the pixel array, and has a fixed format */
+	fmt = v4l2_subdev_state_get_format(state, S5KJN1_PAD_IMAGE);
+	*fmt = *image;
+	fmt->code = MEDIA_BUS_FMT_RAW_10;
+	fmt->width = S5KJN1_PIXEL_ARRAY_WIDTH;
+	fmt->height = S5KJN1_PIXEL_ARRAY_HEIGHT;
+	fmt->colorspace = V4L2_COLORSPACE_RAW;
 
 	fmt = v4l2_subdev_state_get_format(state, S5KJN1_PAD_PDAF);
 	s5kjn1_update_pdaf_format(mode, fmt);
@@ -1168,16 +1198,31 @@ static int s5kjn1_enum_mbus_code(struct v4l2_subdev *sd,
 {
 	struct s5kjn1 *s5kjn1 = to_s5kjn1(sd);
 
-	/* Media bus code index is constant, but code formats are not */
-	if (code->index > 0)
-		return -EINVAL;
-
-	if (s5kjn1_is_pdaf(code->pad, code->stream))
+	if (s5kjn1_is_pdaf(code->pad, code->stream)) {
+		if (code->index > 0)
+			return -EINVAL;
 		code->code = MEDIA_BUS_FMT_META_10;
-	else
-		code->code = s5kjn1_get_format_code(s5kjn1);
+		return 0;
+	}
 
-	return 0;
+	if (code->pad == S5KJN1_PAD_IMAGE) {
+		if (code->index > 0)
+			return -EINVAL;
+		code->code = MEDIA_BUS_FMT_RAW_10;
+		return 0;
+	}
+
+	/* The index is constant, but the first code follows the flips */
+	switch (code->index) {
+	case 0:
+		code->code = s5kjn1_get_format_code(s5kjn1);
+		return 0;
+	case 1:
+		code->code = MEDIA_BUS_FMT_RAW_10;
+		return 0;
+	default:
+		return -EINVAL;
+	}
 }
 
 static int s5kjn1_enum_frame_size(struct v4l2_subdev *sd,
@@ -1201,10 +1246,23 @@ static int s5kjn1_enum_frame_size(struct v4l2_subdev *sd,
 		return 0;
 	}
 
+	if (fse->pad == S5KJN1_PAD_IMAGE) {
+		if (fse->index > 0 || fse->code != MEDIA_BUS_FMT_RAW_10)
+			return -EINVAL;
+
+		fse->min_width = S5KJN1_PIXEL_ARRAY_WIDTH;
+		fse->max_width = S5KJN1_PIXEL_ARRAY_WIDTH;
+		fse->min_height = S5KJN1_PIXEL_ARRAY_HEIGHT;
+		fse->max_height = S5KJN1_PIXEL_ARRAY_HEIGHT;
+
+		return 0;
+	}
+
 	if (fse->index >= ARRAY_SIZE(s5kjn1_supported_modes))
 		return -EINVAL;
 
-	if (fse->code != s5kjn1_get_format_code(s5kjn1))
+	if (fse->code != s5kjn1_get_format_code(s5kjn1) &&
+	    fse->code != MEDIA_BUS_FMT_RAW_10)
 		return -EINVAL;
 
 	fse->min_width = s5kjn1_supported_modes[fse->index].width;
@@ -1220,24 +1278,28 @@ static int s5kjn1_get_selection(struct v4l2_subdev *sd,
 				struct v4l2_subdev_state *sd_state,
 				struct v4l2_subdev_selection *sel)
 {
-	struct s5kjn1 *s5kjn1 = to_s5kjn1(sd);
-
-	if (sel->which != V4L2_SUBDEV_FORMAT_ACTIVE)
+	/*
+	 * Only the image has selection rectangles: on the internal image pad
+	 * (the common raw sensor model) and, for older clients, on the
+	 * source pad's image stream. Neither can be changed: each mode reads
+	 * the whole pixel array.
+	 */
+	if (s5kjn1_is_pdaf(sel->pad, sel->stream))
 		return -EINVAL;
 
 	switch (sel->target) {
-	case V4L2_SEL_TGT_CROP:
+	case V4L2_SEL_TGT_NATIVE_SIZE:
 	case V4L2_SEL_TGT_CROP_BOUNDS:
+	case V4L2_SEL_TGT_CROP_DEFAULT:
+	case V4L2_SEL_TGT_CROP:
 		sel->r.left = 0;
 		sel->r.top = 0;
-		sel->r.width = s5kjn1->mode->width;
-		sel->r.height = s5kjn1->mode->width;
+		sel->r.width = S5KJN1_PIXEL_ARRAY_WIDTH;
+		sel->r.height = S5KJN1_PIXEL_ARRAY_HEIGHT;
 		return 0;
 	default:
 		return -EINVAL;
 	}
-
-	return 0;
 }
 
 static int s5kjn1_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
