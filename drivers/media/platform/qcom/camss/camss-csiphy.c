@@ -91,6 +91,9 @@ static const struct csiphy_format_info formats_sdm845[] = {
 	{ MEDIA_BUS_FMT_SRGGB14_1X14, 14 },
 	{ MEDIA_BUS_FMT_Y8_1X8, 8 },
 	{ MEDIA_BUS_FMT_Y10_1X10, 10 },
+	{ MEDIA_BUS_FMT_META_8, 8 },
+	{ MEDIA_BUS_FMT_META_10, 10 },
+	{ MEDIA_BUS_FMT_META_12, 12 },
 };
 
 const struct csiphy_formats csiphy_formats_8x16 = {
