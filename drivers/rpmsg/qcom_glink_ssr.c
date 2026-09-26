@@ -5,11 +5,13 @@
  */
 
 #include <linux/completion.h>
+#include <linux/kexec.h>
 #include <linux/module.h>
 #include <linux/notifier.h>
 #include <linux/rpmsg.h>
 #include <linux/rpmsg/qcom_glink.h>
 #include <linux/remoteproc/qcom_rproc.h>
+#include <linux/syscore_ops.h>
 
 /**
  * struct do_cleanup_msg - The data structure for an SSR do_cleanup message
@@ -58,13 +60,22 @@ struct glink_ssr {
 /* Notifier list for all registered glink_ssr instances */
 static BLOCKING_NOTIFIER_HEAD(ssr_notifiers);
 
+/* Notifier events: a remoteproc stopped, or this processor is kexecing */
+#define GLINK_SSR_EVENT_REMOTE_STOPPED	0
+#define GLINK_SSR_EVENT_KEXEC		1
+
+/* G-Link edge name of the application processor itself */
+#define GLINK_SSR_APSS_NAME		"apss"
+
 /**
  * qcom_glink_ssr_notify() - notify GLINK SSR about stopped remoteproc
  * @ssr_name:	name of the remoteproc that has been stopped
  */
 void qcom_glink_ssr_notify(const char *ssr_name)
 {
-	blocking_notifier_call_chain(&ssr_notifiers, 0, (void *)ssr_name);
+	blocking_notifier_call_chain(&ssr_notifiers,
+				     GLINK_SSR_EVENT_REMOTE_STOPPED,
+				     (void *)ssr_name);
 }
 EXPORT_SYMBOL_GPL(qcom_glink_ssr_notify);
 
@@ -117,8 +128,16 @@ static int qcom_glink_ssr_notifier_call(struct notifier_block *nb,
 	if (ret < 0)
 		dev_err(ssr->dev, "failed to send cleanup message\n");
 
+	/*
+	 * RPM acts on a do_cleanup for "apss" but does not answer it: it tears
+	 * down its side of our edge, which leaves no channel to answer on.
+	 * The wait still gives it time to do so before the next kernel starts
+	 * talking to it, so keep it, but a timeout is expected there.
+	 */
 	ret = wait_for_completion_timeout(&ssr->completion, HZ);
-	if (!ret)
+	if (!ret && event == GLINK_SSR_EVENT_KEXEC)
+		dev_dbg(ssr->dev, "no cleanup done message before kexec\n");
+	else if (!ret)
 		dev_err(ssr->dev, "timeout waiting for cleanup done message\n");
 
 	return NOTIFY_DONE;
@@ -165,4 +184,57 @@ static struct rpmsg_driver qcom_glink_ssr_driver = {
 		.name = "qcom_glink_ssr",
 	},
 };
-module_rpmsg_driver(qcom_glink_ssr_driver);
+
+/*
+ * On a kexec, tell every remote still connected that the application
+ * processor is restarting, as a stopped remoteproc is announced to the rest.
+ *
+ * RPM keeps its G-Link session with us across a kexec: it considers the
+ * rpm_requests channel still open and never announces it again, so the next
+ * kernel waits for it forever and nothing RPM-backed (clocks, regulators,
+ * power domains) ever probes. On do_cleanup for "apss" RPM tears its side
+ * of the edge down and opens rpm_requests afresh for the next kernel, as it
+ * does for a restarted modem.
+ *
+ * This runs from syscore shutdown, after device_shutdown(), because RPM
+ * takes any further message on the old session as fatal and resets the
+ * SoC: the drivers shutting down must have sent their last votes by then.
+ * Only on kexec: on a reboot or power-off the remotes go down with us.
+ */
+static void qcom_glink_ssr_shutdown(void *data)
+{
+	if (!kexec_in_progress)
+		return;
+
+	blocking_notifier_call_chain(&ssr_notifiers, GLINK_SSR_EVENT_KEXEC,
+				     (void *)GLINK_SSR_APSS_NAME);
+}
+
+static const struct syscore_ops qcom_glink_ssr_syscore_ops = {
+	.shutdown = qcom_glink_ssr_shutdown,
+};
+
+static struct syscore qcom_glink_ssr_syscore = {
+	.ops = &qcom_glink_ssr_syscore_ops,
+};
+
+static int __init qcom_glink_ssr_init(void)
+{
+	int ret;
+
+	ret = register_rpmsg_driver(&qcom_glink_ssr_driver);
+	if (ret)
+		return ret;
+
+	register_syscore(&qcom_glink_ssr_syscore);
+
+	return 0;
+}
+module_init(qcom_glink_ssr_init);
+
+static void __exit qcom_glink_ssr_exit(void)
+{
+	unregister_syscore(&qcom_glink_ssr_syscore);
+	unregister_rpmsg_driver(&qcom_glink_ssr_driver);
+}
+module_exit(qcom_glink_ssr_exit);
