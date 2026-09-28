@@ -67,6 +67,7 @@ struct icnl9916_panel {
 	/* EXPERIMENT: the settled read-back after a brightness write. */
 	struct delayed_work bl_check;
 	u16 bl_want;
+	int bl_rewrites;
 	bool on;
 };
 
@@ -635,37 +636,67 @@ static int icnl9916_panel_get_modes(struct drm_panel *panel,
  * by the content and 0x52 reports the scaled value -- measured settling at
  * 82-86 % of what was written. A write counts as taken when it reads back
  * non-zero with BCTRL and BL set and the display on.
+ *
+ * Returns whether the judged read-back is a mismatch.
  */
-static void icnl9916_panel_bl_read(struct mipi_dsi_device *dsi, const char *when,
+static bool icnl9916_panel_bl_read(struct mipi_dsi_device *dsi, const char *when,
 				   u16 want, int wret, bool judge)
 {
 	u16 got = 0;
 	u8 ctrl = 0, mode = 0;
 	int bret, cret, mret;
+	bool mismatch;
 
 	bret = mipi_dsi_dcs_get_display_brightness_large(dsi, &got);
 	cret = mipi_dsi_dcs_read(dsi, MIPI_DCS_GET_CONTROL_DISPLAY, &ctrl, 1);
 	mret = mipi_dsi_dcs_get_power_mode(dsi, &mode);
 
+	mismatch = judge && (wret || bret || (want && !got) || cret != 1 ||
+			     (ctrl & 0x24) != 0x24 || mret || mode != 0x9c);
 	dev_info(&dsi->dev,
 		 "bl: %s %u (%d) -> 0x52=%u (%d) 0x54=%#04x (%d) 0x0a=%#04x (%d)%s\n",
 		 when, want, wret, got, bret, ctrl, cret, mode, mret,
-		 judge && (wret || bret || (want && !got) || cret != 1 ||
-			   (ctrl & 0x24) != 0x24 || mret || mode != 0x9c) ?
-		 " MISMATCH" : "");
+		 mismatch ? " MISMATCH" : "");
+
+	return mismatch;
 }
+
+/*
+ * EXPERIMENT: rewrite a brightness the panel did not take. A retried init
+ * power-cycles the whole chip, touch half included, and the boot's
+ * brightness write can land while it is still coming back: DSI reads fail
+ * ("Invalid response cmd", -61), and the panel settles on, with BCTRL and
+ * BL set, at brightness 0 -- a dark boot that a second write lights. So a
+ * settled mismatch writes the brightness again and checks once more, a
+ * few times at most.
+ */
+#define ICNL9916_BL_REWRITES	3
 
 static void icnl9916_panel_bl_check(struct work_struct *work)
 {
 	struct icnl9916_panel *ctx = container_of(to_delayed_work(work),
 						  struct icnl9916_panel, bl_check);
+	struct backlight_device *bl = ctx->panel.backlight;
 	struct mipi_dsi_device *dsi = ctx->dsi;
+	int ret;
 
+	mutex_lock(&bl->update_lock);
 	if (!ctx->on)
-		return;
+		goto out;
 	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
-	icnl9916_panel_bl_read(dsi, "settled, want", ctx->bl_want, 0, true);
+	if (icnl9916_panel_bl_read(dsi, "settled, want", ctx->bl_want, 0, true) &&
+	    ctx->bl_rewrites < ICNL9916_BL_REWRITES) {
+		ctx->bl_rewrites++;
+		ret = mipi_dsi_dcs_set_display_brightness_large(dsi, ctx->bl_want);
+		dev_warn(&dsi->dev, "bl: rewrite %d of %d: %u (%d)\n",
+			 ctx->bl_rewrites, ICNL9916_BL_REWRITES, ctx->bl_want,
+			 ret < 0 ? ret : 0);
+		mod_delayed_work(system_dfl_wq, &ctx->bl_check,
+				 msecs_to_jiffies(1000));
+	}
 	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
+out:
+	mutex_unlock(&bl->update_lock);
 }
 
 static int icnl9916_panel_bl_update_status(struct backlight_device *bl)
@@ -682,6 +713,7 @@ static int icnl9916_panel_bl_update_status(struct backlight_device *bl)
 	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
 
 	ctx->bl_want = brightness;
+	ctx->bl_rewrites = 0;
 	mod_delayed_work(system_dfl_wq, &ctx->bl_check, msecs_to_jiffies(1000));
 
 	return ret < 0 ? ret : 0;
