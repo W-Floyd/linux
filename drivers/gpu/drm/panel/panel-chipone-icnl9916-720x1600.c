@@ -365,7 +365,22 @@ static int icnl9916_panel_prepare(struct drm_panel *panel)
 {
 	struct icnl9916_panel *ctx = to_icnl9916_panel(panel);
 	struct device *dev = &ctx->dsi->dev;
+	char state[64] = "";
+	unsigned int i, n = 0;
 	int ret;
+
+	/*
+	 * EXPERIMENT: say which supplies were already up. The vendor's supply
+	 * waits only matter to a panel that starts unpowered, and a boot
+	 * straight from ABL inherits the bias rails on (regulator-boot-on), so
+	 * this says which case each boot record is.
+	 */
+	for (i = 0; i < ctx->desc->num_supplies; i++)
+		n += scnprintf(state + n, sizeof(state) - n, " %s=%d",
+			       ctx->desc->supplies[i].name,
+			       regulator_is_enabled(ctx->supplies[i].consumer));
+	if (n)
+		dev_info(dev, "panel init: supplies at prepare:%s\n", state);
 
 	ret = icnl9916_panel_power_on(ctx);
 	if (ret < 0)
