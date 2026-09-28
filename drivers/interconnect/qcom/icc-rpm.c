@@ -600,7 +600,15 @@ regmap_done:
 		data->nodes[i] = node;
 	}
 
-	clk_bulk_disable_unprepare(qp->num_intf_clks, qp->intf_clks);
+	/*
+	 * EXPERIMENT (LinuxBoot stage, whose config alone sets BUILTIN_DTB):
+	 * leave the interface clocks on, as the bootloader left them. A kernel
+	 * kexec'd from here may program the same QoS registers expecting the
+	 * bootloader's state (stock Android does, and lists no UFS clock for
+	 * it), and with them off that resets the SoC.
+	 */
+	if (!IS_ENABLED(CONFIG_BUILTIN_DTB))
+		clk_bulk_disable_unprepare(qp->num_intf_clks, qp->intf_clks);
 
 	ret = icc_provider_register(provider);
 	if (ret)
