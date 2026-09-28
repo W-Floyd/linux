@@ -63,9 +63,13 @@
  * as soon as the rest had probed and drop VDDCX and the interconnects to
  * what the stage's own drivers vote for, while the hardware ABL started
  * keeps running at its rates -- a state the next kernel would then inherit.
+ *
+ * UFS is driven, not held: the Boot Manager reads stock Android's kernel
+ * raw from the other slot's boot partition (boot_b), and its boot scan
+ * mounts the rest read-only without replaying journals (u-root's
+ * fogona-linuxboot fork). The held nodes below still keep sync_state from
+ * firing.
  */
-&ufs_mem_hc { compatible = "fogona,linuxboot-held"; };
-&ufs_mem_phy { compatible = "fogona,linuxboot-held"; };
 &remoteproc_mpss { compatible = "fogona,linuxboot-held"; };
 &remoteproc_adsp { compatible = "fogona,linuxboot-held"; };
 &remoteproc_cdsp { compatible = "fogona,linuxboot-held"; };
