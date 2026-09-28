@@ -356,7 +356,7 @@ static int icnl9916_panel_init(struct icnl9916_panel *ctx)
 	if (ret < 0)
 		return ret;
 	if (mode != ctx->desc->on_power_mode) {
-		dev_warn(dev, "panel did not take its init: 0x0a = %#04x, want %#04x\n",
+		dev_warn(dev, "panel init did not take: 0x0a = %#04x, want %#04x\n",
 			 mode, ctx->desc->on_power_mode);
 		return -EIO;
 	}
@@ -373,7 +373,7 @@ static int icnl9916_panel_init(struct icnl9916_panel *ctx)
 	if (ret < 0)
 		return ret;
 	if (mode != ctx->desc->on_ctrl_display) {
-		dev_warn(dev, "panel did not take its init: 0x54 = %#04x, want %#04x\n",
+		dev_warn(dev, "panel init did not take: 0x54 = %#04x, want %#04x\n",
 			 mode, ctx->desc->on_ctrl_display);
 		return -EIO;
 	}
