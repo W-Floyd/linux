@@ -25,6 +25,20 @@
  * Register layout is common to the family, but the values are tuned per panel
  * module, so each module needs its own command sequence and timings.
  */
+
+/*
+ * One of a module's supplies, with the waits the vendor device tree puts
+ * around it (qcom,supply-{pre,post}-{on,off}-sleep).  Supplies are enabled in
+ * the order listed and disabled in reverse, as the vendor driver does.
+ */
+struct icnl9916_supply {
+	const char *name;
+	unsigned int pre_on_us;
+	unsigned int post_on_us;
+	unsigned int pre_off_us;
+	unsigned int post_off_us;
+};
+
 struct icnl9916_panel_desc {
 	const struct drm_display_mode *modes;
 	unsigned int num_modes;
@@ -34,7 +48,7 @@ struct icnl9916_panel_desc {
 	int (*on)(struct mipi_dsi_device *dsi);
 	int (*off)(struct mipi_dsi_device *dsi);
 	void (*reset)(struct gpio_desc *reset);
-	const char * const *supplies;
+	const struct icnl9916_supply *supplies;
 	unsigned int num_supplies;
 	/* Brightness is set with DCS rather than by a separate backlight. */
 	bool dcs_backlight;
@@ -278,6 +292,46 @@ static int icnl9916c_tm_panel_off(struct mipi_dsi_device *dsi)
 	return dsi_ctx.accum_err;
 }
 
+static void icnl9916_supply_disable(struct icnl9916_panel *ctx, unsigned int i)
+{
+	const struct icnl9916_supply *s = &ctx->desc->supplies[i];
+
+	fsleep(s->pre_off_us);
+	regulator_disable(ctx->supplies[i].consumer);
+	fsleep(s->post_off_us);
+}
+
+static int icnl9916_panel_power_on(struct icnl9916_panel *ctx)
+{
+	unsigned int i;
+	int ret;
+
+	for (i = 0; i < ctx->desc->num_supplies; i++) {
+		const struct icnl9916_supply *s = &ctx->desc->supplies[i];
+
+		fsleep(s->pre_on_us);
+		ret = regulator_enable(ctx->supplies[i].consumer);
+		if (ret < 0) {
+			dev_err(&ctx->dsi->dev, "Failed to enable %s: %d\n",
+				s->name, ret);
+			while (i--)
+				icnl9916_supply_disable(ctx, i);
+			return ret;
+		}
+		fsleep(s->post_on_us);
+	}
+
+	return 0;
+}
+
+static void icnl9916_panel_power_off(struct icnl9916_panel *ctx)
+{
+	unsigned int i = ctx->desc->num_supplies;
+
+	while (i--)
+		icnl9916_supply_disable(ctx, i);
+}
+
 /*
  * Reset the panel and run its on-sequence, then, where the panel's
  * description gives the power mode it should end in, read 0x0a back and
@@ -313,11 +367,9 @@ static int icnl9916_panel_prepare(struct drm_panel *panel)
 	struct device *dev = &ctx->dsi->dev;
 	int ret;
 
-	ret = regulator_bulk_enable(ctx->desc->num_supplies, ctx->supplies);
-	if (ret < 0) {
-		dev_err(dev, "Failed to enable regulators: %d\n", ret);
+	ret = icnl9916_panel_power_on(ctx);
+	if (ret < 0)
 		return ret;
-	}
 
 	ret = icnl9916_panel_init(ctx);
 	/*
@@ -335,20 +387,18 @@ static int icnl9916_panel_prepare(struct drm_panel *panel)
 		dev_warn(dev, "panel init failed (%d); power-cycling for attempt %d\n",
 			 ret, attempt);
 		gpiod_set_value_cansleep(ctx->reset, 1);
-		regulator_bulk_disable(ctx->desc->num_supplies, ctx->supplies);
+		icnl9916_panel_power_off(ctx);
 		msleep(20);
-		ret = regulator_bulk_enable(ctx->desc->num_supplies, ctx->supplies);
-		if (ret < 0) {
-			dev_err(dev, "Failed to enable regulators: %d\n", ret);
+		ret = icnl9916_panel_power_on(ctx);
+		if (ret < 0)
 			return ret;
-		}
 		ret = icnl9916_panel_init(ctx);
 		dev_warn(dev, "panel init attempt %d: %d\n", attempt, ret);
 	}
 	if (ret < 0) {
 		dev_err(dev, "Failed to initialize panel: %d\n", ret);
 		gpiod_set_value_cansleep(ctx->reset, 1);
-		regulator_bulk_disable(ctx->desc->num_supplies, ctx->supplies);
+		icnl9916_panel_power_off(ctx);
 		return ret;
 	}
 
@@ -371,7 +421,7 @@ static int icnl9916_panel_unprepare(struct drm_panel *panel)
 		dev_err(dev, "Failed to un-initialize panel: %d\n", ret);
 
 	gpiod_set_value_cansleep(ctx->reset, 1);
-	regulator_bulk_disable(ctx->desc->num_supplies, ctx->supplies);
+	icnl9916_panel_power_off(ctx);
 
 	return 0;
 }
@@ -459,10 +509,15 @@ static const struct icnl9916_panel_desc icnl9916_panel_desc = {
  */
 /*
  * vddio is board logic at 1.8 V; avdd/avee are the +/-5.9 V pair from the bias
- * chip, which the vendor device tree calls "lab" and "ibb".
+ * chip, which the vendor device tree calls "lab" and "ibb".  The waits are the
+ * vendor's (dsi_panel_pwr_supply_fogona in khaje-sde-display-fogona-common.dtsi):
+ * without them the bias pair came up together, with no settling before reset.
  */
-static const char * const icnl9916c_tm_supplies[] = {
-	"vddio", "avdd", "avee",
+static const struct icnl9916_supply icnl9916c_tm_supplies[] = {
+	{ .name = "vddio", .post_on_us = 20000 },
+	{ .name = "avdd", .pre_on_us = 3000 },
+	{ .name = "avee", .pre_on_us = 3000, .post_on_us = 10000,
+	  .pre_off_us = 3000, .post_off_us = 3000 },
 };
 
 static const struct icnl9916_panel_desc icnl9916c_tm_panel_desc = {
@@ -638,7 +693,7 @@ static int icnl9916_panel_get_supplies(struct icnl9916_panel *ctx)
 		return -ENOMEM;
 
 	for (i = 0; i < ctx->desc->num_supplies; i++)
-		ctx->supplies[i].supply = ctx->desc->supplies[i];
+		ctx->supplies[i].supply = ctx->desc->supplies[i].name;
 
 	return devm_regulator_bulk_get(dev, ctx->desc->num_supplies,
 				       ctx->supplies);
