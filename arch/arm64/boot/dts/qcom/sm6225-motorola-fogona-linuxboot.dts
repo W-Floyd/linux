@@ -31,8 +31,11 @@
 		 * off the panel, so with the deferred fbcon takeover nothing
 		 * draws over ABL's splash until the display driver takes the
 		 * panel; the console stays tty0, for the uinit's fallback menu.
+		 * quiet does the same for u-root's init (the fogona-linuxboot
+		 * fork): no banner, its log in dmesg. It comes before loglevel=1,
+		 * which it would otherwise override with its own level 4.
 		 */
-		bootargs = "console=tty0 loglevel=1 fbcon=map:0,font:6x10 clk_ignore_unused pd_ignore_unused regulator_ignore_unused panic=5 androidboot.slot_suffix=_a";
+		bootargs = "console=tty0 quiet loglevel=1 fbcon=map:0,font:6x10 clk_ignore_unused pd_ignore_unused regulator_ignore_unused panic=5 androidboot.slot_suffix=_a";
 	};
 
 	/*
