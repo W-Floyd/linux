@@ -27,6 +27,9 @@
 #include <linux/proc_fs.h>
 #include <linux/memblock.h>
 #include <linux/of_fdt.h>
+#include <linux/libfdt.h>
+#include <linux/io.h>
+#include <linux/sysfs.h>
 #include <linux/efi.h>
 #include <linux/psci.h>
 #include <linux/sched/task.h>
@@ -167,6 +170,88 @@ static void __init smp_build_mpidr_hash(void)
 		pr_warn("Large number of MPIDR hash buckets detected\n");
 }
 
+/*
+ * With BUILTIN_DTB the boot loader's tree is not used, but it is kept, with
+ * the initramfs it names, for /sys/firmware/bootloader/: a Qualcomm ABL
+ * builds it for the Android it would boot (its vendor_boot DTB, dtbo's
+ * overlays, and its own /memory, /reserved-memory and /chosen), which is
+ * what a kexec of that Android needs, and the initramfs ends in ABL's
+ * bootconfig.
+ */
+#ifdef CONFIG_BUILTIN_DTB
+static phys_addr_t bl_fdt_phys, bl_initrd_phys;
+static size_t bl_fdt_size, bl_initrd_size;
+
+static u64 __init bl_chosen_u64(const void *fdt, int off, const char *name)
+{
+	int len;
+	const void *p = fdt_getprop(fdt, off, name, &len);
+
+	if (p && len == 8)
+		return fdt64_to_cpu(*(const fdt64_t *)p);
+	if (p && len == 4)
+		return fdt32_to_cpu(*(const fdt32_t *)p);
+	return 0;
+}
+
+static void __init keep_bootloader_fdt(phys_addr_t dt_phys)
+{
+	int size = 0, off;
+	void *fdt;
+	u64 start, end;
+
+	if (!dt_phys)
+		return;
+	fdt = fixmap_remap_fdt(dt_phys, &size, PAGE_KERNEL_RO);
+	if (!fdt)
+		return;
+	memblock_reserve(dt_phys, size);
+	bl_fdt_phys = dt_phys;
+	bl_fdt_size = size;
+
+	off = fdt_path_offset(fdt, "/chosen");
+	if (off < 0)
+		return;
+	start = bl_chosen_u64(fdt, off, "linux,initrd-start");
+	end = bl_chosen_u64(fdt, off, "linux,initrd-end");
+	if (start && end > start) {
+		memblock_reserve(start, end - start);
+		bl_initrd_phys = start;
+		bl_initrd_size = end - start;
+	}
+}
+
+static BIN_ATTR_SIMPLE_ADMIN_RO(fdt);
+static BIN_ATTR_SIMPLE_ADMIN_RO(initrd);
+
+static int __init bootloader_sysfs_init(void)
+{
+	struct kobject *kobj;
+
+	if (!bl_fdt_phys)
+		return 0;
+	kobj = kobject_create_and_add("bootloader", firmware_kobj);
+	if (!kobj)
+		return -ENOMEM;
+	bin_attr_fdt.private = memremap(bl_fdt_phys, bl_fdt_size, MEMREMAP_WB);
+	bin_attr_fdt.size = bl_fdt_size;
+	if (bin_attr_fdt.private && sysfs_create_bin_file(kobj, &bin_attr_fdt))
+		pr_warn("bootloader: no fdt file\n");
+	if (!bl_initrd_phys)
+		return 0;
+	bin_attr_initrd.private = memremap(bl_initrd_phys, bl_initrd_size, MEMREMAP_WB);
+	bin_attr_initrd.size = bl_initrd_size;
+	if (bin_attr_initrd.private && sysfs_create_bin_file(kobj, &bin_attr_initrd))
+		pr_warn("bootloader: no initrd file\n");
+	pr_info("bootloader: kept its fdt (%zu bytes at %pa) and initrd (%zu bytes at %pa)\n",
+		bl_fdt_size, &bl_fdt_phys, bl_initrd_size, &bl_initrd_phys);
+	return 0;
+}
+late_initcall(bootloader_sysfs_init);
+#else
+static inline void keep_bootloader_fdt(phys_addr_t dt_phys) { }
+#endif
+
 static void __init setup_machine_fdt(phys_addr_t dt_phys)
 {
 	int size = 0;
@@ -174,6 +259,7 @@ static void __init setup_machine_fdt(phys_addr_t dt_phys)
 	const char *name;
 
 	if (IS_ENABLED(CONFIG_BUILTIN_DTB)) {
+		keep_bootloader_fdt(dt_phys);
 		/*
 		 * Ignore the boot loader's tree and use the one linked into
 		 * the image. It sits in init data, already mapped and covered
