@@ -8,6 +8,7 @@
 #include <linux/of.h>
 #include <linux/module.h>
 #include <linux/gpio/consumer.h>
+#include <linux/kexec.h>
 #include <linux/regulator/consumer.h>
 #include <linux/workqueue.h>
 
@@ -449,6 +450,19 @@ static int icnl9916_panel_unprepare(struct drm_panel *panel)
 	/* No read-back from a panel that is about to lose power. */
 	ctx->on = false;
 	cancel_delayed_work_sync(&ctx->bl_check);
+
+	/*
+	 * Handing over by kexec, leave the panel powered, out of reset and on,
+	 * as a bootloader's splash leaves it; the DSI host still stops. The
+	 * chip's touch half answers only while the panel runs, and the next
+	 * kernel's touch driver (stock Android's) may probe before its display
+	 * driver has powered the panel: with the panel off here it finds no
+	 * chip, and does not try again.
+	 */
+	if (kexec_in_progress) {
+		dev_info(dev, "kexec: leaving the panel on\n");
+		return 0;
+	}
 
 	ret = ctx->desc->off(ctx->dsi);
 	if (ret < 0)
