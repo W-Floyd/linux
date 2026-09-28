@@ -54,6 +54,8 @@ struct icnl9916_panel_desc {
 	bool dcs_backlight;
 	/* The 0x0a power mode the on-sequence ends in; 0 to not check. */
 	u8 on_power_mode;
+	/* The 0x54 control bits the on-sequence sets; 0 to not check. */
+	u8 on_ctrl_display;
 };
 
 struct icnl9916_panel {
@@ -358,6 +360,23 @@ static int icnl9916_panel_init(struct icnl9916_panel *ctx)
 			 mode, ctx->desc->on_power_mode);
 		return -EIO;
 	}
+
+	/*
+	 * EXPERIMENT: dark stage boots on 2026-09-28 read 0x0a = 0x9c but
+	 * settled at 0x54 = 0x00, brightness 0: the panel took the sequence
+	 * but not its 0x53 write, and with BCTRL off no brightness write
+	 * lights it. Count that as a failed init too.
+	 */
+	if (!ctx->desc->on_ctrl_display)
+		return 0;
+	ret = mipi_dsi_dcs_read(ctx->dsi, MIPI_DCS_GET_CONTROL_DISPLAY, &mode, 1);
+	if (ret < 0)
+		return ret;
+	if (mode != ctx->desc->on_ctrl_display) {
+		dev_warn(dev, "panel did not take its init: 0x54 = %#04x, want %#04x\n",
+			 mode, ctx->desc->on_ctrl_display);
+		return -EIO;
+	}
 	return 0;
 }
 
@@ -547,6 +566,8 @@ static const struct icnl9916_panel_desc icnl9916c_tm_panel_desc = {
 	.dcs_backlight = true,
 	/* Booster on, sleep out, normal mode, display on. */
 	.on_power_mode = 0x9c,
+	/* BCTRL, DD and BL, as the on-sequence's 0x53 writes them. */
+	.on_ctrl_display = 0x2c,
 };
 
 /*
