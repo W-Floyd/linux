@@ -863,6 +863,17 @@ static void dwc3_qcom_remove(struct platform_device *pdev)
 	pm_runtime_disable(dev);
 }
 
+/*
+ * Stop the controller, and with it its DMA, before a reboot or a kexec: a
+ * gadget left running keeps writing received packets through IOMMU
+ * mappings the next kernel knows nothing of. The glue's clocks stay on, as
+ * a bootloader leaves them.
+ */
+static void dwc3_qcom_shutdown(struct platform_device *pdev)
+{
+	of_platform_depopulate(&pdev->dev);
+}
+
 static int __maybe_unused dwc3_qcom_pm_suspend(struct device *dev)
 {
 	struct dwc3_qcom *qcom = dev_get_drvdata(dev);
@@ -922,6 +933,7 @@ MODULE_DEVICE_TABLE(of, dwc3_qcom_of_match);
 static struct platform_driver dwc3_qcom_driver = {
 	.probe		= dwc3_qcom_probe,
 	.remove		= dwc3_qcom_remove,
+	.shutdown	= dwc3_qcom_shutdown,
 	.driver		= {
 		.name	= "dwc3-qcom-legacy",
 		.pm	= &dwc3_qcom_dev_pm_ops,
