@@ -1017,6 +1017,33 @@ static int bq25890_rw_init_data(struct bq25890_device *bq)
 	return 0;
 }
 
+/*
+ * The SC89890H powers up with HVDCP_EN and MAXC_EN set, and a chip reset
+ * restores that, so on a QC-capable adapter the chip negotiates a higher VBUS
+ * on its own and nothing here knows what it picked. Keep the input at the 5 V
+ * that BC1.2 detection settles on. The BQ25890 and BQ25895 also default both
+ * on; they are left alone, as boards using them may rely on it.
+ */
+static int bq25890_disable_hv_input(struct bq25890_device *bq)
+{
+	int ret;
+
+	if (bq->chip_version != SC89890H)
+		return 0;
+
+	ret = bq25890_field_write(bq, F_HVDCP_EN, 0);
+	if (ret < 0) {
+		dev_dbg(bq->dev, "Disabling HVDCP failed %d\n", ret);
+		return ret;
+	}
+
+	ret = bq25890_field_write(bq, F_MAXC_EN, 0);
+	if (ret < 0)
+		dev_dbg(bq->dev, "Disabling MaxCharge failed %d\n", ret);
+
+	return ret;
+}
+
 static int bq25890_hw_init(struct bq25890_device *bq)
 {
 	int ret;
@@ -1039,6 +1066,10 @@ static int bq25890_hw_init(struct bq25890_device *bq)
 			return ret;
 		}
 	}
+
+	ret = bq25890_disable_hv_input(bq);
+	if (ret < 0)
+		return ret;
 
 	/* disable watchdog */
 	ret = bq25890_field_write(bq, F_WD, 0);
@@ -1677,6 +1708,8 @@ static void bq25890_remove(struct i2c_client *client)
 	if (!bq->skip_reset) {
 		/* reset all registers to default values */
 		bq25890_chip_reset(bq);
+		/* ... which turns HVDCP back on, on the SC89890H */
+		bq25890_disable_hv_input(bq);
 	}
 }
 
