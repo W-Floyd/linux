@@ -53,6 +53,7 @@ static const char *const bq25890_chip_name[] = {
 enum bq25890_fields {
 	F_EN_HIZ, F_EN_ILIM, F_IINLIM,				     /* Reg00 */
 	F_BHOT, F_BCOLD, F_VINDPM_OFS,				     /* Reg01 */
+	F_DP_DAC, F_DM_DAC,					     /* Reg01, SC89890H */
 	F_CONV_START, F_CONV_RATE, F_BOOSTF, F_ICO_EN,
 	F_HVDCP_EN, F_MAXC_EN, F_FORCE_DPM, F_AUTO_DPDM_EN,	     /* Reg02 */
 	F_BAT_LOAD_EN, F_WD_RST, F_OTG_CFG, F_CHG_CFG, F_SYSVMIN,
@@ -189,6 +190,15 @@ static const struct reg_field bq25890_reg_fields[] = {
 	[F_BHOT]		= REG_FIELD(0x01, 6, 7),
 	[F_BCOLD]		= REG_FIELD(0x01, 5, 5),
 	[F_VINDPM_OFS]		= REG_FIELD(0x01, 0, 4),
+	/*
+	 * REG01 is a different register on the SC89890H: bits 7:5 and 4:2
+	 * drive D+ and D- (0 HiZ, 1 0 V, 2 0.6 V, 3 1.2 V, 4 2.0 V, 5 2.7 V,
+	 * 6 3.3 V) and bit 0 is VINDPM_OS. F_BHOT, F_BCOLD and F_VINDPM_OFS
+	 * must not be written on that chip, as they would drive the data
+	 * lines.
+	 */
+	[F_DP_DAC]		= REG_FIELD(0x01, 5, 7),
+	[F_DM_DAC]		= REG_FIELD(0x01, 2, 4),
 	/* REG02 */
 	[F_CONV_START]		= REG_FIELD(0x02, 7, 7),
 	[F_CONV_RATE]		= REG_FIELD(0x02, 6, 6),
@@ -1070,6 +1080,21 @@ static int bq25890_hw_init(struct bq25890_device *bq)
 	ret = bq25890_disable_hv_input(bq);
 	if (ret < 0)
 		return ret;
+
+	/* Do not drive the data lines; BC1.2 detection does that itself */
+	if (bq->chip_version == SC89890H) {
+		ret = bq25890_field_write(bq, F_DP_DAC, 0);
+		if (ret < 0) {
+			dev_dbg(bq->dev, "Releasing D+ failed %d\n", ret);
+			return ret;
+		}
+
+		ret = bq25890_field_write(bq, F_DM_DAC, 0);
+		if (ret < 0) {
+			dev_dbg(bq->dev, "Releasing D- failed %d\n", ret);
+			return ret;
+		}
+	}
 
 	/* disable watchdog */
 	ret = bq25890_field_write(bq, F_WD, 0);
