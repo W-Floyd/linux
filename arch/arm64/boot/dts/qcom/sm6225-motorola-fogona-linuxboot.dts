@@ -107,21 +107,16 @@
  * initramfs (tools/linuxboot/build.sh).
  */
 
-/* Bluetooth, the amplifiers and the gauge. */
+/* Bluetooth. */
 &uart3 { status = "disabled"; };
-&i2c2 { status = "disabled"; };
 
 /*
- * i2c1 stays enabled for the Type-C chip alone; the charger and the PA
- * boost on it are left as ABL set them. The gadget does not need it --
- * dwc3 starts in the device role -- and with geni I2C built as a module
- * nothing on this bus probes in the stage at all.
+ * Battery: the CW2217 gauge on i2c2 and the charger on i2c1 stay enabled
+ * (tools/linuxboot/build.sh builds geni I2C and both drivers in, as the
+ * stage loads no modules), so the stage reports the battery and keeps
+ * the charger running. The PA boost on i2c1 is left as ABL set it.
  */
 &i2c1 {
-	charger@6a {
-		status = "disabled";
-	};
-
 	regulator@75 {
 		status = "disabled";
 	};
