@@ -482,6 +482,18 @@ enum bq25890_status {
 	STATUS_TERMINATION_DONE,
 };
 
+/* REG0B[7:5] on the BQ25890 and SC89890H */
+enum bq25890_vbus_stat {
+	VBUS_STAT_NONE = 0,
+	VBUS_STAT_SDP,
+	VBUS_STAT_CDP,
+	VBUS_STAT_DCP,
+	VBUS_STAT_HVDCP,
+	VBUS_STAT_UNKNOWN,
+	VBUS_STAT_NONSTANDARD,
+	VBUS_STAT_OTG,
+};
+
 enum bq25890_chrg_fault {
 	CHRG_FAULT_NORMAL,
 	CHRG_FAULT_INPUT,
@@ -594,6 +606,32 @@ static int bq25890_power_supply_get_property(struct power_supply *psy,
 
 	case POWER_SUPPLY_PROP_ONLINE:
 		val->intval = state.online && !state.hiz;
+		break;
+
+	case POWER_SUPPLY_PROP_USB_TYPE:
+		val->intval = POWER_SUPPLY_USB_TYPE_UNKNOWN;
+
+		/* The REG0B[7:5] encoding is not verified on the others */
+		if (bq->chip_version != BQ25890 &&
+		    bq->chip_version != SC89890H)
+			break;
+
+		ret = bq25890_field_read(bq, F_VBUS_STAT);
+		if (ret < 0)
+			return ret;
+
+		switch (ret) {
+		case VBUS_STAT_SDP:
+			val->intval = POWER_SUPPLY_USB_TYPE_SDP;
+			break;
+		case VBUS_STAT_CDP:
+			val->intval = POWER_SUPPLY_USB_TYPE_CDP;
+			break;
+		case VBUS_STAT_DCP:
+		case VBUS_STAT_HVDCP:
+			val->intval = POWER_SUPPLY_USB_TYPE_DCP;
+			break;
+		}
 		break;
 
 	case POWER_SUPPLY_PROP_HEALTH:
@@ -1130,6 +1168,7 @@ static const enum power_supply_property bq25890_power_supply_props[] = {
 	POWER_SUPPLY_PROP_STATUS,
 	POWER_SUPPLY_PROP_CHARGE_TYPE,
 	POWER_SUPPLY_PROP_ONLINE,
+	POWER_SUPPLY_PROP_USB_TYPE,
 	POWER_SUPPLY_PROP_HEALTH,
 	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
 	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX,
@@ -1149,6 +1188,10 @@ static char *bq25890_charger_supplied_to[] = {
 
 static const struct power_supply_desc bq25890_power_supply_desc = {
 	.type = POWER_SUPPLY_TYPE_USB,
+	.usb_types = BIT(POWER_SUPPLY_USB_TYPE_UNKNOWN) |
+		     BIT(POWER_SUPPLY_USB_TYPE_SDP) |
+		     BIT(POWER_SUPPLY_USB_TYPE_CDP) |
+		     BIT(POWER_SUPPLY_USB_TYPE_DCP),
 	.properties = bq25890_power_supply_props,
 	.num_properties = ARRAY_SIZE(bq25890_power_supply_props),
 	.get_property = bq25890_power_supply_get_property,
