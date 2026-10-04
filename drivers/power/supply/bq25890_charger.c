@@ -134,6 +134,7 @@ struct bq25890_device {
 	bool skip_reset;
 	bool read_back_init_data;
 	bool force_hiz;
+	bool iinlim_from_supplier;	/* IINLIM holds a supplier's CURRENT_MAX */
 	u32 pump_express_vbus_max;
 	u32 iinlim_percentage;
 	enum bq25890_chip_version chip_version;
@@ -206,7 +207,7 @@ static const struct reg_field bq25890_reg_fields[] = {
 	[F_ICO_EN]		= REG_FIELD(0x02, 4, 4),
 	[F_HVDCP_EN]		= REG_FIELD(0x02, 3, 3),  // reserved on BQ25896
 	[F_MAXC_EN]		= REG_FIELD(0x02, 2, 2),  // reserved on BQ25896
-	[F_FORCE_DPM]		= REG_FIELD(0x02, 1, 1),
+	[F_FORCE_DPM]		= REG_FIELD(0x02, 1, 1),  // FORCE_DPDM
 	[F_AUTO_DPDM_EN]	= REG_FIELD(0x02, 0, 0),
 	/* REG03 */
 	[F_BAT_LOAD_EN]		= REG_FIELD(0x03, 7, 7),
@@ -850,6 +851,86 @@ static int bq25890_charger_get_scaled_iinlim_regval(struct bq25890_device *bq,
 	return bq25890_find_idx(bq, iinlim_ua, TBL_IINLIM);
 }
 
+/*
+ * Hand IINLIM back to the chip's own input source detection, once a limit
+ * written from a supplier's CURRENT_MAX no longer applies. Called with
+ * bq->lock held. Returns 0 when there is nothing left to do, so the caller
+ * can forget the supplier's limit.
+ *
+ * A port with a USB data link (SDP, CDP) gets the BC1.2 limit for the type
+ * the chip already detected, written directly: re-running detection drives
+ * D+/D-, which would disturb a live USB session. Anything else has the chip
+ * re-run detection through REG02 bit 1, which the datasheets and the vendor
+ * driver call FORCE_DPDM (F_FORCE_DPM here is a misleading name for it).
+ * That does not switch the input path off; the chip rewrites IINLIM when
+ * detection finishes.
+ *
+ * Only the BQ25890 and SC89890H are handled, where that bit and the REG0B
+ * encoding are known; not on a port the chip classed as HVDCP, whose VBUS
+ * may be raised; and not while the SC89890H is driving D+/D- itself.
+ */
+static int bq25890_redetect_input(struct bq25890_device *bq)
+{
+	int iinlim, ret;
+
+	if (bq->chip_version != BQ25890 && bq->chip_version != SC89890H)
+		return 0;
+
+	/* No input: the next attach is detected afresh */
+	if (!bq->state.online)
+		return 0;
+
+	ret = bq25890_field_read(bq, F_VBUS_STAT);
+	if (ret < 0)
+		return ret;
+
+	switch (ret) {
+	case VBUS_STAT_SDP:
+		iinlim = bq25890_charger_get_scaled_iinlim_regval(bq, 500000);
+		return bq25890_field_write(bq, F_IINLIM, iinlim);
+	case VBUS_STAT_CDP:
+		iinlim = bq25890_charger_get_scaled_iinlim_regval(bq, 1500000);
+		return bq25890_field_write(bq, F_IINLIM, iinlim);
+	case VBUS_STAT_HVDCP:
+		/* VBUS may be raised; leave it to the next attach */
+		return -EBUSY;
+	}
+
+	if (bq->chip_version == SC89890H) {
+		ret = bq25890_field_read(bq, F_DP_DAC);
+		if (!ret)
+			ret = bq25890_field_read(bq, F_DM_DAC);
+		if (ret)
+			return ret < 0 ? ret : -EBUSY;
+	}
+
+	return bq25890_field_write(bq, F_FORCE_DPM, 1);
+}
+
+/*
+ * The supplier promises no current any more. If IINLIM still holds what it
+ * promised before, that is stale: a source that lowers its Rp to the default
+ * while attached keeps VBUS up, so the chip never re-detects by itself.
+ */
+static void bq25890_drop_supplier_iinlim(struct bq25890_device *bq,
+					 struct power_supply *psy)
+{
+	union power_supply_propval val;
+	bool online;
+	int ret;
+
+	ret = power_supply_get_property_from_supplier(psy,
+						      POWER_SUPPLY_PROP_ONLINE,
+						      &val);
+	online = !ret && val.intval;
+
+	mutex_lock(&bq->lock);
+	if (bq->iinlim_from_supplier &&
+	    (!online || !bq25890_redetect_input(bq)))
+		bq->iinlim_from_supplier = false;
+	mutex_unlock(&bq->lock);
+}
+
 /* Get the input current limit from whatever our supplier can tell us */
 static void bq25890_charger_external_power_changed(struct power_supply *psy)
 {
@@ -871,10 +952,15 @@ static void bq25890_charger_external_power_changed(struct power_supply *psy)
 	if (!ret && val.intval > 0) {
 		input_current_limit =
 			bq25890_charger_get_scaled_iinlim_regval(bq, val.intval);
-		bq25890_field_write(bq, F_IINLIM, input_current_limit);
+		mutex_lock(&bq->lock);
+		if (!bq25890_field_write(bq, F_IINLIM, input_current_limit))
+			bq->iinlim_from_supplier = true;
+		mutex_unlock(&bq->lock);
 		power_supply_changed(psy);
 		return;
 	}
+
+	bq25890_drop_supplier_iinlim(bq, psy);
 
 	/* Otherwise, on the BQ25892 only, fall back to charger-type info */
 	if (bq->chip_version != BQ25892)
@@ -977,6 +1063,10 @@ static irqreturn_t __bq25890_handle_irq(struct bq25890_device *bq)
 		if (ret < 0)
 			goto error;
 	}
+
+	/* Input gone: the chip detects the next one afresh */
+	if (!new_state.online)
+		bq->iinlim_from_supplier = false;
 
 	bq->state = new_state;
 	power_supply_changed(bq->charger);
