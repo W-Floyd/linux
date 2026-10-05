@@ -1854,6 +1854,13 @@ static int bq25890_probe(struct i2c_client *client)
 		usb_register_notifier(bq->usb_phy, &bq->usb_nb);
 	}
 
+	/*
+	 * A supplier that is already attached will not report a change just
+	 * because this driver probed, so ask it now; otherwise the input limit
+	 * stays at the reset default until the next event.
+	 */
+	bq25890_charger_external_power_changed(bq->charger);
+
 	return 0;
 }
 
