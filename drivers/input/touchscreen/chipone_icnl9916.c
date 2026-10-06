@@ -12,6 +12,7 @@
  */
 
 #include <linux/delay.h>
+#include <linux/devm-helpers.h>
 #include <linux/gpio/consumer.h>
 #include <linux/interrupt.h>
 #include <linux/i2c.h>
@@ -20,12 +21,14 @@
 #include <drm/drm_panel.h>
 #include <linux/input/touchscreen.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/reset.h>
 #include <linux/spi/spi.h>
 #include <linux/crc32.h>
 #include <linux/firmware.h>
 #include <linux/unaligned.h>
+#include <linux/workqueue.h>
 
 #define ICNL9916_READ_CMD(cls, cmd)	(1 << 14 | (cls) << 8 | (cmd))
 #define ICNL9916_WRITE_CMD(cls, cmd)	(1 << 13 | (cls) << 8 | (cmd))
@@ -76,6 +79,14 @@
  * which msm-firmware-loader mounts and symlinks into the firmware search path.
  */
 #define ICNL9916_FW_NAME		"chipone_firmware.bin"
+
+/*
+ * A driver built into the kernel runs before userspace has made the image
+ * visible, so a missing file is retried for a while rather than treated as a
+ * failure.
+ */
+#define ICNL9916_FW_RETRY_MS		300
+#define ICNL9916_FW_RETRY_TIMEOUT_MS	60000
 
 /* Payload per program-mode write; the frame adds an opcode and a 24-bit address. */
 #define ICNL9916_SRAM_CHUNK		4096
@@ -134,6 +145,16 @@ struct icnl9916_data {
 	struct gpio_desc *reset_gpio;
 	struct drm_panel_follower panel_follower;
 	bool panel_irq_off;
+	/*
+	 * Serialises everything that resets the chip or downloads firmware to
+	 * it (init, open, the panel callbacks and fw_work) and protects the
+	 * fields below and panel_irq_off.  Never held while cancelling fw_work.
+	 */
+	struct mutex lock;
+	struct delayed_work fw_work;
+	bool panel_up;		/* between panel_prepared and panel_unpreparing */
+	bool fw_pending;	/* panel is up, firmware not downloaded yet */
+	unsigned long fw_deadline;
 	struct touchscreen_properties prop;
 	u8 *tx_buf;
 	u8 *rx_buf;
@@ -403,18 +424,29 @@ static int icnl9916_sram_write(struct icnl9916_data *data, u32 addr,
  * the multi-section format is 0x20000 bytes and this one is not -- so the whole
  * file is the payload and its CRC32 covers all of it.  That CRC is the
  * big-endian, non-reflected, zero-seeded variant, which is exactly crc32_be().
+ *
+ * This does not reset the chip: it only needs one that is out of reset and has
+ * no firmware, which is how icnl9916_init() leaves it, and entering program
+ * mode works the same however long ago that was.  That is what lets
+ * icnl9916_fw_work() call it again and again without pulsing the reset line,
+ * which on this TDDI part also resets the display half.
+ *
+ * Returns -ENOENT when the file is not there.  With @may_retry that is not
+ * reported, as the caller will try again; without it, it is an error like any
+ * other.
  */
-static int icnl9916_load_firmware(struct icnl9916_data *data)
+static int icnl9916_load_firmware(struct icnl9916_data *data, bool may_retry)
 {
 	const struct firmware *fw;
 	__le16 fw_id;
 	u8 *buf;
 	int ret;
 
-	ret = request_firmware(&fw, ICNL9916_FW_NAME, data->dev);
+	ret = firmware_request_nowarn(&fw, ICNL9916_FW_NAME, data->dev);
 	if (ret) {
-		dev_err(data->dev, "Failed to request %s: %d\n",
-			ICNL9916_FW_NAME, ret);
+		if (ret != -ENOENT || !may_retry)
+			dev_err(data->dev, "Failed to request %s: %d\n",
+				ICNL9916_FW_NAME, ret);
 		return ret;
 	}
 
@@ -642,7 +674,14 @@ static irqreturn_t icnl9916_irq(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static int icnl9916_init(struct icnl9916_data *data)
+/*
+ * Reset the chip and make sure it is running firmware.  Returns -ENOENT only
+ * when the firmware file is missing and @may_retry is set, which leaves the
+ * chip reset and empty, waiting for icnl9916_fw_work().  Callers hold
+ * data->lock, except probe, which runs before anything else can reach the
+ * chip.
+ */
+static int icnl9916_init(struct icnl9916_data *data, bool may_retry)
 {
 	struct device *dev = data->dev;
 	__le16 fw_id;
@@ -669,7 +708,7 @@ static int icnl9916_init(struct icnl9916_data *data)
 	if (ret) {
 		dev_err(dev, "Failed to read device ID: %d\n", ret);
 		if (data->spi) {
-			ret = icnl9916_load_firmware(data);
+			ret = icnl9916_load_firmware(data, may_retry);
 		}
 		return ret;
 	}
@@ -685,6 +724,63 @@ static void icnl9916_drain(struct icnl9916_data *data)
 
 	data->bus->read_touch(data, ICNL9916_READ_TOUCH_DATA, &touch_data,
 			      sizeof(touch_data));
+}
+
+/* What panel_prepared() does once the chip runs firmware.  Holds data->lock. */
+static void icnl9916_panel_ready(struct icnl9916_data *data)
+{
+	if (data->panel_irq_off) {
+		enable_irq(data->irq);
+		data->panel_irq_off = false;
+	}
+
+	/*
+	 * The report line is edge triggered, so anything latched while the
+	 * controller was down is never re-signalled.
+	 */
+	icnl9916_drain(data);
+}
+
+/*
+ * Retry the firmware download that panel_prepared() found impossible.  The
+ * chip was reset there and has been waiting since, so only the request and
+ * the download are repeated.  Gives up, with one error, after
+ * ICNL9916_FW_RETRY_TIMEOUT_MS.
+ */
+static void icnl9916_fw_work(struct work_struct *work)
+{
+	struct icnl9916_data *data = container_of(to_delayed_work(work),
+						  struct icnl9916_data, fw_work);
+	int ret;
+
+	mutex_lock(&data->lock);
+
+	/* The panel went down, or open() got the firmware in, meanwhile. */
+	if (!data->panel_up || !data->fw_pending)
+		goto out;
+
+	ret = icnl9916_load_firmware(data, true);
+	if (ret == -ENOENT) {
+		if (time_after(jiffies, data->fw_deadline)) {
+			dev_err(data->dev, "%s still not available, giving up\n",
+				ICNL9916_FW_NAME);
+			data->fw_pending = false;
+		} else {
+			schedule_delayed_work(&data->fw_work,
+					      msecs_to_jiffies(ICNL9916_FW_RETRY_MS));
+		}
+		goto out;
+	}
+
+	/* Anything else was reported by icnl9916_load_firmware(). */
+	data->fw_pending = false;
+	if (ret)
+		goto out;
+
+	dev_info(data->dev, "firmware loaded after retrying\n");
+	icnl9916_panel_ready(data);
+out:
+	mutex_unlock(&data->lock);
 }
 
 /*
@@ -705,22 +801,31 @@ static int icnl9916_panel_prepared(struct drm_panel_follower *follower)
 						  panel_follower);
 	int ret;
 
-	ret = icnl9916_init(data);
-	if (ret)
-		return ret;
+	mutex_lock(&data->lock);
+	data->panel_up = true;
 
-	if (data->panel_irq_off) {
-		enable_irq(data->irq);
-		data->panel_irq_off = false;
+	ret = icnl9916_init(data, true);
+	if (ret == -ENOENT) {
+		/*
+		 * Built in, we run before userspace has made the firmware
+		 * visible.  The chip is reset and empty; leave the irq as it
+		 * is and let icnl9916_fw_work() finish this once the file
+		 * appears.  Not an error for the panel.
+		 */
+		dev_info(data->dev, "firmware not available yet, retrying\n");
+		data->fw_pending = true;
+		data->fw_deadline = jiffies +
+				    msecs_to_jiffies(ICNL9916_FW_RETRY_TIMEOUT_MS);
+		schedule_delayed_work(&data->fw_work,
+				      msecs_to_jiffies(ICNL9916_FW_RETRY_MS));
+		ret = 0;
+	} else if (!ret) {
+		icnl9916_panel_ready(data);
 	}
 
-	/*
-	 * The report line is edge triggered, so anything latched while the
-	 * controller was down is never re-signalled.
-	 */
-	icnl9916_drain(data);
+	mutex_unlock(&data->lock);
 
-	return 0;
+	return ret;
 }
 
 /*
@@ -736,8 +841,15 @@ static int icnl9916_panel_unpreparing(struct drm_panel_follower *follower)
 	/*
 	 * The panel is about to lose power, which takes the touch half of this
 	 * TDDI chip with it. Stop taking reports now rather than letting the
-	 * handler talk to a controller that is going away.
+	 * handler talk to a controller that is going away.  A pending firmware
+	 * retry would be talking to it too, and must not outlive the panel's
+	 * power: cancel it before taking the lock it needs.
 	 */
+	cancel_delayed_work_sync(&data->fw_work);
+	mutex_lock(&data->lock);
+	data->panel_up = false;
+	data->fw_pending = false;
+
 	/*
 	 * Balance matters here. disable_irq()/enable_irq() nest, and
 	 * drm_panel_add_follower() calls panel_prepared() immediately when the
@@ -750,6 +862,7 @@ static int icnl9916_panel_unpreparing(struct drm_panel_follower *follower)
 		disable_irq(data->irq);
 		data->panel_irq_off = true;
 	}
+	mutex_unlock(&data->lock);
 
 	return 0;
 }
@@ -772,12 +885,23 @@ static int icnl9916_start(struct input_dev *input)
 	 * second. Userspace opens and closes touchscreens freely; doing that
 	 * here left the device permanently reloading.
 	 */
+	mutex_lock(&data->lock);
 	ret = data->bus->read(data, ICNL9916_READ_FW_ID, &fw_id, sizeof(fw_id));
 	if (ret) {
-		ret = icnl9916_init(data);
-		if (ret)
+		ret = icnl9916_init(data, false);
+		if (ret) {
+			mutex_unlock(&data->lock);
 			return ret;
+		}
+		/*
+		 * The chip runs firmware now, so a download still waiting for
+		 * the file in icnl9916_fw_work() has nothing left to do.  It
+		 * is not cancelled synchronously, as it needs the lock held
+		 * here; it sees fw_pending clear and returns.
+		 */
+		data->fw_pending = false;
 	}
+	mutex_unlock(&data->lock);
 
 	enable_irq(data->irq);
 
@@ -863,7 +987,7 @@ static int icnl9916_probe(struct icnl9916_data *data)
 	input_set_capability(input, EV_ABS, ABS_MT_POSITION_X);
 	input_set_capability(input, EV_ABS, ABS_MT_POSITION_Y);
 
-	error = icnl9916_init(data);
+	error = icnl9916_init(data, false);
 	if (error) {
 		dev_err(dev, "Failed to initialize device: %d\n", error);
 		return error;
@@ -931,6 +1055,13 @@ static struct icnl9916_data *icnl9916_alloc(struct device *dev,
 
 	data->dev = dev;
 	data->bus = bus;
+
+	if (devm_mutex_init(dev, &data->lock))
+		return NULL;
+	/* Cancelled, and waited for, when the driver unbinds. */
+	if (devm_delayed_work_autocancel(dev, &data->fw_work,
+					 icnl9916_fw_work))
+		return NULL;
 
 	data->chip_reset = devm_reset_control_get_optional_shared(dev, NULL);
 	if (IS_ERR(data->chip_reset))
