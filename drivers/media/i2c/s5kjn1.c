@@ -37,6 +37,13 @@
 #define S5KJN1_VFLIP			BIT(1)
 #define S5KJN1_HFLIP			BIT(0)
 
+/*
+ * Grouped parameter hold: while it is set, the writes to the registers it
+ * covers (exposure, gain, frame length) wait, and take effect together as the
+ * next frame starts when it is cleared.
+ */
+#define S5KJN1_REG_HOLD			CCI_REG8(0x0104)
+
 #define S5KJN1_REG_EXPOSURE		CCI_REG16(0x0202)
 #define S5KJN1_EXPOSURE_MIN		8
 #define S5KJN1_EXPOSURE_STEP		1
@@ -752,6 +759,26 @@ static const struct s5kjn1_mode s5kjn1_supported_modes[] = {
 	},
 };
 
+/*
+ * Write a register of the exposure, gain or frame length so that it takes
+ * effect as the next frame starts. Written at once, it changes the frame being
+ * read out from the row the sensor has reached (there is no frame start event
+ * to time the write by), and with a rolling shutter a frame then has two
+ * exposures, one above the row and one below it.
+ */
+static int s5kjn1_write_held(struct s5kjn1 *s5kjn1, u32 reg, u64 val)
+{
+	int ret = 0;
+	int release = 0;
+
+	cci_write(s5kjn1->regmap, S5KJN1_REG_HOLD, 1, &ret);
+	cci_write(s5kjn1->regmap, reg, val, &ret);
+	/* The hold is cleared even if a write failed */
+	cci_write(s5kjn1->regmap, S5KJN1_REG_HOLD, 0, &release);
+
+	return ret ? ret : release;
+}
+
 static int s5kjn1_set_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct s5kjn1 *s5kjn1 = container_of(ctrl->handler, struct s5kjn1,
@@ -779,16 +806,14 @@ static int s5kjn1_set_ctrl(struct v4l2_ctrl *ctrl)
 
 	switch (ctrl->id) {
 	case V4L2_CID_ANALOGUE_GAIN:
-		ret = cci_write(s5kjn1->regmap, S5KJN1_REG_AGAIN,
-				ctrl->val, NULL);
+		ret = s5kjn1_write_held(s5kjn1, S5KJN1_REG_AGAIN, ctrl->val);
 		break;
 	case V4L2_CID_EXPOSURE:
-		ret = cci_write(s5kjn1->regmap, S5KJN1_REG_EXPOSURE,
-				ctrl->val, NULL);
+		ret = s5kjn1_write_held(s5kjn1, S5KJN1_REG_EXPOSURE, ctrl->val);
 		break;
 	case V4L2_CID_VBLANK:
-		ret = cci_write(s5kjn1->regmap, S5KJN1_REG_VTS,
-				ctrl->val + mode->height, NULL);
+		ret = s5kjn1_write_held(s5kjn1, S5KJN1_REG_VTS,
+					ctrl->val + mode->height);
 		break;
 	case V4L2_CID_VFLIP:
 	case V4L2_CID_HFLIP:
