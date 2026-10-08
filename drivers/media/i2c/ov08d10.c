@@ -6,6 +6,7 @@
 #include <linux/delay.h>
 #include <linux/i2c.h>
 #include <linux/module.h>
+#include <linux/nvmem-provider.h>
 #include <linux/pm_runtime.h>
 #include <linux/property.h>
 #include <linux/regulator/consumer.h>
@@ -1049,6 +1050,11 @@ struct ov08d10 {
 	u8 nlanes;
 
 	const struct ov08d10_chip *chip;
+
+	/* The OTP image, read from the sensor on first use (OV08F10) */
+	u8 *otp;
+	bool otp_read;
+	bool streaming;
 };
 
 struct ov08d10_chip {
@@ -1069,6 +1075,8 @@ struct ov08d10_chip {
 	/* Digital gain register value is the control value shifted right */
 	u8 digital_gain_shift;
 	bool has_test_pattern;
+	/* Whether the sensor's OTP holds the module's calibration */
+	bool has_otp;
 
 	/* Register values for the exposure and vertical blanking controls */
 	u32 (*exposure_reg)(struct ov08d10 *ov08d10, u32 exposure);
@@ -1275,6 +1283,7 @@ static const struct ov08d10_chip ov08f10_chip = {
 	.exposure_margin = 21,
 	.analog_gain_max = 0xf8 << 3,
 	.digital_gain_shift = 4,
+	.has_otp = true,
 	.exposure_reg = ov08f10_exposure_reg,
 	.vblank_reg = ov08f10_vblank_reg,
 };
@@ -1775,6 +1784,8 @@ static int ov08d10_set_stream(struct v4l2_subdev *sd, int enable)
 		pm_runtime_put(ov08d10->dev);
 	}
 
+	ov08d10->streaming = enable;
+
 	/* vflip and hflip cannot change during streaming */
 	__v4l2_ctrl_grab(ov08d10->vflip, enable);
 	__v4l2_ctrl_grab(ov08d10->hflip, enable);
@@ -2020,6 +2031,131 @@ static int ov08d10_identify_module(struct ov08d10 *ov08d10)
 	return 0;
 }
 
+/*
+ * The OV08F10's OTP holds the module's calibration (Motorola's layout: white
+ * balance, lens shading). The vendor's register sequence loads one 128 byte
+ * page at a time (page 0x04 to 0x3f, selected in register 0xa9 of page 3)
+ * into registers 0x00-0x7f of page 9. It starts with a sensor reset, so the
+ * image is read when the sensor is not streaming, and kept.
+ */
+#define OV08F10_OTP_FIRST_PAGE	0x04
+#define OV08F10_OTP_PAGES	60
+#define OV08F10_OTP_PAGE_SIZE	128
+#define OV08F10_OTP_SIZE	(OV08F10_OTP_PAGES * OV08F10_OTP_PAGE_SIZE)
+
+static int ov08f10_otp_write(struct i2c_client *client, u8 reg, u8 val)
+{
+	return i2c_smbus_write_byte_data(client, reg, val);
+}
+
+/* Called with the sensor powered and not streaming */
+static int ov08f10_otp_load(struct ov08d10 *ov08d10)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(&ov08d10->sd);
+	unsigned int page, i;
+	int ret;
+
+	ret = ov08f10_otp_write(client, OV08D10_REG_PAGE, 0x00);
+	ret = ret ?: ov08f10_otp_write(client, 0x20, 0x0e);
+	ret = ret ?: ov08f10_otp_write(client, 0xe7, 0x03);
+	ret = ret ?: ov08f10_otp_write(client, 0xe7, 0x00);
+	if (ret)
+		return ret;
+	fsleep(5 * USEC_PER_MSEC);
+
+	ret = ov08f10_otp_write(client, OV08D10_REG_PAGE, 0x00);
+	ret = ret ?: ov08f10_otp_write(client, 0x1d, 0x00);
+	ret = ret ?: ov08f10_otp_write(client, 0x1c, 0x19);
+	ret = ret ?: ov08f10_otp_write(client, 0x20, 0x0f);
+	ret = ret ?: ov08f10_otp_write(client, 0xe7, 0x03);
+	ret = ret ?: ov08f10_otp_write(client, 0xe7, 0x00);
+	if (ret)
+		return ret;
+	fsleep(3 * USEC_PER_MSEC);
+
+	for (page = 0; page < OV08F10_OTP_PAGES; page++) {
+		u8 *dst = ov08d10->otp + page * OV08F10_OTP_PAGE_SIZE;
+
+		ret = ov08f10_otp_write(client, OV08D10_REG_PAGE, 0x03);
+		ret = ret ?: ov08f10_otp_write(client, 0x9f, 0x20);
+		ret = ret ?: ov08f10_otp_write(client, 0x9d, 0x10);
+		ret = ret ?: ov08f10_otp_write(client, 0xa9,
+					       OV08F10_OTP_FIRST_PAGE + page);
+		ret = ret ?: ov08f10_otp_write(client, OV08D10_REG_PAGE, 0x09);
+		ret = ret ?: ov08f10_otp_write(client, 0x00, 0x80);
+		if (ret)
+			return ret;
+		fsleep(5 * USEC_PER_MSEC);
+
+		for (i = 0; i < OV08F10_OTP_PAGE_SIZE; i++) {
+			ret = i2c_smbus_read_byte_data(client, i);
+			if (ret < 0)
+				return ret;
+			dst[i] = ret;
+		}
+	}
+
+	return ov08f10_otp_write(client, OV08D10_REG_PAGE, 0x00);
+}
+
+static int ov08f10_otp_read(void *priv, unsigned int off, void *val,
+			    size_t bytes)
+{
+	struct ov08d10 *ov08d10 = priv;
+	int ret = 0;
+
+	mutex_lock(&ov08d10->mutex);
+	if (!ov08d10->otp_read) {
+		/* Loading the OTP resets the sensor */
+		if (ov08d10->streaming) {
+			ret = -EBUSY;
+			goto out;
+		}
+
+		ret = pm_runtime_resume_and_get(ov08d10->dev);
+		if (ret < 0)
+			goto out;
+
+		ret = ov08f10_otp_load(ov08d10);
+		pm_runtime_put(ov08d10->dev);
+		if (ret)
+			goto out;
+
+		ov08d10->otp_read = true;
+	}
+
+	memcpy(val, ov08d10->otp + off, bytes);
+out:
+	mutex_unlock(&ov08d10->mutex);
+
+	return ret;
+}
+
+static int ov08f10_register_otp(struct ov08d10 *ov08d10)
+{
+	struct nvmem_config config = {
+		.name = "ov08f10-otp",
+		.dev = ov08d10->dev,
+		.read_only = true,
+		.root_only = false,
+		.type = NVMEM_TYPE_OTP,
+		.word_size = 1,
+		.stride = 1,
+		.size = OV08F10_OTP_SIZE,
+		.reg_read = ov08f10_otp_read,
+		.priv = ov08d10,
+	};
+	struct nvmem_device *nvmem;
+
+	ov08d10->otp = devm_kzalloc(ov08d10->dev, OV08F10_OTP_SIZE, GFP_KERNEL);
+	if (!ov08d10->otp)
+		return -ENOMEM;
+
+	nvmem = devm_nvmem_register(ov08d10->dev, &config);
+
+	return PTR_ERR_OR_ZERO(nvmem);
+}
+
 static int ov08d10_get_hwcfg(struct ov08d10 *ov08d10)
 {
 	struct device *dev = ov08d10->dev;
@@ -2196,6 +2332,13 @@ static int ov08d10_probe(struct i2c_client *client)
 	}
 
 	pm_runtime_idle(ov08d10->dev);
+
+	if (ov08d10->chip->has_otp) {
+		ret = ov08f10_register_otp(ov08d10);
+		if (ret)
+			dev_warn(ov08d10->dev, "failed to register the OTP: %d\n",
+				 ret);
+	}
 
 	return 0;
 

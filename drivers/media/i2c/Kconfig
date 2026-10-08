@@ -447,6 +447,7 @@ config VIDEO_OV02C10
 
 config VIDEO_OV08D10
         tristate "OmniVision OV08D10 sensor support"
+        select NVMEM
         help
           This is a Video4Linux2 sensor driver for the OmniVision
           OV08D10 camera sensor.
