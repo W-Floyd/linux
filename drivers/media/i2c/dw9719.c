@@ -91,6 +91,8 @@ struct dw9719_device {
 	u32 mode_low_bits;
 	u32 sac_mode;
 	u32 vcm_freq;
+	/* Whether the focus position being away from rest holds a power reference */
+	bool focus_held;
 
 	struct dw9719_v4l2_ctrls {
 		struct v4l2_ctrl_handler handler;
@@ -252,19 +254,32 @@ static int dw9719_set_ctrl(struct v4l2_ctrl *ctrl)
 						    ctrls.handler);
 	int ret;
 
-	/* Only apply changes to the controls if the device is powered up */
-	if (!pm_runtime_get_if_in_use(dw9719->dev))
-		return 0;
+	if (ctrl->id != V4L2_CID_FOCUS_ABSOLUTE)
+		return -EINVAL;
 
-	switch (ctrl->id) {
-	case V4L2_CID_FOCUS_ABSOLUTE:
-		ret = dw9719_t_focus_abs(dw9719, ctrl->val);
-		break;
-	default:
-		ret = -EINVAL;
+	/*
+	 * The actuator is powered while the lens is away from its rest
+	 * position (0), and not while a file handle of the subdev is open: a
+	 * camera stack holds the handle for as long as it runs, which kept
+	 * the actuator on, and clicking at power up, with the camera idle.
+	 * At rest, a new position is kept and written by dw9719_resume().
+	 */
+	if (ctrl->val && !dw9719->focus_held) {
+		/* The resume writes the position, and this again */
+		ret = pm_runtime_resume_and_get(dw9719->dev);
+		if (ret < 0)
+			return ret;
+		dw9719->focus_held = true;
+	} else if (!dw9719->focus_held) {
+		return 0;
 	}
 
-	pm_runtime_put(dw9719->dev);
+	ret = dw9719_t_focus_abs(dw9719, ctrl->val);
+
+	if (!ctrl->val) {
+		dw9719->focus_held = false;
+		pm_runtime_put_autosuspend(dw9719->dev);
+	}
 
 	return ret;
 }
@@ -328,23 +343,6 @@ err_power_down:
 	dw9719_power_down(dw9719);
 	return ret;
 }
-
-static int dw9719_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
-{
-	return pm_runtime_resume_and_get(sd->dev);
-}
-
-static int dw9719_close(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
-{
-	pm_runtime_put_autosuspend(sd->dev);
-
-	return 0;
-}
-
-static const struct v4l2_subdev_internal_ops dw9719_internal_ops = {
-	.open = dw9719_open,
-	.close = dw9719_close,
-};
 
 static int dw9719_init_controls(struct dw9719_device *dw9719)
 {
@@ -410,7 +408,6 @@ static int dw9719_probe(struct i2c_client *client)
 
 	v4l2_i2c_subdev_init(&dw9719->sd, client, &dw9719_ops);
 	dw9719->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
-	dw9719->sd.internal_ops = &dw9719_internal_ops;
 
 	ret = dw9719_init_controls(dw9719);
 	if (ret)
