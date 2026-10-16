@@ -34,6 +34,24 @@
 		 * console=ttyAMA0,115200n8).
 		 */
 		stdout-path = "serial0:115200n8";
+
+		/*
+		 * The panel's scanout buffer the stock firmware leaves running:
+		 * RDMA0 page 0 (the decompressor points RDMA0 BASE0 at it), the
+		 * 1920x720 ARGB8888 layer behind the LVDS serializer.
+		 */
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		framebuffer@88000000 {
+			compatible = "simple-framebuffer";
+			reg = <0x88000000 0x546000>;
+			width = <1920>;
+			height = <720>;
+			stride = <7680>;
+			format = "a8r8g8b8";
+		};
 	};
 
 	/*
@@ -251,7 +269,49 @@
  * support, not in this node's own correctness -- same treatment as
  * mrgb_panel's deliberately-omitted clock-frequency above.
  */
+/*
+ * The OTG core stays disabled: on this board the USB-A port is run in host
+ * mode through the EHCI/OHCI pair behind the mux (vendor registers: OTG core
+ * idle in device mode, HPRT0 = 0 with a stick plugged in), and a host-mode
+ * dwc2 here only finds a bogus full-speed device and could disturb the mux.
+ */
 &dwc_otg {
+	status = "disabled";
+};
+
+&ehci_mux {
 	status = "okay";
-	dr_mode = "host";
+};
+
+&ohci_mux {
+	status = "okay";
+};
+
+&ehci_host {
+	status = "okay";
+};
+
+&ohci_host {
+	status = "okay";
+};
+
+&i2c1 {
+	status = "okay";
+
+	/*
+	 * FocalTech FT7251 touch controller (vendor log: chip id 0x7251, fw 7,
+	 * 5 points, 1920x720), behind the display SerDes. No reset-gpios on
+	 * purpose: its firmware carries the panel's init code and the SerDes
+	 * link is already up, so probing must not reset it. The interrupt is
+	 * the vendor's gpsd1 9, which the vendor kernel's external-interrupt
+	 * block routes to GIC 35 (SPI 3); polarity/edge as that block left it.
+	 */
+	touchscreen@38 {
+		compatible = "focaltech,ft7251";
+		reg = <0x38>;
+		interrupt-parent = <&gic>;
+		interrupts = <GIC_SPI 3 IRQ_TYPE_LEVEL_HIGH>;
+		touchscreen-size-x = <1920>;
+		touchscreen-size-y = <720>;
+	};
 };
