@@ -16,6 +16,7 @@
 #include <linux/sizes.h>
 
 #include <asm/cp15.h>
+#include <asm/tcc803x-hb.h>
 #include <asm/cputype.h>
 #include <asm/cachetype.h>
 #include <asm/sections.h>
@@ -1305,6 +1306,17 @@ static __init void prepare_page_table(void)
 	for ( ; addr < PAGE_OFFSET; addr += PMD_SIZE)
 		pmd_clear(pmd_off_k(addr));
 
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	/* Keep the stock fb identity-mapped for the band painters. */
+	for (addr = 0x88000000; addr < 0x89000000; addr += PMD_SIZE) {
+		pmd_t *pmd = pmd_off_k(addr);
+
+		pmd[0] = __pmd(addr | mem_types[MT_DEVICE].prot_sect);
+		pmd[1] = __pmd((addr + SECTION_SIZE) | mem_types[MT_DEVICE].prot_sect);
+		flush_pmd_entry(pmd);
+	}
+#endif
+
 	/*
 	 * Find the end of the first block of lowmem.
 	 */
@@ -1756,7 +1768,9 @@ void __init paging_init(const struct machine_desc *mdesc)
 		 kernel_sec_start, kernel_sec_end);
 
 	prepare_page_table();
+	tcc803x_hb_band_direct(15, 0xffffa0a0);	/* paging_init: prepare_page_table done */
 	map_lowmem();
+	tcc803x_hb_band_direct(16, 0xffa0ffa0);	/* paging_init: map_lowmem done */
 	memblock_set_current_limit(arm_lowmem_limit);
 	pr_debug("lowmem limit is %08llx\n", (long long)arm_lowmem_limit);
 	/*
@@ -1767,6 +1781,7 @@ void __init paging_init(const struct machine_desc *mdesc)
 	dma_contiguous_remap();
 	early_fixmap_shutdown();
 	devicemaps_init(mdesc);
+	tcc803x_hb_band_direct(17, 0xffa0a0ff);	/* paging_init: devicemaps_init done */
 	kmap_init();
 	tcm_init();
 

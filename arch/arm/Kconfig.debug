@@ -1804,6 +1804,19 @@ config DEBUG_UART_8250_PALMCHIP
 	  except for having a different register layout.  Say Y here if
 	  the debug UART is of this type.
 
+config DEBUG_TCC803X_FB_HEARTBEAT
+	bool "TCC803x: boot progress and printk on the stock framebuffer"
+	depends on ARCH_TCC803X && TCC803X_KEXEC_FB
+	select FONT_SUPPORT
+	select FONT_8x16
+	select STACKTRACE
+	help
+	  For kexec'd images on a head unit with no usable UART: draws boot
+	  stage tiles, an initcall counter and a printk text console into the
+	  scanout buffer the stock firmware leaves at physical 0x88000000
+	  (3 pages of 1920x720 ARGB8888). Starts in the zImage decompressor
+	  with the MMU off and works until userspace starts.
+
 config DEBUG_UNCOMPRESS
 	bool "Enable decompressor debugging via DEBUG_LL output"
 	depends on !ARCH_MULTIPLATFORM

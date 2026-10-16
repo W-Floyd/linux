@@ -19,6 +19,7 @@
 #include <asm/asm-offsets.h>
 #include <asm/page.h>
 #include <asm/thread_info.h>
+#include <asm/tcc803x-hb.h>
 
 #if defined(CONFIG_DEBUG_LL) && !defined(CONFIG_DEBUG_SEMIHOSTING)
 #include CONFIG_DEBUG_LL_INCLUDE
@@ -98,6 +99,8 @@ ENTRY(stext)
  THUMB(	.thumb			)	@ switch to Thumb now.
  THUMB(1:			)
 
+	tcc_hb_band	4, 0x0000ff, r3, r4, r5, r6	@ blue: kernel head.S reached
+
 #ifdef CONFIG_ARM_VIRT_EXT
 	bl	__hyp_stub_install
 #endif
@@ -136,7 +139,9 @@ ENTRY(stext)
 #ifdef CONFIG_ARM_PATCH_PHYS_VIRT
 	bl	__fixup_pv_table
 #endif
+	tcc_hb_band	5, 0xff00ff, r3, r4, r5, r6	@ magenta: cpu/dtb checks passed
 	bl	__create_page_tables
+	tcc_hb_band	6, 0xff8000, r0, r3, r5, r6	@ orange: page tables built, MMU still off
 
 	/*
 	 * The following calls CPU specific code in a position independent
@@ -307,6 +312,20 @@ __create_page_tables:
 	strne	r6, [r3], #1 << PMD_ENTRY_ORDER
 	addne	r6, r6, #1 << SECTION_SHIFT
 	strne	r6, [r3]
+
+#if defined(CONFIG_DEBUG_TCC803X_FB_HEARTBEAT) && !defined(CONFIG_ARM_LPAE)
+	@ Identity-map 16MB at the stock fb with device attributes so the band
+	@ painters work with the MMU on; paging_init() drops it.
+	ldr	r3, [r10, #PROCINFO_IO_MMUFLAGS]
+	add	r0, r4, #0x88000000 >> (SECTION_SHIFT - PMD_ENTRY_ORDER)
+	mov	r6, #0x88000000
+	orr	r6, r6, r3
+	mov	r5, #16
+1:	str	r6, [r0], #1 << PMD_ENTRY_ORDER
+	add	r6, r6, #1 << SECTION_SHIFT
+	subs	r5, r5, #1
+	bne	1b
+#endif
 
 #if defined(CONFIG_ARM_LPAE) && defined(CONFIG_CPU_ENDIAN_BE8)
 	sub	r4, r4, #4			@ Fixup page table pointer

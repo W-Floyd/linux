@@ -88,6 +88,7 @@ obj-y			+= head$(MMUEXT).o
 obj-$(CONFIG_DEBUG_LL)	+= debug.o
 obj-$(CONFIG_EARLY_PRINTK)	+= early_printk.o
 obj-$(CONFIG_ARM_PATCH_PHYS_VIRT)	+= phys2virt.o
+obj-$(CONFIG_DEBUG_TCC803X_FB_HEARTBEAT)	+= tcc803x-fbcon.o
 
 # This is executed very early using a temporary stack when no memory allocator
 # nor global data is available. Everything has to be allocated on the stack.

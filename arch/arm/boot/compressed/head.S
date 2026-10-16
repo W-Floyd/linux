@@ -8,6 +8,7 @@
 #include <linux/linkage.h>
 #include <asm/assembler.h>
 #include <asm/v7m.h>
+#include <asm/tcc803x-hb.h>
 
 #include "efi-header.S"
 
@@ -184,6 +185,7 @@
 		 * As of today (2014) that's exactly the members of the A and R
 		 * classes.
 		 */
+
  AR_CLASS(	.arm	)
 start:
 		.type	start,#function
@@ -244,6 +246,21 @@ start:
 		orr	r4, r4, #0x10000000
 		orr	r4, r4, #0x10000
 		str	r4, [r3]
+#endif
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+		@ Reset-surviving marker just past the fb: magic, r1, r2, cpsr.
+		mov	r6, #0x88000000
+		add	r6, r6, #0xff0000
+		movw	r5, #0xee01
+		movt	r5, #0xc0ff
+		str	r5, [r6]
+		str	r7, [r6, #4]
+		str	r8, [r6, #8]
+		str	r9, [r6, #12]
+		mov	r4, #0x88000000		@ page the text console draws into
+		str	r4, [r6, #16]
+		tcc_hb_clear	r3, r4, r5
+		tcc_hb_band	0, 0xff0000, r3, r4, r5, r6	@ red: zImage entered
 #endif
 
 #ifndef CONFIG_CPU_V7M
@@ -644,11 +661,13 @@ not_relocated:	mov	r0, #0
  *   r7  = architecture ID
  *   r8  = atags pointer
  */
+		tcc_hb_band	1, 0xffff00, r0, r1, r2, r3	@ yellow: about to decompress
 		mov	r0, r4
 		mov	r1, sp			@ malloc space above stack
 		add	r2, sp, #MALLOC_SIZE	@ 64k max
 		mov	r3, r7
 		bl	decompress_kernel
+		tcc_hb_band	2, 0x00ff00, r0, r1, r2, r3	@ green: decompressed
 
 		get_inflated_image_size	r1, r2, r3
 
@@ -1449,6 +1468,9 @@ __hyp_reentry_vectors:
 #endif /* CONFIG_ARM_VIRT_EXT */
 
 __enter_kernel:
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+		tcc_hb_band	3, 0x00ffff, r0, r1, r2, r3	@ cyan: entering kernel
+#endif
 		mov	r0, #0			@ must be 0
 		mov	r1, r7			@ restore architecture number
 		mov	r2, r8			@ restore atags pointer
