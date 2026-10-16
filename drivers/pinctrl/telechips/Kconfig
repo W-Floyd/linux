@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config PINCTRL_TCC803X
+	bool "Telechips TCC803x pin controller driver"
+	depends on ARCH_TCC803X || COMPILE_TEST
+	depends on OF
+	select PINMUX
+	default ARCH_TCC803X
+	help
+	  Pin controller and GPIO driver for the Telechips TCC803x SoC.
+	  Covers only pin banks GPA..GPSD1 (see the driver for why); does
+	  not yet implement pin bias/drive-strength/slew-rate (pinconf).

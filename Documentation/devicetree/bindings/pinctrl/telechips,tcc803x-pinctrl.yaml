@@ -1,0 +1,95 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/pinctrl/telechips,tcc803x-pinctrl.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Telechips TCC803x Pin Controller / GPIO
+
+maintainers:
+  - William Floyd <git@notmy.space>
+
+description: |
+  The TCC803x pin controller handles pin multiplexing, GPIO and (on some
+  pins) basic pin configuration for the SoC's GPA..GPSD2/GPH/GPK/GPMA pin
+  banks. Each bank is a fixed-offset block of registers starting at
+  0x14200000; a separate, smaller "PM GPIO" block for the always-on domain
+  exists at 0x14800800.
+
+  CAVEAT: this binding and its driver currently cover only the pin banks
+  whose registers fall inside the first 0x300-byte reg window (GPA through
+  GPSD1). The vendor's own devicetree declares that same 0x300-byte window
+  for this node while its own driver computes register offsets for
+  GPSD2/GPH/GPK/GPMA as far out as +0x6c0 -- outside that window. That
+  inconsistency is unresolved in the vendor source itself and is not
+  carried into this binding; those banks are deliberately left
+  undocumented/unsupported here until it is.
+
+properties:
+  compatible:
+    const: telechips,tcc803x-pinctrl
+
+  reg:
+    items:
+      - description: Main GPIO/pinmux register block (banks GPA..GPSD1)
+      - description: PM-domain GPIO register block (always-on bank)
+
+  gpio-controller: true
+
+  "#gpio-cells":
+    const: 2
+
+  interrupts:
+    description:
+      Per-pin external-interrupt lines, routed through a shared mux
+      (EINTSEL) rather than one line per GPIO.
+    minItems: 1
+    maxItems: 15
+
+required:
+  - compatible
+  - reg
+  - gpio-controller
+  - "#gpio-cells"
+
+patternProperties:
+  "-grp$":
+    type: object
+    additionalProperties: false
+    description:
+      A pin group assigning one function to a list of pins.
+
+    properties:
+      telechips,pins:
+        $ref: /schemas/types.yaml#/definitions/string-array
+        description:
+          Pin names in "<bank>-<pin>" form, e.g. "gpsd0-11".
+
+      telechips,pin-function:
+        $ref: /schemas/types.yaml#/definitions/uint32
+        description:
+          Raw 4-bit function-select value written to that pin's FUNC field.
+          There is no symbolic name for these in vendor source beyond the
+          raw integer; see the driver for the one value currently known
+          (UART0, 7).
+
+    required:
+      - telechips,pins
+      - telechips,pin-function
+
+additionalProperties: false
+
+examples:
+  - |
+    pinctrl@14200000 {
+        compatible = "telechips,tcc803x-pinctrl";
+        reg = <0x14200000 0x300>, <0x14800800 0x100>;
+        gpio-controller;
+        #gpio-cells = <2>;
+
+        uart0_grp: uart0-grp {
+            telechips,pins = "gpsd0-11", "gpsd0-12";
+            telechips,pin-function = <7>;
+        };
+    };
+...
