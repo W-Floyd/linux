@@ -1,0 +1,134 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/display/bridge/telechips,tcc803x-hdmi.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Telechips TCC803x DesignWare HDMI TX Encoder
+
+maintainers:
+  - William Floyd <git@notmy.space>
+
+description: |
+  The TCC803x HDMI transmitter is a Synopsys DesignWare HDMI TX controller
+  (dw-hdmi) IP core. Identification confirmed from the vendor driver source
+  (Telechips AVNT5W_TCC803XKK_kernel, GPLv2, Hyundai Mobis supplier-portal
+  release): Synopsys copyright headers and "dwc_hdmi_*"-prefixed functions
+  throughout drivers/char/hdmi_v2_0/, and the vendor's own board DT already
+  spells out compatible = "telechips,dw-hdmi-tx" for this exact node
+  (arch/arm/boot/dts/tcc/tcc803x.dtsi:2872 in that tree).
+
+  The companion PHY is reached through a Telechips-specific MMIO register
+  window (the "hdmi_phy" reg region) rather than the controller's internal
+  I2C PHY master that most dw-hdmi platforms use -- see
+  drivers/char/hdmi_v2_0/hdmi_api_lib/src/phy/phy_803x.c in that same
+  vendor tree (hdmi_phy_write()/hdmi_phy_read() do byte-wide iowrite32/
+  ioread32 against this window). This is wired up as dw-hdmi's "vendor PHY"
+  mechanism (struct dw_hdmi_phy_ops), the same mechanism Amlogic's
+  meson_dw_hdmi.c uses for its own non-I2C PHY.
+
+  Does not reference the common synopsys,dw-hdmi.yaml schema: its
+  reg/clocks/interrupts caps (1 reg, <=5 clocks named iahb/isfr, 1
+  interrupt) are sized for the minimal AHB/APB-clock integration most
+  dw-hdmi platforms use, not this SoC's full vendor register/clock/IRQ
+  set (CEC, HDCP1.4/2.2, DDI bus clock, etc.) -- allOf-ing it in would
+  only narrow this schema, never widen it.
+
+properties:
+  compatible:
+    const: telechips,tcc803x-hdmi
+
+  reg:
+    minItems: 3
+    maxItems: 4
+
+  reg-names:
+    minItems: 3
+    items:
+      - const: hdmi_link
+      - const: hdcp_2.2
+      - const: hdmi_phy
+      - const: i2c_port_cfg
+
+  reg-io-width:
+    const: 4
+
+  interrupts:
+    minItems: 1
+    maxItems: 2
+
+  interrupt-names:
+    minItems: 1
+    items:
+      - const: hdmi_link
+      - const: hdcp_2.2
+
+  clocks:
+    minItems: 6
+    maxItems: 8
+
+  clock-names:
+    minItems: 6
+    items:
+      - const: hdmi_ref_clk
+      - const: hdmi_spdif_clk
+      - const: hdmi_apb_clk
+      - const: hdmi_cec
+      - const: hdmi_hdcp14
+      - const: hdmi_hdcp22
+      - const: hdmi_ddibus
+      - const: hdmi_isoip_ddibus
+
+  telechips,ref-clock-source:
+    description: |
+      HDMI reference clock source select, matching the vendor's own
+      hdmi_ref_src_clock board property (drivers/char/hdmi_v2_0/hdmi_tx.c
+      in the vendor tree). Not yet backed by real CKC clock IDs in
+      mainline (see the clocks note below) -- kept as a raw selector
+      property, same value space as the vendor's own property, until the
+      corresponding clock-controller support exists to express this as an
+      actual "clocks" phandle/assigned-clock-parent instead.
+    $ref: /schemas/types.yaml#/definitions/uint32
+    enum: [0, 1, 2, 3]
+
+  telechips,phy-type:
+    description: |
+      Companion PHY selection, matching the vendor's own hdmi_phy_type
+      board property. 0 selects PHY 8980, 1 selects PHY 8985 (vendor
+      drivers/char/hdmi_v2_0/include/hdmi_includes.h comment, "0 8980, 1
+      8985").
+    $ref: /schemas/types.yaml#/definitions/uint32
+    enum: [0, 1]
+
+required:
+  - compatible
+  - reg
+  - reg-names
+  - reg-io-width
+  - interrupts
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+
+    soc {
+      #address-cells = <1>;
+      #size-cells = <1>;
+
+      hdmi-tx@12400000 {
+        compatible = "telechips,tcc803x-hdmi";
+        reg = <0x12400000 0x20000>, <0x12440000 0x1000>,
+              <0x12480000 0x1000>, <0x163c0000 0x10>;
+        reg-names = "hdmi_link", "hdcp_2.2", "hdmi_phy", "i2c_port_cfg";
+        reg-io-width = <4>;
+        interrupts = <GIC_SPI 123 IRQ_TYPE_LEVEL_HIGH>,
+                     <GIC_SPI 126 IRQ_TYPE_LEVEL_HIGH>;
+        interrupt-names = "hdmi_link", "hdcp_2.2";
+        telechips,ref-clock-source = <0>;
+        telechips,phy-type = <0>;
+      };
+    };
+
+...
