@@ -76,15 +76,23 @@
 	 * uses (not DISP1 as an earlier pass claimed -- that board's own
 	 * dts carries zero DISP overrides; it includes the real AVN
 	 * board's base dtsi unmodified, whose fbdisplay node is
-	 * fbdisplay_num=0). LVDS has a complete vendor driver, an on-die
-	 * PHY (lvds_phy@12370000 in tcc803x.dtsi), and the real AVN
-	 * board's own pinctrl names lvds_variant_check-gpio alongside
-	 * digital_variant_check-gpio -- real vendor source leans LVDS over
+	 * fbdisplay_num=0). LVDS has a complete vendor driver and an on-die
+	 * PHY (lvds_phy@12370000 in tcc803x.dtsi). Its CKC_PCLKCTRL gate
+	 * (PERI_LVDS_PHY, clock ID 105) read EN=1/SEL=XIN on a live
+	 * register capture off the real running unit -- the LVDS PHY's
+	 * clock is actually enabled right now, not just present in source.
+	 * (lvds_variant_check-gpio/digital_variant_check-gpio, named
+	 * alongside each other in the real board's pinctrl, turned out to
+	 * be camera-link variant detection -- drivers/misc/mobis/
+	 * daudio_pinctrl.c:608-617 -- not display-panel detection; a live
+	 * read of both returned 0/0 and doesn't bear on this question.)
+	 * Real vendor source + live clock-gate evidence both lean LVDS over
 	 * MRGB for the actual panel, even though this node stays MRGB
-	 * pending live confirmation (see the binding's caveat section).
-	 * This node exists so the real, live-captured DISP0 timing has
-	 * somewhere honest to live, not as a claim that an MRGB pipeline
-	 * works end to end.
+	 * pending live confirmation that DISP0's pixel stream actually
+	 * reaches the panel through lvds_phy (see the binding's caveat
+	 * section). This node exists so the real, live-captured DISP0
+	 * timing has somewhere honest to live, not as a claim that an MRGB
+	 * pipeline works end to end.
 	 */
 	mrgb_panel: panel {
 		compatible = "telechips,tcc803x-mrgb-panel";
