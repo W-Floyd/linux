@@ -387,6 +387,19 @@ config DRM_TCC803X_DW_HDMI
 	  support: PHY init and TMDS output for a single, vendor-confirmed
 	  pixel clock (1920x1080p60). No HDCP, audio, or CEC.
 
+config DRM_TCC803X_LVDS
+	tristate "Telechips TCC803x on-die LVDS bridge"
+	depends on OF
+	depends on COMMON_CLK
+	depends on ARCH_TCC803X || COMPILE_TEST
+	help
+	  Choose this to enable the on-die LVDS PHY/serializer on
+	  Telechips TCC803x SoCs. Minimal support: enables the
+	  vendor-confirmed, live-confirmed PERI_LVDS_PHY clock gate only.
+	  Does not program the PHY's own registers -- their bit layout is
+	  not available in extracted vendor source. Will not by itself
+	  produce a working display; see the driver's header comment.
+
 config DRM_TOSHIBA_TC358762
 	tristate "TC358762 DSI/DPI bridge"
 	depends on OF

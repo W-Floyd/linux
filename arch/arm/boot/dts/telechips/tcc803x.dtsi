@@ -656,6 +656,54 @@
 		};
 
 		/*
+		 * On-die LVDS PHY/serializer. reg (4 regions) and clock
+		 * confirmed from vendor tcc803x.dtsi:2266-2271
+		 * (AVNT5W_TCC803XKK_kernel): lvds_phy@12370000, reg spans
+		 * 0x12370000/0x400, 0x12370400/0x400, 0x12360800/0x400,
+		 * 0x12360c00/0x400, clocks = <&clk_peri PERI_LVDS_PHY>.
+		 * A live register read tonight (see
+		 * telechips,tcc803x-lvds.yaml) confirmed this clock's
+		 * CKC_PCLKCTRL gate is actually enabled on the real running
+		 * unit (SEL=XIN, EN=1) -- real evidence this block is
+		 * powered, not merely present in source.
+		 *
+		 * status = "disabled" here, like hdmi_tx: this is structural
+		 * (address/clock only). The PHY's own 4 register regions'
+		 * bit layout -- what it takes to actually lock/enable the
+		 * serializer -- is not in this extracted GPL package; only
+		 * clk_prepare_enable() on the gate above is vendor-confirmed
+		 * (drivers/video/fbdev/tcc-fb/lcd_TM123XDHP90.c). See the
+		 * binding and drivers/gpu/drm/bridge/tcc803x-lvds.c for what
+		 * is and is not implemented.
+		 */
+		lvds_phy: lvds-phy@12370000 {
+			compatible = "telechips,tcc803x-lvds";
+			reg = <0x12370000 0x400>, <0x12370400 0x400>,
+			      <0x12360800 0x400>, <0x12360c00 0x400>;
+			reg-names = "lvds0", "lvds1", "lvds-cfg0", "lvds-cfg1";
+			clocks = <&ckc TCC803X_CLK_PERI_LVDS_PHY>;
+			clock-names = "lvds-phy";
+			status = "disabled";
+
+			/*
+			 * Input endpoint, same devm_drm_of_get_bridge()
+			 * port-0/endpoint-0 pairing pattern as hdmi_tx_in
+			 * above. Unpaired here (no remote-endpoint): which
+			 * CRTC output endpoint feeds this is a board-level,
+			 * DT-time choice (see tcc803x-avn.dts) because
+			 * vioc_crtc0's own port carries exactly one endpoint
+			 * -- devm_drm_of_get_bridge()'s hardcoded (0, 0)
+			 * resolves a single bridge, not a chain, so HDMI and
+			 * LVDS cannot both be wired live from the same CRTC
+			 * endpoint without a driver change.
+			 */
+			port {
+				lvds_phy_in: endpoint {
+				};
+			};
+		};
+
+		/*
 		 * HDMI CEC. Separate SFR block from hdmi-tx's own "hdmi_iob_cec"
 		 * region (0x16051000, part of hdmi-tx's shared IOB config window,
 		 * not mapped here) -- this is the dedicated CEC1 controller.

@@ -1,0 +1,122 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/display/telechips/telechips,tcc803x-lvds.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Telechips TCC803x on-die LVDS PHY/serializer
+
+maintainers:
+  - William Floyd <git@notmy.space>
+
+description: |
+  The TCC803x SoC has an on-die LVDS transmitter (PHY + serializer),
+  distinct from the VIOC MISCCFG MRGB mux documented in
+  telechips,tcc803x-mrgb-panel.yaml -- see that binding for the full
+  LVDS-vs-MRGB evidence trail (vendor driver, same-board-family
+  precedent, live MISCCFG read, live PERI_LVDS_PHY clock-gate read).
+  This binding only documents the LVDS block itself.
+
+  reg (4 regions) and the PERI_LVDS_PHY clock are confirmed from vendor
+  source (AVNT5W_TCC803XKK_kernel, Hyundai Mobis supplier-portal
+  release, Telechips Inc., GPLv2):
+    arch/arm/boot/dts/tcc/tcc803x.dtsi:2266-2271
+      lvds_phy:lvds_phy@12370000 {
+          compatible = "telechips,lvds_phy";
+          clocks = <&clk_peri PERI_LVDS_PHY>;
+          phy-frequency = <100000000>;
+          reg = <0x12370000 0x400 0x12370400 0x400
+                 0x12360800 0x400 0x12360C00 0x400>;
+      };
+    include/dt-bindings/clock/tcc803x-clks.h:145 (PERI_LVDS_PHY == 105)
+
+  phy-frequency (100 MHz) is not carried into this binding: it is not
+  a mainline graph/clock property, and nothing in the extracted vendor
+  source consumes it outside that same static DT value, so it would
+  add a number without adding confirmed behavior.
+
+  A live register read tonight confirmed PERI_LVDS_PHY's own
+  CKC_PCLKCTRL gate (clock ID 105, CKC_PCLKCTRL(105) = 0x14000274) is
+  enabled on the real running head unit: 0xe5000000, decoded as
+  SEL=5=XIN, EN (bit 29) = 1, via the same PCLKCTRL field layout
+  already confirmed for PERI_UART0/PERI_LCD0. That is real, direct
+  evidence this clock gate is live right now -- not merely present in
+  vendor source. The same read found the lvds_phy block's own 4
+  register regions all reading 0x00000000; their bit layout is not
+  confirmed from any source in this extracted GPL package (vendor
+  panel driver drivers/video/fbdev/tcc-fb/lcd_TM123XDHP90.c only calls
+  clk_prepare_enable() on this clock -- no lower-level PHY register
+  writes exist anywhere in the tree), so an all-zero read is exactly
+  what reset state looks like and proves nothing either way about PHY
+  programming. The real init sequence most likely lives in this
+  board's bootloader package, not extracted here.
+
+  CONSEQUENCE FOR THIS BINDING: it documents reg and the one
+  vendor-confirmed clock only. No PHY-control or PHY-status register
+  property is defined, because no source confirms what such a
+  property would mean. See drivers/gpu/drm/bridge/tcc803x-lvds.c for
+  what the driver built against this binding does and does not do.
+
+properties:
+  compatible:
+    const: telechips,tcc803x-lvds
+
+  reg:
+    items:
+      - description: LVDS PHY/serializer region 0 (0x12370000)
+      - description: LVDS PHY/serializer region 1 (0x12370400)
+      - description: LVDS config region 0 (0x12360800)
+      - description: LVDS config region 1 (0x12360c00)
+
+  reg-names:
+    items:
+      - const: lvds0
+      - const: lvds1
+      - const: lvds-cfg0
+      - const: lvds-cfg1
+
+  clocks:
+    maxItems: 1
+    description: PERI_LVDS_PHY (CKC_PCLKCTRL channel 105)
+
+  clock-names:
+    items:
+      - const: lvds-phy
+
+  port:
+    $ref: /schemas/graph.yaml#/properties/port
+    description:
+      Input endpoint, paired with the upstream CRTC's own output
+      endpoint the same way hdmi_tx's "port" is in tcc803x.dtsi --
+      devm_drm_of_get_bridge(dev, dev->of_node, 0, 0) on the CRTC side
+      resolves exactly one such endpoint. hdmi_tx and this node cannot
+      both be the live target of that single endpoint at once; which
+      one is wired is a board-DT-time choice (see tcc803x-avn.dts).
+
+required:
+  - compatible
+  - reg
+  - reg-names
+  - clocks
+  - clock-names
+
+additionalProperties: false
+
+examples:
+  - |
+    lvds-phy@12370000 {
+        compatible = "telechips,tcc803x-lvds";
+        reg = <0x12370000 0x400>, <0x12370400 0x400>,
+              <0x12360800 0x400>, <0x12360c00 0x400>;
+        reg-names = "lvds0", "lvds1", "lvds-cfg0", "lvds-cfg1";
+        clocks = <&ckc 105>;
+        clock-names = "lvds-phy";
+
+        port {
+            lvds_phy_in: endpoint {
+                remote-endpoint = <&vioc_crtc0_out>;
+            };
+        };
+    };
+
+...

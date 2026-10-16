@@ -64,6 +64,12 @@
 #define TCC803X_CLK_PERI_HDMI_CEC	17
 #define TCC803X_CLK_PERI_HDMI_HDCP14	18
 #define TCC803X_CLK_PERI_HDMI_HDCP22	19
+/*
+ * PERI_LVDS_PHY == 105: confirmed live, not from static vendor source --
+ * see the lvds_phy node's comment in tcc803x.dtsi for the register
+ * capture this index is read from (CKC_PCLKCTRL(105), 0x14000274).
+ */
+#define TCC803X_CLK_PERI_LVDS_PHY	105
 
 /*
  * DDIBUS_* onecell IDs -- mainline-only (base + vendor bit number), see
