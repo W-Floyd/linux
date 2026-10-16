@@ -153,25 +153,72 @@
 };
 
 /*
- * HDMI enablement: the real active AVN board DT in the vendor tree
- * (arch/arm/boot/dts/mobis/tcc8031-android-avn.dtsi:285-295, TCC8031 being
- * this SoC family's real AVN silicon) sets hdmi_ref_src_clock = <0> (XIN)
- * and hdmi_phy_type = <0> (PHY 8980), matching here. This is the only
- * realistic debug/console-replacement output path on hardware with no
- * accessible UART header, so it is enabled by default on this board file
- * (unlike sdhc0 above, which mirrors the vendor's own disabled-by-default
- * SoC dtsi and is opted in per board).
+ * HDMI: real, vendor-confirmed wiring (hdmi_ref_src_clock = <0> / XIN,
+ * hdmi_phy_type = <0> / PHY 8980, arch/arm/boot/dts/mobis/
+ * tcc8031-android-avn.dtsi:285-295). Left disabled by default on THIS
+ * board file for now: devm_drm_of_get_bridge(dev, dev->of_node, 0, 0)
+ * in tcc803x_drm_vioc.c's tcc803x_vioc_attach_bridge() resolves exactly
+ * one bridge off vioc_crtc0's single output endpoint (port 0, endpoint
+ * 0) -- it does not walk or chain multiple bridges, so HDMI and the
+ * LVDS bridge below cannot both be the live target of that endpoint at
+ * once without a driver change. LVDS is wired live below instead for
+ * this kexec test pass, since exercising that untested path is the
+ * point of this round of bring-up. To go back to testing HDMI: set
+ * status="okay" here (with the properties below) and remove the
+ * &vioc_crtc0_out override below so vioc_crtc0_out keeps its
+ * tcc803x.dtsi default (&hdmi_tx_in).
  */
 &hdmi_tx {
-	status = "okay";
+	status = "disabled";
 	telechips,ref-clock-source = <0>;
 	telechips,phy-type = <0>;
 };
 
 /*
- * VIOC single-plane path: RDMA0 -> WMIX0/DISP0 -> hdmi_tx. See
- * tcc803x.dtsi's vioc-config/vioc-rdma0/vioc-crtc0 nodes for register
- * citations and what's deliberately not modeled.
+ * LVDS: wired live for this kexec test pass (see &hdmi_tx above for
+ * why only one of HDMI/LVDS can be live at a time). Panel referenced
+ * structurally only (telechips,tcc803x-lvds-panel.yaml) -- see
+ * drivers/gpu/drm/bridge/tcc803x-lvds.c for why this bridge does not
+ * chain to it. clk and the 4 register regions are real
+ * (tcc803x.dtsi's lvds_phy node); PHY-level register init is NOT
+ * implemented by that driver -- see its header for why.
+ */
+&lvds_phy {
+	status = "okay";
+};
+
+&vioc_crtc0_out {
+	remote-endpoint = <&lvds_phy_in>;
+};
+
+&lvds_phy_in {
+	remote-endpoint = <&vioc_crtc0_out>;
+};
+
+/ {
+	lvds_panel: lvds-panel {
+		compatible = "telechips,tcc803x-lvds-panel";
+		width-mm = <92>;
+		height-mm = <243>;
+
+		panel-timing {
+			hactive = <1920>;
+			vactive = <720>;
+			hsync-len = <31>;
+			hfront-porch = <49>;
+			hback-porch = <159>;
+			vsync-len = <4>;
+			vfront-porch = <14>;
+			vback-porch = <27>;
+		};
+	};
+};
+
+/*
+ * VIOC single-plane path: RDMA0 -> WMIX0/DISP0 -> lvds_phy (this build)
+ * or hdmi_tx (see above). See tcc803x.dtsi's vioc-config/vioc-rdma0/
+ * vioc-crtc0 nodes for register citations and what's deliberately not
+ * modeled.
  */
 &vioc_config {
 	status = "okay";

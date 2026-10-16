@@ -511,6 +511,7 @@ static const struct tcc803x_ckc_peri_desc tcc803x_ckc_peri_clocks[] = {
 	{ TCC803X_CLK_PERI_HDMI_CEC,	"peri-hdmi-cec" },
 	{ TCC803X_CLK_PERI_HDMI_HDCP14,	"peri-hdmi-hdcp14" },
 	{ TCC803X_CLK_PERI_HDMI_HDCP22,	"peri-hdmi-hdcp22" },
+	{ TCC803X_CLK_PERI_LVDS_PHY,	"peri-lvds-phy" },
 };
 
 struct tcc803x_ckc_ddibus_desc {
