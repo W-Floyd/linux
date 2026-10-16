@@ -96,6 +96,7 @@ obj-$(CONFIG_PINCTRL_STM32)	+= stm32/
 obj-y				+= sunplus/
 obj-$(CONFIG_PINCTRL_SUNXI)	+= sunxi/
 obj-y				+= tegra/
+obj-y				+= telechips/
 obj-y				+= ti/
 obj-$(CONFIG_PINCTRL_ULTRARISC)	+= ultrarisc/
 obj-$(CONFIG_PINCTRL_UNIPHIER)	+= uniphier/
