@@ -68,27 +68,22 @@ static const struct drm_driver tcc803x_drm_driver = {
 };
 
 /*
- * Component match set: populated from the "ports"/phandle list hanging
- * off the top-level display node (see tcc803x_drm_add_components()).
- * Each matched component is expected to implement component_ops and,
- * on ->bind(), register itself as a CRTC/plane (VIOC side) or as an
- * encoder/connector (HDMI side) against the drm_device handed to it
- * via drvdata/component_bind_all() the way exynos/rockchip do it.
+ * No of_device_id match table here: tcc803x_drm_add_components() below
+ * builds the component_match set positionally, from the "ports" phandle
+ * list on the display-subsystem node (drm_of_component_match_add() +
+ * compare_of(), same as exynos/rockchip), not by compatible string. A
+ * vioc_crtc0/hdmi_tx of_device_id table would never be consulted by that
+ * path, so it isn't carried here.
  *
- * NOTE: as of this writing the VIOC and HDMI driver/DT work this
- * depends on has not landed in this tree yet (checked via `git status`
- * before writing this file - no vioc- or hdmi- driver or DT nodes are
- * present). The compatible strings below are therefore PROVISIONAL -
- * they match the naming convention used elsewhere in this port
- * (telechips,tcc803x-*) but must be reconciled with whatever the VIOC
- * and HDMI agents actually land.
+ * drivers/gpu/drm/telechips/tcc803x_drm_vioc.c implements the VIOC CRTC
+ * side as a real component (telechips,tcc803x-vioc-crtc, component_add()
+ * in its ->probe()). drivers/gpu/drm/bridge/tcc803x-dw-hdmi.c implements
+ * the HDMI side as a plain platform_driver around dw_hdmi_probe() - it is
+ * a DRM bridge, not a component, and never calls component_add(). Listing
+ * &hdmi_tx in "ports" (see tcc803x-avn.dts) therefore still leaves one
+ * match in the set that nothing will ever satisfy; see the status note at
+ * the bottom of this file.
  */
-static const struct of_device_id tcc803x_drm_component_ids[] = {
-	{ .compatible = "telechips,tcc803x-vioc-crtc" },
-	{ .compatible = "telechips,tcc803x-vioc-plane" },
-	{ .compatible = "telechips,tcc803x-hdmi" },
-	{}
-};
 
 static int tcc803x_drm_bind(struct device *dev)
 {
@@ -257,7 +252,8 @@ MODULE_LICENSE("GPL");
 
 /*
  * ===========================================================================
- * Honest status (deliverable 2), written at the time this file was added:
+ * Honest status, updated now that the VIOC CRTC driver, the HDMI bridge
+ * driver, and the display-subsystem DT node have all landed:
  *
  * DONE:
  *  - Top-level component-master skeleton: allocates the drm_device, wires
@@ -266,37 +262,26 @@ MODULE_LICENSE("GPL");
  *    up automatically against whatever CRTC(s) the component drivers expose.
  *  - Kconfig/Makefile wiring (see Kconfig, Makefile in this directory) and
  *    drivers/gpu/drm/Kconfig source line.
+ *  - tcc803x_drm_vioc.c implements the VIOC CRTC/plane as a real component
+ *    (telechips,tcc803x-vioc-crtc, component_add()/component_del() in
+ *    probe/remove) and will bind successfully against this file's match set.
+ *  - tcc803x-dw-hdmi.c implements the HDMI side and the display-subsystem
+ *    node (arch/arm/boot/dts/telechips/tcc803x-avn.dts) lists both
+ *    &vioc_crtc0 and &hdmi_tx under "ports", so dtbs_check/dtc are happy and
+ *    tcc803x_drm_add_components() has real phandles to walk.
  *
  * NOT DONE / BLOCKED:
- *  - HDMI landed (checked via `git status` immediately before writing this
- *    file, re-checked once more after a first pass): drivers/gpu/drm/bridge/
- *    tcc803x-dw-hdmi.c plus arch/arm/boot/dts/telechips/tcc803x.dtsi gained
- *    a `hdmi_tx: hdmi-tx@12400000` node with
- *    `compatible = "telechips,tcc803x-hdmi"` - this already matches the
- *    placeholder string below, no change needed there. It is a Synopsys
- *    dw-hdmi-derived DRM BRIDGE, not a component - it will need wiring via
- *    drm_bridge_attach() from whatever encoder the VIOC driver exposes,
- *    not via this file's component_match list. That attach call belongs in
- *    the VIOC CRTC/encoder driver, not here.
- *  - VIOC CRTC/plane driver has NOT landed (no vioc_crtc/vioc_wmix/vioc_rdma
- *    DT nodes or driver files anywhere in the tree as of this writing - only
- *    comments referencing the VIOC MMIO region at 0x12000000). This file
- *    therefore cannot be bound to anything real yet: compiles, but
- *    component_master_add_with_match() will find zero matches (no "ports"
- *    phandles exist to parse) and probe will return -ENODEV every time, by
- *    design, until the VIOC side lands.
- *  - The "telechips,tcc803x-vioc-crtc" / "telechips,tcc803x-vioc-plane"
- *    compatible strings above are PROVISIONAL guesses at naming convention
- *    (following the "telechips,tcc803x-hdmi" pattern that turned out
- *    correct), not confirmed against the VIOC agent's actual binding.
- *    Whoever lands that needs to either match these strings or this match
- *    table needs updating to theirs.
- *  - No top-level "display-subsystem" DT node was added to any .dts/.dtsi,
- *    deliberately: adding it now would reference phandles (&vioc_crtc0,
- *    &hdmi_encoder) that don't exist, which would fail dtbs_check/dtc and
- *    give false confidence that the pipeline is wired. That node is a
- *    ~10 line addition once the VIOC/HDMI DT nodes exist; see the two
- *    dependent tickets' output for the real phandle names to use.
+ *  - hdmi_tx's driver (tcc803x-dw-hdmi.c) is a plain platform_driver around
+ *    dw_hdmi_probe() - a DRM BRIDGE, not a component. It never calls
+ *    component_add(), so the &hdmi_tx entry in "ports" adds a match that
+ *    nothing will ever satisfy: component_bind_all() will wait on it
+ *    indefinitely and tcc803x_drm_platform_probe() will stay deferred
+ *    forever instead of completing. The fix is for the VIOC CRTC driver to
+ *    look up and drm_bridge_attach() the HDMI bridge directly (the usual
+ *    pattern for a bridge behind a component CRTC), not to list it as a
+ *    component match here. That attach call, and removing &hdmi_tx from
+ *    "ports" once it's in place, is still TODO in tcc803x_drm_vioc.c, not
+ *    this file.
  *  - mode_config min/max width/height are placeholders, not derived from
  *    real VIOC DISP timing-generator limits.
  *  - No IOMMU/VIOC-address-space wiring (tcc_drm_iommu.c in the vendor tree
@@ -304,10 +289,8 @@ MODULE_LICENSE("GPL");
  *    into whatever MMU sits in front of the VIOC RDMA/WDMA blocks, if any
  *    exists on TCC803x's VIOC generation (not yet confirmed).
  *
- * Bottom line: this is real, buildable glue code, not a stub that only
- * looks complete. It will light up fbcon the moment a conforming CRTC and
- * encoder/connector are registered and the display-subsystem DT node is
- * added - but neither of those exists yet, so there is no working pipeline
- * tonight. Said plainly rather than claiming otherwise.
+ * Bottom line: the CRTC side is real and will bind; the HDMI bridge exists
+ * but isn't wired into the pipeline yet, so component_bind_all() still
+ * never completes and there is no working display output tonight.
  * ===========================================================================
  */

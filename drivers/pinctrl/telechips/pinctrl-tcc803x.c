@@ -141,6 +141,16 @@ struct tcc803x_pinctrl {
 	struct pinctrl_desc desc;
 	struct pinctrl_pin_desc *pins;
 	unsigned int npins;
+	/*
+	 * Guards the OUTPUT_ENABLE read-modify-write in
+	 * tcc803x_gpio_direction_set(): the register packs every pin of a
+	 * bank into one 32-bit word, so two threads changing direction on
+	 * different pins of the same bank would otherwise race on the same
+	 * readl()/writel() pair. Also taken around the DATA_OR/DATA_BIC
+	 * write in tcc803x_gpio_set() for the same reason, even though that
+	 * one write is itself atomic - it keeps a direction_set() and a
+	 * set() on sibling pins from interleaving unpredictably.
+	 */
 	spinlock_t lock;
 };
 

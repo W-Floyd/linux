@@ -177,6 +177,17 @@ static void sdhci_tcc803x_hw_reset(struct sdhci_host *host)
 		return;
 
 	gpiod_set_value_cansleep(tcc->reset_gpio, 1);
+	/*
+	 * udelay(), not usleep_range(), is intentional here despite the
+	 * checkpatch style hint: this is the RST_n assert width, not a
+	 * settle wait, and sdhci-tcc.c:715 (vendor) uses the same 10us
+	 * busy-wait. usleep_range()'s lower bound is a hint, not a floor -
+	 * the scheduler is free to run this task later, which could shrink
+	 * the actual assert pulse below what the card needs. A fixed
+	 * busy-wait guarantees the minimum width; sleeping is fine for the
+	 * settle time after deassert below, where undershooting isn't a
+	 * correctness risk.
+	 */
 	udelay(10);
 	gpiod_set_value_cansleep(tcc->reset_gpio, 0);
 	usleep_range(300, 1000);
