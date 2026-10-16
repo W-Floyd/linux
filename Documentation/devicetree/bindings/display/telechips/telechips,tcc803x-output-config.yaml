@@ -80,12 +80,41 @@ description: |
       the only other board in this same vendor tree with a comparable
       1920x720 panel (tianma TM123XDHP90, drivers/video/fbdev/tcc-fb/
       lcd_TM123XDHP90.c, "telechips,lvds-tm123xdhp90",
-      arch/arm/boot/dts/mobis/tcc8030-android-lpd4321_sv0.1.dts:62-75)
-      is LVDS off DISP1, not MRGB off DISP0. See
-      telechips,tcc803x-mrgb-panel.yaml for the MRGB panel node this
-      mux feeds and its own caveat section on why MRGB routing here is
-      grounded in a live register read (outside this static-source
-      investigation), not vendor-source precedent.
+      arch/arm/boot/dts/tcc/tcc8030-android-lpd4321_sv0.1.dts:138-152)
+      is LVDS off DISP0, not off DISP1 as earlier noted here -- that
+      board's own file carries zero fbdisplay/DISP references; it
+      `#include`s the real AVN board's own base dtsi,
+      arch/arm/boot/dts/mobis/tcc8031-android-avn.dtsi, unmodified, and
+      that dtsi's `fbdisplay@12000000` node sets
+      `telechips,fbdisplay_num = <0>` (read directly as the DISP
+      controller index -- `lcdc_number`/`nr_disp` -- by every consumer
+      checked: drivers/video/fbdev/tcc-fb/tcc_vioc_fb.c:2526,
+      drivers/gpu/drm/tcc/tcc_drm_lcd.c:787). So DISP0 is confirmed,
+      independent of MRGB-vs-LVDS, for the main panel on this exact
+      board family -- the earlier DISP1 attribution here conflated this
+      with unrelated VIOC_DISP1 references in that same vendor tree's
+      video/VIQE sub-pipeline nodes (PIP/overlay scaling paths, not the
+      main panel). What remains genuinely unresolved is LVDS vs MRGB,
+      not which DISP. The real AVN board file also names
+      `lvds_variant_check-gpio` and `digital_variant_check-gpio` side
+      by side in its `mobis-gpio-pinctrl` node
+      (arch/arm/boot/dts/mobis/tcc8031-android-avn.dtsi:~890), implying
+      two real production panel variants selected/detected at
+      board/runtime level -- LVDS (via the SoC's on-die
+      `lvds_phy@12370000`, clocked by `PERI_LVDS_PHY`, tcc803x.dtsi:
+      2266-2271, with a complete working driver,
+      lcd_TM123XDHP90.c) and a "digital" variant that is more likely
+      DISP0's own native parallel-RGB pins driven directly (no
+      MISCCFG/MRGBSEL involved at all) than the MISCCFG-routed MRGB aux
+      path documented above, since that path has zero consumers
+      anywhere in the vendor tree. See telechips,tcc803x-mrgb-panel.yaml
+      for the MRGB panel node this mux feeds and its own caveat section
+      on why MRGB routing here is grounded in a live register read
+      (outside this static-source investigation), not vendor-source
+      precedent. Resolving LVDS vs MRGB/digital for this specific unit
+      needs either a live read of lvds_variant_check-gpio /
+      digital_variant_check-gpio, or confirmation of whether DISP0's
+      pixel stream reaches the panel through the lvds_phy block.
     - MISCCFG's live/current value on real hardware: not read here.
     - D0CPUIF/D1CPUIF/D2CPUIF bitfields beyond their offsets: not
       decoded, since no caller of VIOC_OUTCFG_SetOutConfig() in this

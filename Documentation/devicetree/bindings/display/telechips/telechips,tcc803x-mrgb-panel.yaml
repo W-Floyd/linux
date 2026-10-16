@@ -59,15 +59,45 @@ description: |
   but nothing calls it with that argument). The only other board in
   this same vendor tree with a comparable 1920x720 panel (tianma
   TM123XDHP90, drivers/video/fbdev/tcc-fb/lcd_TM123XDHP90.c,
-  "telechips,lvds-tm123xdhp90", arch/arm/boot/dts/mobis/
-  tcc8030-android-lpd4321_sv0.1.dts:62-75) is LVDS-driven off DISP1,
-  not MRGB off DISP0 -- a real, vendor-confirmed-working alternative
-  output type for a same-resolution panel, structurally worth keeping
-  in mind even though it is not what this binding documents. This
-  node's routing is grounded instead in a live MISCCFG register read
-  off the real running head unit (outside this static-source
-  investigation) showing MRGBSEL selecting DISP0; static vendor source
-  alone does not independently corroborate that selection.
+  "telechips,lvds-tm123xdhp90") is LVDS-driven off DISP0, same as this
+  node -- not DISP1 as an earlier pass here claimed. That board file,
+  arch/arm/boot/dts/tcc/tcc8030-android-lpd4321_sv0.1.dts:138-152, is
+  not an unrelated cousin: it `#include`s the real AVN board's own
+  base dtsi, arch/arm/boot/dts/mobis/tcc8031-android-avn.dtsi,
+  unmodified, and carries zero DISP overrides of its own. That shared
+  base dtsi's `fbdisplay@12000000` node sets `telechips,fbdisplay_num =
+  <0>`, read directly as the DISP controller index by every consumer
+  driver checked (drivers/video/fbdev/tcc-fb/tcc_vioc_fb.c:2526,
+  drivers/gpu/drm/tcc/tcc_drm_lcd.c:787) -- DISP0 either way. So the
+  real, vendor-confirmed-working LVDS precedent is a same-DISP,
+  same-board-family alternative output type for a same-resolution
+  panel, not merely a structural curiosity. The TCC803x SoC also has
+  genuine on-die LVDS transmitter hardware (`lvds_phy@12370000`,
+  clocked by `PERI_LVDS_PHY`, tcc803x.dtsi:2266-2271) -- LVDS off this
+  chip needs no external bridge. The real AVN board's own
+  `mobis-gpio-pinctrl` node additionally names
+  `lvds_variant_check-gpio` and `digital_variant_check-gpio` side by
+  side (tcc8031-android-avn.dtsi:~890), implying this board ships (or
+  shipped) in two real panel-interface variants, detected/selected at
+  board level -- LVDS, and a "digital" variant more plausibly read as
+  DISP0's native parallel-RGB pins driven directly (bypassing MISCCFG
+  entirely) than as this binding's MISCCFG-routed MRGB path, which has
+  no consumer anywhere in the vendor tree. This node's routing is
+  grounded instead in a live MISCCFG register read off the real
+  running head unit (outside this static-source investigation) showing
+  MRGBSEL selecting DISP0; static vendor source alone does not
+  independently corroborate that selection, and MRGBSEL=0 is equally
+  consistent with that field simply never having been touched since
+  reset -- LVDS does not route through MISCCFG at all, so that reading
+  carries no evidence either way between LVDS and MRGB. Net
+  assessment: LVDS off DISP0 is better supported by vendor source
+  (working driver, on-die PHY, explicit board-level variant-detection
+  GPIOs) than MRGB off DISP0 (zero consumers anywhere); this binding
+  is retained as honest scaffolding for the live-register-backed
+  hypothesis, not as the higher-confidence conclusion. Resolving this
+  for the specific unit needs either a live read of
+  lvds_variant_check-gpio / digital_variant_check-gpio, or confirming
+  whether DISP0's pixel stream reaches the panel through lvds_phy.
 
   Timing values below are not estimated: they are the same live DISP0
   register capture (LHTIME1/2, LVTIME1/2) already used to program the
