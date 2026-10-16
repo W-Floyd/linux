@@ -188,6 +188,18 @@ config SOC_SP7021
 
 endif
 
+config ARCH_TCC803X
+	bool "Telechips TCC803x SoCs"
+	depends on ARCH_MULTI_V7
+	select ARM_GIC
+	select ARM_PSCI
+	select HAVE_ARM_ARCH_TIMER
+	help
+	  Support for Telechips TCC803x SoCs.
+	  These use a GIC-400 interrupt controller and the ARM architected
+	  timer, and bring up secondary CPUs through PSCI.
+	  Say Y here if you want to run on such a device.
+
 config ARCH_UNIPHIER
 	bool "Socionext UniPhier SoCs"
 	depends on ARCH_MULTI_V7

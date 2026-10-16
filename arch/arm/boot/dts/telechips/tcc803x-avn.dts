@@ -1,0 +1,121 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR MIT)
+/*
+ * Minimal example board: Telechips TCC803x "AVN" (Audio Video Navigation)
+ * automotive head-unit class.
+ *
+ * AVN as a real board class for this SoC is confirmed in vendor source:
+ *   arch/arm/configs/tcc803x_android_avn_defconfig:413 (CONFIG_PLATFORM_AVN=y)
+ * (path relative to AVNT5W_TCC803XKK_kernel/, see tcc803x.dtsi for the
+ * full reference-tree note). No vendor .dts is literally named
+ * "tcc803x-avn" -- real AVN board .dts files in that tree are named for
+ * sibling chips in the family (tcc8970/tcc8971/tcc8031). This file is a
+ * from-scratch placeholder board using the generic SoC name, not a port
+ * of any specific vendor board file.
+ *
+ * Everything board-specific below (model string, memory size, UART
+ * enablement) is a placeholder pending a real schematic/board reference.
+ */
+
+/dts-v1/;
+
+#include "tcc803x.dtsi"
+
+/ {
+	model = "Telechips TCC803x AVN";
+	compatible = "telechips,tcc803x-avn", "telechips,tcc803x";
+
+	aliases {
+		serial0 = &uart0;
+	};
+
+	chosen {
+		/*
+		 * Baud confirmed: vendor tcc803x.dtsi:29-30 (bootargs
+		 * console=ttyAMA0,115200n8).
+		 */
+		stdout-path = "serial0:115200n8";
+	};
+
+	/*
+	 * Component-master glue (drivers/gpu/drm/telechips/tcc803x_drm_drv.c)
+	 * expects a "ports" phandle list naming its CRTC and encoder
+	 * components. hdmi_tx doubles as both the HDMI encoder and
+	 * connector component here (no separate connector node) --
+	 * confirmed against tcc803x_drm_drv.c's own component-match table
+	 * (telechips,tcc803x-vioc-crtc / telechips,tcc803x-hdmi).
+	 *
+	 * This does NOT mean the pipeline works yet: there is still no
+	 * driver .c file bound to "telechips,tcc803x-hdmi" (only the DT
+	 * node/binding exist so far), so component_bind_all() will keep
+	 * waiting on that match forever. See tcc803x_drm_vioc.c's status
+	 * writeup for what VIOC-side is real vs. still missing.
+	 */
+	display: display-subsystem {
+		compatible = "telechips,tcc803x-display-subsystem";
+		ports = <&vioc_crtc0>, <&hdmi_tx>;
+	};
+};
+
+&uart0 {
+	status = "okay";
+};
+
+/*
+ * eMMC enablement confirmed: vendor mobis/tcc8031-android-avn.dtsi:
+ * 797-815 (sdhc@16440000 override -- the TCC8031-based AVN board this
+ * SoC family's real AVN boards are built on). vendor fstab path
+ * "/dev/block/platform/16440000.sdhc/..." (mobis/tcc803x-android.dtsi:53)
+ * independently confirms sdhc0 (0x1644_0000) is the eMMC boot device,
+ * matching the "eMMC Boot" comment on sdhc0 in tcc803x.dtsi.
+ *
+ * bus-width, max-frequency, non-removable, disable-wp, cap-mmc-hw-reset,
+ * mmc-ddr-1_8v: vendor values at the cited lines, carried over unchanged.
+ * Omitted from the vendor block: pinctrl-0 (&sd0_clk/&sd0_cmd/&sd0_bus8,
+ * no pinctrl binding/driver exists yet), vqmmc-supply (&vqmmc_emmc, no
+ * regulator node defined here), tcc-mmc-reset (&gpsd0 14 0, no GPIO
+ * controller node defined here), and the vendor-internal tcc-kpanic /
+ * no-sdio / no-sd properties (kernel-panic-dump and mode-restriction
+ * flags private to the vendor driver, not part of this binding).
+ */
+&sdhc0 {
+	status = "okay";
+	bus-width = <8>;
+	max-frequency = <198000000>;
+	non-removable;
+	disable-wp;
+	cap-mmc-hw-reset;
+	mmc-ddr-1_8v;
+};
+
+/*
+ * HDMI enablement: the real active AVN board DT in the vendor tree
+ * (arch/arm/boot/dts/mobis/tcc8031-android-avn.dtsi:285-295, TCC8031 being
+ * this SoC family's real AVN silicon) sets hdmi_ref_src_clock = <0> (XIN)
+ * and hdmi_phy_type = <0> (PHY 8980), matching here. This is the only
+ * realistic debug/console-replacement output path on hardware with no
+ * accessible UART header, so it is enabled by default on this board file
+ * (unlike sdhc0 above, which mirrors the vendor's own disabled-by-default
+ * SoC dtsi and is opted in per board).
+ */
+&hdmi_tx {
+	status = "okay";
+	telechips,ref-clock-source = <0>;
+	telechips,phy-type = <0>;
+};
+
+/*
+ * VIOC single-plane path: RDMA0 -> WMIX0/DISP0 -> hdmi_tx. See
+ * tcc803x.dtsi's vioc-config/vioc-rdma0/vioc-crtc0 nodes for register
+ * citations and what's deliberately not modeled.
+ */
+&vioc_config {
+	status = "okay";
+};
+
+&vioc_rdma0 {
+	status = "okay";
+};
+
+&vioc_crtc0 {
+	status = "okay";
+};

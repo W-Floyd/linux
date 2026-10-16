@@ -1,0 +1,655 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR MIT)
+/*
+ * Device tree skeleton for the Telechips TCC803x SoC.
+ *
+ * Copyright (C) 2026 <author>
+ *
+ * This is a from-scratch mainline bring-up skeleton, not a copy of any
+ * vendor devicetree. Facts below are traced to real Telechips vendor
+ * source (2015-2016, GPLv2, Telechips Inc.) as released through Hyundai
+ * Mobis's open-source compliance portal, reference tree:
+ *
+ *   AVNT5W_TCC803XKK_kernel/
+ *
+ * all paths below are relative to that tree's root.
+ *
+ * === CONFIRMED FROM VENDOR SOURCE ===
+ *
+ * - Root compatible "telechips,tcc803x":
+ *     arch/arm/mach-tcc803x/board-tcc803x.c:78  (tcc803x_dt_compat[])
+ *     arch/arm/boot/dts/tcc/tcc803x.dtsi:24     (root node compatible)
+ *
+ * - CPU core: the vendor's own DT for this exact SoC declares four
+ *   cores compatible = "arm,cortex-a53", enable-method = "psci":
+ *     arch/arm/boot/dts/tcc/tcc803x.dtsi:166-203   (cpus / cpu@0..cpu@3)
+ *     arch/arm/boot/dts/mobis/tcc803x.dtsi:166-203 (identical, second copy)
+ *   Paired with a GIC-400 and the ARMv8 architected timer (both ARMv8-A
+ *   IP, consistent with an A53 cluster):
+ *     arch/arm/boot/dts/tcc/tcc803x.dtsi:219-226 (gic: interrupt-controller@17301000,
+ *                                                  compatible = "arm,gic-400")
+ *     arch/arm/boot/dts/tcc/tcc803x.dtsi:230-236 (timer, compatible = "arm,armv8-timer")
+ *   This dtsi is not a copy-paste from an unrelated chip: its peripheral
+ *   addresses cross-check exactly against the separate, independently
+ *   written mach-tcc803x C code (see address list below), which gives
+ *   confidence the cpus/gic/timer nodes describe this same silicon.
+ *
+ *   CAVEAT: arch/arm/plat-tcc/Kconfig:113-145 (Kconfig for ARCH_TCC803X,
+ *   the 32-bit "mach-tcc803x" legacy boot path actually used to build
+ *   this kernel) selects CPU_V7 and additionally defines a sub-option
+ *     config TCC803X_CA7S
+ *         bool "Build for TCC803X Cortex-A7 Single Core"
+ *   (Kconfig:141-145). CPU_V7 is not actually in conflict with an A53 --
+ *   a Cortex-A53 cluster runs ARMv7-A-compatible AArch32 code under a
+ *   32-bit kernel via proc-v7.S, so CPU_V7 is the correct selection
+ *   either way. The CA7S option's literal "Cortex-A7" text is the one
+ *   piece of evidence pointing away from A53; it reads like it names a
+ *   distinct single-core SKU/variant rather than the primary AP cluster
+ *   described by the DT above. Treated here as a stale/variant Kconfig
+ *   label, not as contradicting the DT's cortex-a53 cpus node, but this
+ *   is a real discrepancy in the vendor tree and should be re-checked
+ *   against a datasheet before upstream submission.
+ *
+ * - Peripheral physical addresses, cross-confirmed between the vendor's
+ *   C code (arch/arm/mach-tcc803x/include/mach/iomap.h and
+ *   arch/arm/mach-tcc803x/board-tcc803x.c) and the vendor's own DT
+ *   (arch/arm/boot/dts/tcc/tcc803x.dtsi):
+ *     clock controller (ckc)   0x14000000  iomap.h:24 (TCC_PA_CKC) ==
+ *                                          tcc803x.dtsi:719-721 (ckc@14000000)
+ *     GPIO                     0x14200000  iomap.h:27 (TCC_PA_GPIO) ==
+ *                                          tcc803x.dtsi:716 (tcc_pm reg, "gpio")
+ *     legacy timer block       0x14300000  iomap.h:28 (TCC_PA_TIMER) ==
+ *                                          tcc803x.dtsi:839-841 (tcc_timer@14300000)
+ *     PMU                      0x14400000  iomap.h:29 (TCC_PA_PMU) ==
+ *                                          tcc803x.dtsi:722 (ckc reg, "pmu")
+ *     NAND flash controller    0x16400000  board-tcc803x.c:29 (TCC803X_PA_NFC) ==
+ *                                          tcc803x.dtsi:712 (tcc_pm reg, "nfc")
+ *     I2C0..3                  0x16300000 + n*0x10000  board-tcc803x.c:24-27
+ *     SDHC0..2                 0x16440000/0x16450000/0x16460000  board-tcc803x.c:36-38
+ *     VIOC (display/video bus) 0x12000000  board-tcc803x.c:23 (TCC803X_PA_VIOC)
+ *     legacy VIC/PIC           0x14100000 / 0x14100200  iomap.h:25-26
+ *     GIC_POL (legacy)         0x14600000  iomap.h:30 (TCC_PA_GIC_POL) --
+ *                                          a second, older interrupt
+ *                                          controller block distinct
+ *                                          from the GIC-400 above;
+ *                                          purpose not yet understood,
+ *                                          not wired into this skeleton.
+ *     uart0 (first UART)       0x16600000  tcc803x.dtsi:1388-1394
+ *                                          (serial@16600000, compatible
+ *                                          "arm,pl011", "arm,primecell"),
+ *                                          corroborated in the C side by
+ *                                          tcc803x.dtsi:714 ("uart0" comment
+ *                                          in tcc_pm's reg list, same addr)
+ *
+ * - AVN ("Audio Video Navigation") is a real board class for this SoC:
+ *     arch/arm/configs/tcc803x_android_avn_defconfig:413 (CONFIG_PLATFORM_AVN=y)
+ *     arch/arm/configs/tcc803x_android_avn_qb_defconfig:403
+ *     arch/arm/configs/tcc803x_wide_pe_common_defconfig:390
+ *   (real board .dts files in the vendor tree are named for sibling
+ *   chips in this family -- tcc8970/tcc8971/tcc8031 -- not "tcc803x"
+ *   itself; no vendor .dts is literally named tcc803x-avn)
+ *
+ * === STRUCTURAL PLACEHOLDERS (not from vendor source) ===
+ *
+ * - The "soc" bus node wrapping everything is scaffolding needed to make
+ *   this a valid, buildable mainline dtsi. Nothing here has been
+ *   hardware-tested.
+ * - Interrupt numbering: the vendor DT uses GIC_SPI <n> (SPI-relative,
+ *   already without the +32), so values are copied unchanged.
+ * - The clock-controller node now has a real (partial) driver --
+ *   drivers/clk/telechips/clk-tcc803x-ckc.c, PERI_UART0 gate only, see
+ *   its node comment below -- but still no pinctrl, reset, or power
+ *   domain bindings exist in mainline for this SoC; those stay bare
+ *   "compatible"/"reg"/"interrupts" placeholders. The uart0 "apb_pclk"
+ *   input is likewise still a fixed-clock stand-in (see uart0's comment).
+ * - memory node reg/size is a placeholder; the vendor dts's own
+ *   memory@20000000 (0x20000000, size 0x80000000) is noted here as a
+ *   real data point but board RAM size varies per board and must be
+ *   confirmed per board file.
+ */
+
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/clock/telechips,tcc803x-clks.h>
+
+/ {
+	compatible = "telechips,tcc803x";
+	#address-cells = <1>;
+	#size-cells = <1>;
+	interrupt-parent = <&gic>;
+
+	/*
+	 * sdhc0/1/2 aliases confirmed: vendor tcc803x.dtsi:58-60
+	 * (arch/arm/boot/dts/mobis/tcc803x.dtsi, identical in tcc/tcc803x.dtsi).
+	 */
+	aliases {
+		sdhc0 = &sdhc0;
+		sdhc1 = &sdhc1;
+		sdhc2 = &sdhc2;
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		/*
+		 * Confirmed: arch/arm/boot/dts/tcc/tcc803x.dtsi:166-203 of the
+		 * vendor tree declares four of these, enable-method "psci".
+		 * See CPU core note above re: the conflicting CA7S Kconfig label.
+		 */
+		cpu0: cpu@0 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a53";
+			reg = <0x0>;
+			enable-method = "psci";
+		};
+
+		cpu1: cpu@1 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a53";
+			reg = <0x1>;
+			enable-method = "psci";
+		};
+
+		cpu2: cpu@2 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a53";
+			reg = <0x2>;
+			enable-method = "psci";
+		};
+
+		cpu3: cpu@3 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a53";
+			reg = <0x3>;
+			enable-method = "psci";
+		};
+	};
+
+	psci {
+		/* Compatible and method confirmed: vendor tcc803x.dtsi:157-160. */
+		compatible = "arm,psci-0.2";
+		method = "smc";
+	};
+
+	/*
+	 * XIN: the CKC's crystal reference input. 24 MHz is no longer a
+	 * guess -- it's the XIN_CLK_RATE constant from two independent
+	 * vendor clock drivers for this SoC:
+	 *   drivers/clk/tcc/clk-tcc803x.h:178 (3.18 tree, this SoC's
+	 *     SMC-based arm64-side CKC driver)
+	 *   drivers/clk/telechips/clk-tcc803x.h:15 in
+	 *     github.com/topst-development/kernel-5.10 (Telechips' own
+	 *     actively maintained kernel 5.10 tree for the TOPST dev-board
+	 *     family), which also defines XIN_CLK_RATE = 24 MHz for this
+	 *     same compatible string.
+	 * Still not confirmed against this exact board's crystal -- both
+	 * sources are SoC-level defaults, not a board-specific reading --
+	 * but no longer a bare guess either.
+	 */
+	xin: clock-24000000 {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;
+	};
+
+	/*
+	 * Placeholder, same rationale as xin above: stands in for the CKC
+	 * outputs feeding each SDHC instance (vendor clocks =
+	 * <&clk_peri PERI_SDMMC0/1/2 &clk_io IOBUS_SDMMC0/1/2>, clock-names
+	 * "mmc_fclk"/"mmc_hclk" -- vendor mobis/tcc803x.dtsi:1480-1481,
+	 * 1501-1502, 1520-1521). Unlike uartclk, PERI_SDMMC0/1/2 are not
+	 * (yet) among the PERI_* channels drivers/clk/telechips/clk-tcc803x-ckc.c
+	 * implements (only PERI_UART0/58 is wired up -- see the ckc node
+	 * below and include/dt-bindings/clock/telechips,tcc803x-clks.h),
+	 * so this stays a bare fixed-clock stand-in rather than a &ckc
+	 * reference. Rate is an unconfirmed guess (max-frequency on sdhc0
+	 * in the board file is 198 MHz, so the fclk must be able to reach
+	 * at least that high; 200 MHz is a round placeholder, not a vendor
+	 * value).
+	 */
+	mmc_clk: clock-200000000 {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <200000000>;
+	};
+
+	/* Memory placeholder: size is board-specific; see note above. */
+	memory@20000000 {
+		device_type = "memory";
+		reg = <0x20000000 0x80000000>;
+	};
+
+	timer {
+		/*
+		 * Compatible and the four PPIs (13/14/11/10 = secure phys,
+		 * non-secure phys, virt, hyp) confirmed: vendor tcc803x.dtsi:230-236.
+		 * The vendor also sets GIC_CPU_MASK_SIMPLE(4) on each; omitted
+		 * as the mask is meaningless for PPIs on current kernels.
+		 * No clock-frequency: vendor gives none, firmware programs CNTFRQ.
+		 */
+		compatible = "arm,armv8-timer";
+		interrupts = <GIC_PPI 13 IRQ_TYPE_LEVEL_LOW>,
+			     <GIC_PPI 14 IRQ_TYPE_LEVEL_LOW>,
+			     <GIC_PPI 11 IRQ_TYPE_LEVEL_LOW>,
+			     <GIC_PPI 10 IRQ_TYPE_LEVEL_LOW>;
+	};
+
+	soc {
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		/*
+		 * Confirmed address: arch/arm/mach-tcc803x/include/mach/iomap.h:24
+		 * (TCC_PA_CKC), cross-confirmed by vendor tcc803x.dtsi:719-721.
+		 * Driver: drivers/clk/telechips/clk-tcc803x-ckc.c (partial --
+		 * PERI_UART0 gate only; see its header comment and
+		 * Documentation/devicetree/bindings/clock/telechips,tcc803x-ckc.yaml).
+		 *
+		 * reg size: the vendor's own DT declares this region as 0x1A8
+		 * (tcc803x.dtsi:721), but PERI_UART0's PCLKCTRL register sits
+		 * at CKC_PCLKCTRL(0xD0) + 58*4 = 0x1B8 by the vendor driver's
+		 * own offset formula (drivers/clk/tcc/clk-tcc803x-a7s.c:1371,
+		 * -a7s-reg.h:14) -- past the end of the vendor's declared
+		 * window. That inconsistency is in the vendor source itself;
+		 * 0x1bc here is sized to actually cover PERI_UART0's register
+		 * instead of reproducing it. Revisit if/when PLL or other
+		 * PERI_* channels within the vendor's 0x1A8 claim get added.
+		 */
+		/*
+		 * reg[1] ("ddibus"): the separate "display bus configuration"
+		 * window DDIBUS_* gates live in, vendor tcc803x.dtsi:726
+		 * (0x12380000 size 0x8) -- see clk-tcc803x-ckc.c and
+		 * telechips,tcc803x-clks.h for why this isn't part of the
+		 * CKC's own PCLKCTRL window above.
+		 */
+		ckc: clock-controller@14000000 {
+			compatible = "telechips,tcc803x-ckc";
+			reg = <0x14000000 0x1bc>, <0x12380000 0x8>;
+			reg-names = "ckc", "ddibus";
+			clocks = <&xin>;
+			clock-names = "xin";
+			#clock-cells = <1>;
+		};
+
+		/*
+		 * Confirmed address: iomap.h:28 (TCC_PA_TIMER), cross-confirmed
+		 * by vendor tcc803x.dtsi:839-841 (tcc_timer@14300000).
+		 * Legacy Telechips timer block; the architected timer above is
+		 * the clocksource. Placeholder: this compatible has no binding
+		 * or driver and will fail schema checks until one exists.
+		 */
+		timer@14300000 {
+			compatible = "telechips,tcc803x-timer";
+			reg = <0x14300000 0xa0>;
+		};
+
+		/*
+		 * Confirmed: reg, compatible, SPI 88 level-high, clock-names:
+		 * vendor tcc803x.dtsi:1388-1395. reg-io-width: the vendor
+		 * pl011 driver forces 32-bit register access on TCC803X
+		 * (drivers/tty/serial/amba-pl011.c:135-136, access_32b).
+		 * The vendor DT has no arm,primecell-periphid; unverified
+		 * whether the IP's PrimeCell ID registers read back correctly.
+		 *
+		 * clocks: vendor tcc803x.dtsi:1392 wires two distinct CKC
+		 * outputs here -- <&clk_peri PERI_UART0> for "uartclk" and
+		 * <&clk_io IOBUS_UART0> for "apb_pclk". "uartclk" now comes
+		 * from the real ckc node/driver above (PERI_UART0, confirmed
+		 * include/dt-bindings/clock/tcc803x-clks.h:98 -- see
+		 * TCC803X_CLK_PERI_UART0). "apb_pclk" is still the xin
+		 * placeholder: IOBUS_UART0 (index 64, tcc803x-clks.h:223) is a
+		 * power-down/gate bit in the "io bus configuration 0" register
+		 * region (0x16051000, tcc803x.dtsi:728), a separate MMIO block
+		 * the ckc driver doesn't map or implement.
+		 */
+		uart0: serial@16600000 {
+			compatible = "arm,pl011", "arm,primecell";
+			reg = <0x16600000 0x1000>;
+			interrupts = <GIC_SPI 88 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ckc TCC803X_CLK_PERI_UART0>, <&xin>;
+			clock-names = "uartclk", "apb_pclk";
+			reg-io-width = <4>;
+			/*
+			 * pinctrl-0: now backed by a real (if minimal) pinctrl
+			 * driver -- drivers/pinctrl/telechips/pinctrl-tcc803x.c,
+			 * see pinctrl@14200000 below. The vendor's own board DT
+			 * has no pinctrl properties on its uart0 node (muxing is
+			 * done by the LK bootloader before Linux boots), so this
+			 * pinctrl-0 reference is new, not carried over from
+			 * vendor source -- only the pin assignment and function
+			 * value it resolves to (gpsd0-11/-12, function 7) are
+			 * vendor-cited; see uart0-grp below.
+			 */
+			pinctrl-names = "default";
+			pinctrl-0 = <&uart0_grp>;
+			status = "disabled";
+		};
+
+		/*
+		 * Confirmed: reg window and compatible string placement:
+		 * vendor tcc803x.dtsi:892-894 (arch/arm/boot/dts/mobis and
+		 * tcc/tcc803x.dtsi, identical). Covers only banks GPA..GPSD1 --
+		 * see the KNOWN GAP note in the driver and in
+		 * Documentation/devicetree/bindings/pinctrl/telechips,tcc803x-pinctrl.yaml
+		 * for why GPSD2/GPH/GPK/GPMA are left out (the vendor's own DT
+		 * declares a reg window too small to cover the offsets its own
+		 * driver uses for those banks -- an unresolved inconsistency in
+		 * the vendor source, not reproduced here). The second reg
+		 * region (PM-domain GPIO block) is declared to match the vendor
+		 * binding but is unused by this driver.
+		 */
+		pinctrl: pinctrl@14200000 {
+			compatible = "telechips,tcc803x-pinctrl";
+			reg = <0x14200000 0x300>, <0x14800800 0x100>;
+			gpio-controller;
+			#gpio-cells = <2>;
+
+			/*
+			 * Confirmed: arch/arm/boot/dts/mobis/tcc8031-pinctrl.dtsi:
+			 * 808-811 (uart0_data: telechips,pins = "gpsd0-11",
+			 * "gpsd0-12"; telechips,pin-function = <7>;). RTS/CTS
+			 * (gpsd0-13/-14, vendor's separate uart0_rtscts group) are
+			 * not needed for the TX/RX-only uart0 node above, so they
+			 * are not wired up here.
+			 */
+			uart0_grp: uart0-grp {
+				telechips,pins = "gpsd0-11", "gpsd0-12";
+				telechips,pin-function = <7>;
+			};
+		};
+
+		/*
+		 * Confirmed: GIC-400, four regions (GICD, GICC, GICH, GICV),
+		 * vendor tcc803x.dtsi:219-226. The vendor gives no VGIC
+		 * maintenance interrupt, so none is described (standard
+		 * GIC-400 wiring would be PPI 9, unconfirmed).
+		 */
+		/*
+		 * Confirmed: reg (4 regions), compatible, SPI 74/75/76
+		 * level-high, clock-names, bus-width, max-frequency,
+		 * "eMMC Boot" comment on sdhc0: vendor mobis/tcc803x.dtsi:
+		 * 1475-1533 (identical in tcc/tcc803x.dtsi:1459-1517).
+		 * compatible "telechips,tcc803x-sdhci" also matches the
+		 * vendor driver's of_device_id table entry pairing it with
+		 * soc_data_tcc803x (drivers/mmc/host/sdhci-tcc.c:781) --
+		 * i.e. a TCC803x-specific instance of a shared, SDHCI-core-
+		 * based driver (depends on MMC_SDHCI_PLTFM, operates on
+		 * struct sdhci_host; drivers/mmc/host/sdhci-tcc.c:1-40,
+		 * Kconfig MMC_SDHCI_TCC), not a from-scratch register
+		 * interface -- confirmed independently of, and consistent
+		 * with, the structurally similar sdhci-tcc.c in Telechips'
+		 * own upstream TOPST tree (github.com/topst-development/
+		 * kernel-5.10, release/d3/1.3.0), which targets the newer
+		 * TCC805x/TCC807x and is not a register/clock-name source
+		 * for this SoC.
+		 *
+		 * reg[1] is a per-channel offset (0x1647_0000 / _0050 / _00a0)
+		 * into one shared SoC-wide channel-control block, mapped via
+		 * of_iomap(pdev->dev.of_node, 1) as chctrl_base. reg[3] (the
+		 * 0x1647_00fc auto-tune-result register) is at the identical
+		 * physical address on *all three* sdhc nodes -- one shared
+		 * status register read by every instance and indexed
+		 * internally by shifting 8*controller_id
+		 * (sdhci_tcc_tune_result_show, drivers/mmc/host/sdhci-tcc.c
+		 * ~line 787-805). reg[2] is the vendor's own literal "dummy"
+		 * placeholder (mobis/tcc803x.dtsi:1478 comment), left as the
+		 * unpopulated channel-mux region.
+		 *
+		 * telechips,controller-id: mainline vendor-prefixed form of
+		 * the vendor DT's bare "controller-id" property (vendor
+		 * mobis/tcc803x.dtsi:1484/1505/1524); renamed only for DT
+		 * binding convention, value unchanged.
+		 *
+		 * clocks: point at the mmc_clk placeholder (see note above
+		 * mmc_clk's definition) in place of the vendor's unconfirmed
+		 * CKC clock IDs (&clk_peri PERI_SDMMC0/1/2, &clk_io
+		 * IOBUS_SDMMC0/1/2).
+		 *
+		 * bus-width/max-frequency here are the SoC-default values
+		 * from the vendor's SoC-level dtsi (4-bit, 50 MHz); board
+		 * files override per instance (see tcc803x-avn.dts for the
+		 * sdhc0 eMMC override to 8-bit/198 MHz).
+		 */
+		sdhc0: mmc@16440000 {
+			compatible = "telechips,tcc803x-sdhci";
+			reg = <0x16440000 0x100>, <0x16470000 0x200>,
+			      <0x0 0x0>, <0x164700fc 0x4>;
+			interrupts = <GIC_SPI 74 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&mmc_clk>, <&mmc_clk>;
+			clock-names = "mmc_fclk", "mmc_hclk";
+			telechips,controller-id = <0>;
+			max-frequency = <50000000>;
+			bus-width = <4>;
+			status = "disabled";
+		};
+
+		sdhc1: mmc@16450000 {
+			compatible = "telechips,tcc803x-sdhci";
+			reg = <0x16450000 0x100>, <0x16470050 0x200>,
+			      <0x0 0x0>, <0x164700fc 0x4>;
+			interrupts = <GIC_SPI 75 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&mmc_clk>, <&mmc_clk>;
+			clock-names = "mmc_fclk", "mmc_hclk";
+			telechips,controller-id = <1>;
+			max-frequency = <50000000>;
+			bus-width = <4>;
+			status = "disabled";
+		};
+
+		sdhc2: mmc@16460000 {
+			compatible = "telechips,tcc803x-sdhci";
+			reg = <0x16460000 0x100>, <0x164700a0 0x200>,
+			      <0x0 0x0>, <0x164700fc 0x4>;
+			interrupts = <GIC_SPI 76 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&mmc_clk>, <&mmc_clk>;
+			clock-names = "mmc_fclk", "mmc_hclk";
+			telechips,controller-id = <2>;
+			max-frequency = <50000000>;
+			bus-width = <4>;
+			status = "disabled";
+		};
+
+		gic: interrupt-controller@17301000 {
+			compatible = "arm,gic-400";
+			reg = <0x17301000 0x1000>,
+			      <0x17302000 0x1000>,
+			      <0x17304000 0x2000>,
+			      <0x17306000 0x2000>;
+			interrupt-controller;
+			#address-cells = <0>;
+			#interrupt-cells = <3>;
+		};
+
+		/*
+		 * VIOC display-bus: shared config/IRQ-demux block, one RDMA
+		 * ("read-DMA" image fetcher) channel, and the WMIX0+DISP0
+		 * compositor/timing-generator pair that feeds hdmi-tx below.
+		 * This is the minimal single-plane path only -- the VIOC on
+		 * this SoC has 18 RDMA, 7 WMIX, 8 scaler and multiple WDMA
+		 * (capture) channels total; see
+		 * Documentation/devicetree/bindings/display/telechips/ for
+		 * what's modeled and what is deliberately left out, and why.
+		 *
+		 * All addresses here confirmed against the real vendor Linux
+		 * 3.18 tree (AVNT5W_TCC803XKK_kernel, Hyundai Mobis
+		 * supplier-portal release, Telechips Inc., GPLv2):
+		 *   arch/arm/boot/dts/mobis/tcc803x.dtsi:1994-1998 (RDMA0),
+		 *   :2102-2106 (WMIX0), :2271-2274 (vioc-config),
+		 *   :2312-2318 (DISP0 -- the combined vioc_disp node; DISP0's
+		 *   own window is the first 0x100 bytes of it).
+		 * VIOC0_IRQI (shared bus-0 IRQ, every channel below
+		 * multiplexes onto it): vendor include/dt-bindings/display/
+		 * tcc803x-vioc.h:190 cites GIC SPI 119, but that's wrong for
+		 * this board -- live recon (kexec test night of 2026-10-15,
+		 * nemesis_kexec_recon.log) contradicts it two ways: the
+		 * vendor's own tcc_vsync driver logs
+		 * "vioc0 addr(f3000000) lcdc_num(0) irq_num(151)" at boot,
+		 * and live /proc/interrupts shows GIC 151 as "TCC_MAIN_D"
+		 * actively firing while GIC 119 is "pl08xdmac" (the DMA
+		 * controller, unrelated to VIOC). Using 151.
+		 *
+		 * No "clocks" property on vioc-crtc0: DDIBUS_VIOC and
+		 * PERI_LCD0 are real vendor clock-gate channels (vendor
+		 * include/dt-bindings/clock/tcc803x-clks.h:9,292) but the
+		 * CKC driver's onecell clock table only exports
+		 * PERI_UART0 so far (drivers/clk/telechips/clk-tcc803x-ckc.c)
+		 * -- referencing an unimplemented ID would fail
+		 * devm_clk_get() at probe, not just be incomplete.
+		 */
+		vioc_config: vioc-config@1200a000 {
+			compatible = "telechips,tcc803x-vioc-config";
+			reg = <0x1200a000 0x1000>;
+			status = "disabled";
+		};
+
+		vioc_rdma0: vioc-rdma@12000400 {
+			compatible = "telechips,tcc803x-vioc-plane";
+			reg = <0x12000400 0x48>;
+			interrupts = <GIC_SPI 151 IRQ_TYPE_LEVEL_HIGH>;
+			status = "disabled";
+		};
+
+		vioc_crtc0: vioc-crtc@12001800 {
+			compatible = "telechips,tcc803x-vioc-crtc";
+			reg = <0x12001800 0x100>, <0x12000000 0x100>;
+			reg-names = "wmix", "disp";
+			interrupts = <GIC_SPI 151 IRQ_TYPE_LEVEL_HIGH>;
+			/*
+			 * Vendor tcc803x.dtsi:2292 (vioc_display0@12000000):
+			 * clocks = <&clk_ddi DDIBUS_VIOC>, <&clk_peri PERI_LCD0>, ...
+			 * Only the two IDs this bring-up's CKC driver actually
+			 * implements are carried over (PERI_LCD1/LCD2, for the
+			 * second/third display pipes, aren't wired up here).
+			 */
+			clocks = <&ckc TCC803X_CLK_DDIBUS_VIOC>, <&ckc TCC803X_CLK_PERI_LCD0>;
+			clock-names = "ddi", "disp0";
+			telechips,planes = <&vioc_rdma0>;
+			status = "disabled";
+		};
+
+		/*
+		 * DISP0/1/2 -> physical-output-interface routing mux (HDMI,
+		 * composite/component video encoders, MCU/8080 panel
+		 * interface, sync parallel-RGB panel interface). Real,
+		 * confirmed address/compatible (pre-existing identical node
+		 * at arch/arm/boot/dts/mobis/tcc803x.dtsi:2306-2309, and
+		 * vendor arch/arm/mach-tcc803x/vioc/vioc_outcfg.c's
+		 * of_find_compatible_node(NULL, NULL, "telechips,output_config")
+		 * matches this compatible string exactly). See
+		 * telechips,tcc803x-output-config.yaml for the MISCCFG
+		 * register's field layout and, importantly, what is *not*
+		 * yet confirmed: which of its five output types the real
+		 * main panel actually uses. Not wired into vioc-crtc0 above
+		 * or referenced by any driver in this tree yet -- documented
+		 * here because its address and existence are real, not
+		 * because routing is understood well enough to program it.
+		 */
+		output_config: output-config@12100200 {
+			compatible = "telechips,output_config";
+			reg = <0x12100200 0x10>;
+			status = "disabled";
+		};
+
+		/*
+		 * HDMI TX. IP identification confirmed from vendor driver source
+		 * (AVNT5W_TCC803XKK_kernel, drivers/char/hdmi_v2_0/):
+		 *   - hdmi_tx.c:49-55 ("dwc_hdmi_*" function names, Synopsys's own
+		 *     "snps" log-level naming: "int hdmi_log_level = SNPS_WARN;").
+		 *   - hdmi_api_lib/src/identification/identification.c:1-4, SPDX
+		 *     header "Copyright (c) 2019 - present Synopsys, Inc. and/or
+		 *     its affiliates. Synopsys DesignWare HDMI driver", plus
+		 *     DESIGN_ID/REVISION_ID/PRODUCT_ID0/PRODUCT_ID1/CONFIG0_ID/
+		 *     CONFIG1_ID/CONFIG2_ID register reads -- the DWC HDMI TX
+		 *     controller's own identification register bank.
+		 *   - The vendor's own board DT already spells this out directly:
+		 *     arch/arm/boot/dts/tcc/tcc803x.dtsi:2872
+		 *     compatible = "telechips,dw-hdmi-tx";
+		 *   This is the Synopsys DesignWare HDMI TX controller (dw-hdmi,
+		 *   mainline driver: drivers/gpu/drm/bridge/synopsys/dw-hdmi.c),
+		 *   not a from-scratch Telechips core.
+		 *
+		 *   The PHY is NOT the standard DWC companion PHY reached over the
+		 *   controller's internal I2C master (dw_hdmi_phy_i2c_write()) --
+		 *   drivers/char/hdmi_v2_0/hdmi_api_lib/src/phy/phy_803x.c:1335-1349
+		 *   (hdmi_phy_write/hdmi_phy_read) instead do byte-wide iowrite32/
+		 *   ioread32 straight into a dedicated "hdmi_phy" MMIO window
+		 *   (dev->hdmi_tx_tx_phy_if_io), writing a per-pixel-clock table of
+		 *   45 raw register bytes (tcc_phy_config_regs[], phy_803x.c:94 ff).
+		 *   So this is a Telechips-specific *glue* around what is still
+		 *   plausibly a Synopsys PHY die, exposed through TCC803x's own
+		 *   MMIO wrapper instead of DWC's I2C PHY master -- "Vendor PHY"
+		 *   in dw-hdmi.c's own terminology (DW_HDMI_PHY_VENDOR_PHY /
+		 *   dw_hdmi_phy_ops), same mechanism mainline's
+		 *   drivers/gpu/drm/meson/meson_dw_hdmi.c uses for Amlogic's PHY.
+		 *
+		 * reg/reg-names/interrupts/interrupt-names/clock-names: vendor
+		 * tcc/tcc803x.dtsi:2871-2898 (identical in mobis/tcc803x.dtsi).
+		 * hdcp_2.2 (0x12440000) and i2c_port_cfg (0x163C0000) regions are
+		 * wired for completeness but unused by this minimal glue -- no
+		 * HDCP, no DDC-over-external-I2C support attempted here.
+		 *
+		 * Clocks: the vendor lists 8 CKC outputs (clk_peri/clk_ddi/
+		 * clk_isoip_ddi PERI_HDMI_*, DDIBUS_HDMI, ISOIP_DDB_HDMI),
+		 * vendor tcc803x.dtsi:2882-2897. 7 of those 8 are now wired
+		 * below (6 PERI_HDMI_* + DDIBUS_HDMI). ISOIP_DDB_HDMI is still
+		 * missing: its vendor register offset (PMU_ISOIP_DDI) could not
+		 * be confirmed anywhere in the extracted vendor source for this
+		 * SoC variant (see telechips,tcc803x-clks.h) -- left out rather
+		 * than guessed. HDMI will probe and do video without it; only
+		 * the PMU-side power-island gate for that block is unmodeled.
+		 *
+		 * hdmi_ref_src_clock / hdmi_phy_type: vendor board properties
+		 * (hdmi_tx.c:171-177), not DT-binding-schema properties; kept as
+		 * board-file (tcc803x-avn.dts) overrides, same value space as
+		 * vendor's tcc8031-android-avn.dtsi (0 = XIN, 0 = phy 8980), see
+		 * telechips,tcc803x-hdmi.yaml for the mainline property names.
+		 */
+		hdmi_tx: hdmi-tx@12400000 {
+			compatible = "telechips,tcc803x-hdmi";
+			reg = <0x12400000 0x20000>, <0x12440000 0x1000>,
+			      <0x12480000 0x1000>, <0x163c0000 0x10>;
+			reg-names = "hdmi_link", "hdcp_2.2", "hdmi_phy", "i2c_port_cfg";
+			reg-io-width = <4>;
+			interrupts = <GIC_SPI 123 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 126 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "hdmi_link", "hdcp_2.2";
+			clocks = <&ckc TCC803X_CLK_PERI_HDMI_CORE>,
+				 <&ckc TCC803X_CLK_PERI_HDMI_AUDIO>,
+				 <&ckc TCC803X_CLK_PERI_HDMI_PCLK>,
+				 <&ckc TCC803X_CLK_PERI_HDMI_CEC>,
+				 <&ckc TCC803X_CLK_PERI_HDMI_HDCP14>,
+				 <&ckc TCC803X_CLK_PERI_HDMI_HDCP22>,
+				 <&ckc TCC803X_CLK_DDIBUS_HDMI>;
+			clock-names = "hdmi_ref_clk", "hdmi_spdif_clk", "hdmi_apb_clk",
+				      "hdmi_cec", "hdmi_hdcp14", "hdmi_hdcp22",
+				      "hdmi_ddibus";
+			status = "disabled";
+		};
+
+		/*
+		 * HDMI CEC. Separate SFR block from hdmi-tx's own "hdmi_iob_cec"
+		 * region (0x16051000, part of hdmi-tx's shared IOB config window,
+		 * not mapped here) -- this is the dedicated CEC1 controller.
+		 * reg/interrupts/compatible-string placement confirmed: vendor
+		 * tcc/tcc803x.dtsi:2923-2932. Left disabled: CEC is explicitly out
+		 * of scope for this bring-up (video-signal-only per the HDMI
+		 * glue driver's doc comment), and like hdmi-tx above its clocks
+		 * (PERI_CEC1_CORE/SFR, IOBUS_CEC1) aren't in the clk-bindings
+		 * header yet either.
+		 */
+		hdmi_cec: hdmi-cec@16053000 {
+			/*
+			 * No mainline binding/driver written for this node yet --
+			 * CEC is explicitly out of scope (see hdmi-tx's comment
+			 * above). compatible string is a placeholder reservation.
+			 */
+			compatible = "telechips,tcc803x-hdmi-cec";
+			reg = <0x16053000 0x1000>;
+			interrupts = <GIC_SPI 70 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 71 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "cec", "wakeup";
+			status = "disabled";
+		};
+	};
+};
