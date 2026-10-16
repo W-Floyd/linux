@@ -679,5 +679,108 @@
 			interrupt-names = "cec", "wakeup";
 			status = "disabled";
 		};
+
+		/*
+		 * External USB-A host port's OTG/HS controller. Vendor citation
+		 * (AVNT5W_TCC803XKK_kernel, arch/arm/boot/dts/tcc/tcc803x.dtsi):
+		 *   dwc_otg_phy@11DA0100 (lines 1915-1921): compatible
+		 *     "telechips,tcc_dwc_otg_phy", reg <0x11DA0100 0x30>,
+		 *     clocks <&clk_hsio HSIOBUS_USB20DH &clk_isoip_top
+		 *     ISOIP_TOP_U20DH>.
+		 *   dwc_otg@11980000 (lines 1932-1945): compatible
+		 *     "telechips,dwc_otg", reg is a 5-tuple -- OTG core
+		 *     (0x11980000/0xcfff), OTG PHY (0x11DA0100/0x30, same block
+		 *     as dwc_otg_phy above), EHCI (0x11900000/0x108), EHCI mux
+		 *     PHY (0x11DA00DC/0x20, == mhst_phy below), OHCI
+		 *     (0x11940000/0x60) -- the vendor's own out-of-tree driver
+		 *     (drivers/usb/dwc_otg/v3.20a/) owns all three controllers
+		 *     (OTG/EHCI/OHCI sharing one PHY mux) through this single
+		 *     node. interrupts <GIC_SPI 145> and <GIC_SPI 147>
+		 *     IRQ_TYPE_LEVEL_HIGH; clock-frequency 48000000.
+		 *
+		 * Only the dwc2 (OTG) core's own register window and its own
+		 * IRQ (145) are modeled here, using mainline's generic
+		 * Documentation/devicetree/bindings/usb/dwc2.yaml binding
+		 * ("snps,dwc2") and drivers/usb/dwc2/ instead of the vendor's
+		 * out-of-tree dwc_otg v3.20a -- dwc2 is the actively-maintained
+		 * upstream driver for this Synopsys DesignWare core family. The
+		 * companion EHCI (0x11900000) and OHCI (0x11940000) blocks and
+		 * their shared mux PHY (mhst_phy@11DA00DC, "telechips,
+		 * tcc_ehci_phy") are a separate IP pairing, out of scope here
+		 * (not needed for the single external USB-A port this bring-up
+		 * targets) and not modeled as mainline ehci-platform/
+		 * ohci-platform nodes in this change.
+		 *
+		 * dr_mode is forced to "host": the external USB-A connector
+		 * this controller drives has no ID/CC signaling pins (bare
+		 * Type-A receptacle), so device/peripheral mode is physically
+		 * unreachable on this port regardless of software
+		 * configuration -- confirmed by a separate, failed attempt to
+		 * force device-mode enumeration tonight. Host mode is
+		 * independently confirmed working: it is how a USB stick
+		 * enumerates on this same port today under the vendor driver.
+		 *
+		 * clocks/clock-names are deliberately omitted, matching the
+		 * ISOIP_DDB_HDMI precedent above: the two clocks this block
+		 * actually needs on real hardware, HSIOBUS_USB20DH and
+		 * ISOIP_TOP_U20DH, live in the vendor's separate clk_hsio and
+		 * clk_isoip_top CKC sub-controllers, and neither the HSIO-bus
+		 * power-down/reset register block nor the ISOIP top power
+		 * island is implemented by drivers/clk/telechips/
+		 * clk-tcc803x-ckc.c yet (that driver only models PERI_* and
+		 * DDIBUS_* channels -- see telechips,tcc803x-clks.h's own
+		 * header comment). The vendor's own node additionally lists
+		 * (commented out) "&clk_peri PERI_USB_OTG" -- confirmed absent
+		 * from the vendor's own tcc803x-clks.h entirely (present for
+		 * tcc897x/tcc570x/tcc802x/tcc898x, each at a different PERI
+		 * index, but never defined for tcc803x), so there is no PERI_*
+		 * fallback to wire here either. dwc2.yaml lists clocks and
+		 * clock-names as required properties, so a dtbs_check run
+		 * against this node is expected to flag the omission -- a
+		 * tracked gap (needs HSIOBUS/ISOIP power-domain support added
+		 * to clk-tcc803x-ckc.c), not an oversight.
+		 *
+		 * phys/phy-names are also omitted: see dwc_otg_phy's own
+		 * comment below for why no mainline PHY driver is wired here
+		 * either.
+		 */
+		dwc_otg: usb@11980000 {
+			compatible = "snps,dwc2";
+			reg = <0x11980000 0xd000>;
+			interrupts = <GIC_SPI 145 IRQ_TYPE_LEVEL_HIGH>;
+			dr_mode = "host";
+			status = "disabled";
+		};
+
+		/*
+		 * OTG PHY register block feeding dwc_otg above (vendor
+		 * dwc_otg_phy@11DA0100, "telechips,tcc_dwc_otg_phy" -- see
+		 * dwc_otg's comment for the full citation). Kept as a
+		 * structural placeholder, not wired into dwc_otg's "phys"
+		 * property: no mainline PHY-framework driver exists for this
+		 * block (grepped drivers/phy/ for any "tcc"/"telechips" match
+		 * in this tree -- none). The vendor's own PHY driver
+		 * (drivers/usb/phy/phy-tcc-dwc_otg.c in the vendor source,
+		 * tcc_dwc_otg_phy_init(), ~479 lines) is not a simple
+		 * power-on/enable stub: it performs an ordered sequence of
+		 * raw register writes into this block's pcfg0-pcfg4/lcfg0/
+		 * otgmux registers (magic constants e.g. 0x83000025,
+		 * 0xE31C243A, 0x75852004), with specific bit set/clear
+		 * ordering (BIT(31), BIT(24), BIT(20), BIT(25) on pcfg0) and
+		 * two explicit udelay() waits (30us, 5us) between steps.
+		 * Reproducing that sequence correctly in a new mainline PHY
+		 * driver (drivers/phy/telechips/) is real, bounded, but
+		 * unstarted work -- deliberately not attempted as a guessed
+		 * stub here, since a wrong register sequence on a PHY block
+		 * is a plausible way to make the port stop working instead of
+		 * start working. This is the one genuinely open piece of the
+		 * USB-console chain: host controller, Kconfig, and core are
+		 * wired; this PHY driver is not.
+		 */
+		dwc_otg_phy: dwc-otg-phy@11da0100 {
+			compatible = "telechips,tcc803x-dwc-otg-phy";
+			reg = <0x11da0100 0x30>;
+			status = "disabled";
+		};
 	};
 };
