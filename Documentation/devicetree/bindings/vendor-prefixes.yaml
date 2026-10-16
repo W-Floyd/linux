@@ -1696,6 +1696,8 @@ patternProperties:
     description: Techwell, Inc.
   "^teejet,.*":
     description: TeeJet
+  "^telechips,.*":
+    description: Telechips Inc.
   "^teltonika,.*":
     description: Teltonika Networks
   "^tempo,.*":
