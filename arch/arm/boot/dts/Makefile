@@ -34,6 +34,7 @@ subdir-y += socionext
 subdir-y += st
 subdir-y += sunplus
 subdir-y += synaptics
+subdir-y += telechips
 subdir-y += ti
 subdir-y += unisoc
 subdir-y += vt8500

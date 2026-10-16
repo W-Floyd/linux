@@ -26968,6 +26968,24 @@ L:	netdev@vger.kernel.org
 S:	Maintained
 F:	drivers/net/ethernet/tehuti/tn40*
 
+TELECHIPS TCC803X ARM SOC
+M:	William Floyd <git@notmy.space>
+L:	linux-arm-kernel@lists.infradead.org
+S:	Maintained
+F:	Documentation/devicetree/bindings/arm/telechips/
+F:	Documentation/devicetree/bindings/clock/telechips,tcc803x-ckc.yaml
+F:	Documentation/devicetree/bindings/display/bridge/telechips,tcc803x-hdmi.yaml
+F:	Documentation/devicetree/bindings/display/telechips/
+F:	Documentation/devicetree/bindings/mmc/telechips,tcc803x-sdhci.yaml
+F:	Documentation/devicetree/bindings/pinctrl/telechips,tcc803x-pinctrl.yaml
+F:	arch/arm/boot/dts/telechips/
+F:	drivers/clk/telechips/
+F:	drivers/gpu/drm/bridge/tcc803x-dw-hdmi.c
+F:	drivers/gpu/drm/telechips/
+F:	drivers/mmc/host/sdhci-tcc803x.c
+F:	drivers/pinctrl/telechips/
+F:	include/dt-bindings/clock/telechips,tcc803x-clks.h
+
 TELECOM CLOCK DRIVER FOR MCPL0010
 S:	Orphan
 F:	drivers/char/tlclk.c
