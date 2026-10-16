@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/display/telechips/telechips,tcc803x-vioc-config.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Telechips TCC803x VIOC shared configuration/IRQ-demux block
+
+maintainers:
+  - William Floyd <git@notmy.space>
+
+description: |
+  A syscon-like register block shared by every VIOC RDMA/WMIX/DISP/WDMA
+  channel: per-channel IRQ-select registers (offsets 0x0D8 RDMA, 0x0DC
+  WMIX, confirmed by the vendor's own per-channel node reg lists --
+  arch/arm/boot/dts/mobis/tcc803x.dtsi:1995 lists a channel's own window
+  plus "0x1200A0D8 0x4", which is vioc-config's base 0x1200a000 + 0x0d8),
+  software-reset bits (vioc_wmix.c:537-543, VIOC_WMIX_SetSWReset reads
+  this block via VIOC_IREQConfig_GetAddress()), and RDMA-to-WMIX/path
+  routing muxes used by the full 18-RDMA/7-WMIX/8-scaler VIOC fabric.
+
+  Base address and size confirmed: arch/arm/boot/dts/mobis/tcc803x.dtsi:
+  2271-2274 (vioc_config@1200a000, reg size 0x1000).
+
+  Not yet consumed by any driver in this tree: the minimal single-RDMA/
+  single-WMIX/single-DISP path (telechips,tcc803x-vioc-plane and
+  telechips,tcc803x-vioc-crtc) does not reference this node, since a
+  single fixed RDMA0->WMIX0->DISP0 path needs no runtime routing or IRQ
+  demux to put a static image on screen. This binding documents the
+  block's existence and real address for whichever driver (VIQE,
+  scaler, multi-plane overlay, or IRQ-cause demux for vblank) needs it
+  next.
+
+properties:
+  compatible:
+    const: telechips,tcc803x-vioc-config
+
+  reg:
+    maxItems: 1
+
+required:
+  - compatible
+  - reg
+
+additionalProperties: false
+
+examples:
+  - |
+    vioc_config: vioc-config@1200a000 {
+        compatible = "telechips,tcc803x-vioc-config";
+        reg = <0x1200a000 0x1000>;
+    };

@@ -1,0 +1,100 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/display/telechips/telechips,tcc803x-vioc-crtc.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Telechips TCC803x VIOC WMIX+DISP (DRM CRTC)
+
+maintainers:
+  - William Floyd <git@notmy.space>
+
+description: |
+  A TCC803x VIOC display path's compositing/timing pair: one WMIX
+  ("window mixer", the compositor that overlays up to 4 RDMA inputs) and
+  the DISP0 timing/sync-generator it feeds. Modeled as a single DRM CRTC
+  node with two named register windows, since mainline's atomic KMS
+  model has no separate "mixer" object between planes and a CRTC -- the
+  WMIX's compositing role and DISP's timing-generator role are both
+  folded into this one CRTC's enable/disable and mode_set hooks.
+
+  Register layout confirmed against the real vendor Linux 3.18 tree
+  (AVNT5W_TCC803XKK_kernel, Hyundai Mobis supplier-portal release,
+  Telechips Inc., GPLv2):
+    arch/arm/mach-tcc803x/include/mach/vioc_wmix.h:231-258 (WMIX register
+      map; CTRL.OVP bits[4:0] selects overlay/stacking order of up to 4
+      RDMA input layers, CTRL.UPD bit16 latches pending writes)
+    arch/arm/mach-tcc803x/vioc/vioc_wmix.c:41-57 (OVP/UPD bit access)
+    arch/arm/mach-tcc803x/include/mach/vioc_disp.h:424-452 (DISP register
+      map; CTRL bit0 is the display-enable "LEN" bit, uLSIZE at offset
+      0x04c packs (height<<16)|width)
+    arch/arm/mach-tcc803x/vioc/vioc_disp.c:431-435 (VIOC_DISP_TurnOn/Off
+      just set/clear CTRL bit0)
+    arch/arm/boot/dts/mobis/tcc803x.dtsi:2102-2106 (WMIX0 base address
+      0x12001800), :2312-2318 (DISP0 base address 0x12000000)
+
+  NOT modeled here, and required before this can drive real video
+  timing: the DISP horizontal/vertical timing registers (LHTIME1/2,
+  LVTIME1/2 at offsets 0x00c/0x010/0x014/0x018) and pixel-clock divider
+  (LCLKDIV at 0x008) need real mode-timing values. The DDIBUS_VIOC/
+  PERI_LCD0 gates below only enable the bus and peripheral clocks this
+  path runs on; they don't configure pixel-clock rate or timing.
+
+properties:
+  compatible:
+    const: telechips,tcc803x-vioc-crtc
+
+  reg:
+    items:
+      - description: WMIX0 register window
+      - description: DISP0 register window
+
+  reg-names:
+    items:
+      - const: wmix
+      - const: disp
+
+  interrupts:
+    maxItems: 1
+    description: Shared VIOC bus-0 interrupt (VIOC0_IRQI = SPI 151; vendor
+      header cites 119, contradicted by live recon -- see
+      telechips,tcc803x-vioc-plane.yaml).
+
+  clocks:
+    items:
+      - description: DDIBUS_VIOC display-bus gate
+      - description: PERI_LCD0 peripheral-clock gate
+
+  clock-names:
+    items:
+      - const: ddi
+      - const: disp0
+
+  telechips,planes:
+    $ref: /schemas/types.yaml#/definitions/phandle-array
+    description: |
+      RDMA plane(s) (telechips,tcc803x-vioc-plane nodes) wired to this
+      WMIX's input layers. Order matches the WMIX's own layer 0..3
+      inputs; only layer 0 need be populated for a single-plane path.
+
+required:
+  - compatible
+  - reg
+  - reg-names
+  - interrupts
+  - telechips,planes
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    vioc_crtc0: vioc-crtc@12001800 {
+        compatible = "telechips,tcc803x-vioc-crtc";
+        reg = <0x12001800 0x100>, <0x12000000 0x100>;
+        reg-names = "wmix", "disp";
+        interrupts = <GIC_SPI 151 IRQ_TYPE_LEVEL_HIGH>;
+        clocks = <&ckc 128>, <&ckc 9>;
+        clock-names = "ddi", "disp0";
+        telechips,planes = <&vioc_rdma0>;
+    };

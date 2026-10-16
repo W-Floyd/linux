@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config DRM_TCC803X
+	tristate "DRM Support for Telechips TCC803x"
+	depends on DRM && OF && ARM
+	depends on ARCH_TCC803X || COMPILE_TEST
+	select DRM_GEM_DMA_HELPER
+	select DRM_KMS_HELPER
+	select DRM_CLIENT_SELECTION
+	select DRM_FBDEV_EMULATION
+	select VIDEOMODE_HELPERS
+	help
+	  Top-level KMS driver that binds the TCC803x VIOC display
+	  controller (CRTC/planes) and HDMI encoder/connector into a
+	  single DRM device, with fbdev/fbcon emulation enabled so the
+	  kernel console is usable on the physical display. This board
+	  has no accessible UART, so this is the primary early-boot
+	  debug console.
+
+	  This driver only provides the integration glue; it requires
+	  the VIOC and HDMI sub-drivers (selected separately) to be
+	  present and bound as components for any output to appear.
+
+	  If in doubt, say N.
