@@ -200,6 +200,18 @@ config ARCH_TCC803X
 	  timer, and bring up secondary CPUs through PSCI.
 	  Say Y here if you want to run on such a device.
 
+config TCC803X_KEXEC_FB
+	bool "TCC803x: keep the stock display on framebuffer page 0 after kexec"
+	depends on ARCH_TCC803X
+	help
+	  When a TCC803x head unit is kexec'd from the vendor kernel, the
+	  display keeps scanning whichever of the vendor UI's three buffer
+	  pages (0x88000000, 3 x 1920x720 ARGB8888) it flipped to last, so a
+	  simple-framebuffer node at a fixed address would draw into a page
+	  nobody shows. The zImage entry points RDMA0 BASE0 at page 0 and
+	  makes sure DISP0 and RDMA0 are enabled, with the MMU still off.
+	  Needed for /dev/fb0 after a kexec; harmless otherwise.
+
 config ARCH_UNIPHIER
 	bool "Socionext UniPhier SoCs"
 	depends on ARCH_MULTI_V7

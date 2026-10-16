@@ -229,6 +229,23 @@ start:
 		mov	r7, r1			@ save architecture ID
 		mov	r8, r2			@ save atags pointer
 
+#ifdef CONFIG_TCC803X_KEXEC_FB
+		@ Kexec'd from the stock kernel: scan fb page 0 from now on (RDMA0
+		@ BASE0), so the simple-framebuffer address is fixed, and make sure
+		@ DISP0 LEN and RDMA0 IEN/UPD are set; the UPD write latches BASE0.
+		mov	r3, #0x12000000
+		mov	r4, #0x88000000
+		str	r4, [r3, #0x40c]
+		ldr	r4, [r3]
+		orr	r4, r4, #1
+		str	r4, [r3]
+		add	r3, r3, #0x400
+		ldr	r4, [r3]
+		orr	r4, r4, #0x10000000
+		orr	r4, r4, #0x10000
+		str	r4, [r3]
+#endif
+
 #ifndef CONFIG_CPU_V7M
 		/*
 		 * Booting from Angel - need to enter SVC mode and disable
