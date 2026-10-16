@@ -169,6 +169,7 @@ obj-y					+= starfive/
 obj-$(CONFIG_ARCH_SUNXI)		+= sunxi/
 obj-y					+= sunxi-ng/
 obj-$(CONFIG_ARCH_TEGRA)		+= tegra/
+obj-y					+= telechips/
 obj-y					+= tenstorrent/
 obj-y					+= thead/
 obj-y					+= ti/

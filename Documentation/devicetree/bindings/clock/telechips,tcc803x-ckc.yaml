@@ -1,0 +1,102 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/clock/telechips,tcc803x-ckc.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Telechips TCC803x Clock Controller (CKC)
+
+maintainers:
+  - William Floyd <git@notmy.space>
+
+description: |
+  The TCC803x CKC ("Clock Controller") is the SoC's central clock
+  generation block: PLLs, top-level bus clocks (FBUS_*) and gated
+  peripheral clocks (PERI_*), each PERI_* channel selected by a 4-byte
+  PCLKCTRL register at a fixed per-channel offset.
+
+  This binding currently covers the PERI_* peripheral-clock gates and
+  the DDIBUS_* display-bus power-down/reset gates (a second, separate
+  register window -- see "reg" below). The vendor CKC also owns PLL
+  configuration, the FBUS_* bus clocks, the PMU-resident ISOIP_* gates,
+  and separate I/O-bus/video-bus/HSIO-bus power-down and reset gate
+  arrays that live in other register regions entirely -- none of that
+  is modeled yet.
+
+  Confirmed against the real vendor Linux 3.18 tree
+  (AVNT5W_TCC803XKK_kernel, Hyundai Mobis supplier-portal release,
+  Telechips Inc., GPLv2):
+    drivers/clk/tcc/clk-tcc803x-a7s-reg.h (CKC_* register offsets)
+    drivers/clk/tcc/clk-tcc803x-a7s.c (register access patterns)
+    arch/arm/boot/dts/tcc/tcc803x.dtsi:719-736 (ckc@14000000 node)
+
+  See also: include/dt-bindings/clock/telechips,tcc803x-clks.h
+
+properties:
+  compatible:
+    const: telechips,tcc803x-ckc
+
+  reg:
+    minItems: 1
+    maxItems: 2
+    description: |
+      reg[0]: the CKC's base register block (CLKCTRL/PLL/SWRESET/
+      PCLKCTRL arrays). The vendor's own devicetree declares this region
+      as 0x14000000, size 0x1A8 (arch/arm/boot/dts/tcc/tcc803x.dtsi:721),
+      but by the vendor driver's own offset formula (CKC_PCLKCTRL
+      0xD0 + id*4, clk-tcc803x-a7s.c:1371) PERI_UART0 (id 58) sits at
+      offset 0x1B8 -- past the end of that declared 0x1A8-byte window.
+      This is an inconsistency in the vendor source itself, not
+      something introduced here; this binding's example below sizes
+      the region to actually cover PERI_UART0's register instead of
+      reproducing the vendor's (apparently too-small) value.
+
+      reg[1] (optional, required for the DDIBUS_* gates): the separate
+      "display bus configuration" window, vendor tcc803x.dtsi:726
+      (0x12380000, size 0x8). DDIBUS_PWDN/DDIBUS_RESET
+      (clk-tcc803x-a7s-reg.h:58-59) live here, not in reg[0].
+
+  reg-names:
+    minItems: 1
+    items:
+      - const: ckc
+      - const: ddibus
+
+  clocks:
+    items:
+      - description: Crystal reference (XIN)
+
+  clock-names:
+    items:
+      - const: xin
+
+  "#clock-cells":
+    const: 1
+    description:
+      Cell is a PERI_* channel index, or a TCC803X_CLK_DDIBUS_* onecell
+      ID (a mainline-only remapping of the vendor DDIBUS_* bit number,
+      not a raw vendor value -- see telechips,tcc803x-clks.h), as
+      defined in include/dt-bindings/clock/telechips,tcc803x-clks.h.
+      Only the channels implemented by the driver resolve to a real
+      clock.
+
+required:
+  - compatible
+  - reg
+  - clocks
+  - clock-names
+  - "#clock-cells"
+
+additionalProperties: false
+
+examples:
+  - |
+    clock-controller@14000000 {
+        compatible = "telechips,tcc803x-ckc";
+        reg = <0x14000000 0x1bc>, <0x12380000 0x8>;
+        reg-names = "ckc", "ddibus";
+        clocks = <&xin>;
+        clock-names = "xin";
+        #clock-cells = <1>;
+    };
+...
