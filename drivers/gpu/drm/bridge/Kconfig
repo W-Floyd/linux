@@ -375,6 +375,18 @@ config DRM_THEAD_TH1520_DW_HDMI
 	  Choose this to enable support for the internal HDMI bridge found
 	  on the T-Head TH1520 SoC.
 
+config DRM_TCC803X_DW_HDMI
+	tristate "Telechips TCC803x DesignWare HDMI bridge"
+	depends on OF
+	depends on ARCH_TCC803X || COMPILE_TEST
+	select DRM_DW_HDMI
+	help
+	  Choose this to enable the HDMI TX bridge on Telechips TCC803x
+	  SoCs. This is a Synopsys DesignWare HDMI TX controller with a
+	  Telechips-specific MMIO-mapped (non-I2C) companion PHY. Minimal
+	  support: PHY init and TMDS output for a single, vendor-confirmed
+	  pixel clock (1920x1080p60). No HDCP, audio, or CEC.
+
 config DRM_TOSHIBA_TC358762
 	tristate "TC358762 DSI/DPI bridge"
 	depends on OF
