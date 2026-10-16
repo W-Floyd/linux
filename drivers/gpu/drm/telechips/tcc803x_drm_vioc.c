@@ -217,25 +217,31 @@
  *     TCC803x's VIOC has no IOMMU in front of RDMA/WDMA; the raw
  *     physical-dma_addr_t BASE0 write in this driver is correct as-is
  *     and needs no IOMMU/dma-iommu support added.
- *  5. hdmi-tx has no probe driver yet (DT node/binding only) -- so even
- *     if 1-3 above were fixed, component_bind_all() in tcc803x_drm_drv.c
- *     still never completes, and this code path is never reached by a
- *     running kernel tonight.
+ *  5. [DONE as of this patch] hdmi-tx now has a real probe driver
+ *     (drivers/gpu/drm/bridge/tcc803x-dw-hdmi.c, dw_hdmi_probe()). It is a
+ *     DRM bridge, not a component, so this file's ->bind() resolves it via
+ *     the vioc_crtc0/hdmi_tx OF-graph endpoint in tcc803x.dtsi
+ *     (devm_drm_of_get_bridge()) and drm_bridge_attach()s it to this CRTC's
+ *     own encoder (tcc803x_vioc_attach_bridge(), below) instead of relying
+ *     on component matching, which a plain platform_driver bridge could
+ *     never satisfy. component_bind_all() in tcc803x_drm_drv.c can now
+ *     actually complete.
  *
  * Bottom line: this compiles and is real glue (real register offsets,
- * real atomic plane/CRTC wiring, no invented clock IDs), but does not
- * produce a visible image on real hardware yet. Timing (1) is now the
- * live-captured values, not a guess at which vendor panel table applies.
- * The pixel-clock source (2) is explicitly still open -- see that point
- * for the exact register read that would close it. This driver no
- * longer touches "disp0"'s (PERI_LCD0's) clock rate at all, trusting
- * whatever the bootloader already has running, so it cannot itself make
- * the clock situation worse than it already is on a stock boot.
- * Whether the downstream physical interface is parallel RGB/LVDS or an
- * on-chip HDMI encoder feeding a bridge is still not fully resolved (see
- * point 1 above); that is drivers/gpu/drm/bridge/tcc803x-dw-hdmi.c's and
- * the output_config investigation's territory, not this file's. Points
- * 3-5 are still open.
+ * real atomic plane/CRTC wiring, no invented clock IDs), and now also
+ * attaches the real HDMI bridge instead of leaving component_bind_all()
+ * hung on an unsatisfiable match. Timing (1) is now the live-captured
+ * values, not a guess at which vendor panel table applies. The pixel-clock
+ * source (2) is explicitly still open -- see that point for the exact
+ * register read that would close it. This driver no longer touches
+ * "disp0"'s (PERI_LCD0's) clock rate at all, trusting whatever the
+ * bootloader already has running, so it cannot itself make the clock
+ * situation worse than it already is on a stock boot. Whether the
+ * downstream physical interface is parallel RGB/LVDS or an on-chip HDMI
+ * encoder feeding a bridge is still not fully resolved (see point 1
+ * above); that is drivers/gpu/drm/bridge/tcc803x-dw-hdmi.c's and the
+ * output_config investigation's territory, not this file's. Points 3-4
+ * are still open.
  */
 
 #include <linux/bitfield.h>
@@ -251,9 +257,12 @@
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_atomic_state_helper.h>
+#include <drm/drm_bridge.h>
+#include <drm/drm_bridge_connector.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_device.h>
 #include <drm/drm_drv.h>
+#include <drm/drm_encoder.h>
 #include <drm/drm_fb_dma_helper.h>
 #include <drm/drm_fourcc.h>
 #include <drm/drm_framebuffer.h>
@@ -393,6 +402,7 @@
 struct tcc803x_vioc_crtc {
 	struct drm_crtc base;
 	struct drm_plane primary;
+	struct drm_encoder encoder;
 	void __iomem *wmix;
 	void __iomem *disp;
 	void __iomem *rdma;
@@ -578,6 +588,60 @@ static const struct drm_crtc_funcs tcc803x_crtc_funcs = {
 	.atomic_destroy_state	= drm_atomic_helper_crtc_destroy_state,
 };
 
+/* --- encoder + HDMI bridge ---
+ *
+ * hdmi_tx (drivers/gpu/drm/bridge/tcc803x-dw-hdmi.c) is a plain
+ * platform_driver wrapping dw_hdmi_probe(), which registers a struct
+ * drm_bridge via drm_bridge_add() - it is not a DRM component and never
+ * calls component_add(). Rather than list it in the top-level driver's
+ * "ports" component-match set (where it could never be satisfied, see
+ * tcc803x_drm_drv.c), this CRTC owns a minimal encoder of its own and
+ * drm_bridge_attach()s the HDMI bridge to it directly, the standard
+ * mainline pattern for a bridge behind a component-based CRTC (cf.
+ * drivers/gpu/drm/mxsfb/lcdif_drv.c's lcdif_attach_bridge()). The bridge
+ * is found via the vioc_crtc0/hdmi_tx OF-graph "port"/"endpoint" pair in
+ * tcc803x.dtsi, not a bare phandle, so devm_drm_of_get_bridge() can do the
+ * lookup generically.
+ */
+static const struct drm_encoder_funcs tcc803x_encoder_funcs = {
+	.destroy = drm_encoder_cleanup,
+};
+
+static int tcc803x_vioc_attach_bridge(struct device *dev, struct drm_device *drm,
+				       struct tcc803x_vioc_crtc *crtc)
+{
+	struct drm_bridge *bridge;
+	struct drm_connector *connector;
+	int ret;
+
+	bridge = devm_drm_of_get_bridge(dev, dev->of_node, 0, 0);
+	if (IS_ERR(bridge))
+		return dev_err_probe(dev, PTR_ERR(bridge),
+				      "failed to get output bridge\n");
+
+	crtc->encoder.possible_crtcs = drm_crtc_mask(&crtc->base);
+	ret = drm_encoder_init(drm, &crtc->encoder, &tcc803x_encoder_funcs,
+				DRM_MODE_ENCODER_NONE, NULL);
+	if (ret)
+		return ret;
+
+	/* DRM_BRIDGE_ATTACH_NO_CONNECTOR: let drm_bridge_connector_init()
+	 * below create the connector generically from the bridge chain,
+	 * rather than relying on dw-hdmi's own (component-oriented)
+	 * connector-creation path.
+	 */
+	ret = drm_bridge_attach(&crtc->encoder, bridge, NULL,
+				 DRM_BRIDGE_ATTACH_NO_CONNECTOR);
+	if (ret)
+		return ret;
+
+	connector = drm_bridge_connector_init(drm, &crtc->encoder);
+	if (IS_ERR(connector))
+		return PTR_ERR(connector);
+
+	return 0;
+}
+
 /* --- component glue --- */
 
 static int tcc803x_vioc_bind(struct device *dev, struct device *master, void *data)
@@ -642,6 +706,10 @@ static int tcc803x_vioc_bind(struct device *dev, struct device *master, void *da
 
 	/* Now that the CRTC exists, the primary plane may target it. */
 	crtc->primary.possible_crtcs = drm_crtc_mask(&crtc->base);
+
+	ret = tcc803x_vioc_attach_bridge(dev, drm, crtc);
+	if (ret)
+		return ret;
 
 	dev_set_drvdata(dev, crtc);
 

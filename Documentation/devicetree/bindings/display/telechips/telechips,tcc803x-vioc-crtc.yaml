@@ -77,6 +77,15 @@ properties:
       WMIX's input layers. Order matches the WMIX's own layer 0..3
       inputs; only layer 0 need be populated for a single-plane path.
 
+  port:
+    $ref: /schemas/graph.yaml#/properties/port
+    description: |
+      Output endpoint connected to the downstream bridge (e.g. hdmi_tx)
+      this CRTC's driver resolves with devm_drm_of_get_bridge() and
+      drm_bridge_attach()s to its own CRTC-owned encoder. The bridge is
+      not itself a component (see telechips,tcc803x-hdmi.yaml); this
+      graph link is how the CRTC driver finds it instead.
+
 required:
   - compatible
   - reg

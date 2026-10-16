@@ -39,21 +39,24 @@
 	/*
 	 * Component-master glue (drivers/gpu/drm/telechips/tcc803x_drm_drv.c)
 	 * walks this "ports" phandle list positionally (drm_of_component_match_add()),
-	 * not by compatible string. hdmi_tx doubles as both the HDMI encoder
-	 * and connector here (no separate connector node).
+	 * not by compatible string. Only &vioc_crtc0 is listed: it is the only
+	 * block that actually calls component_add() (tcc803x_drm_vioc.c).
 	 *
-	 * This does NOT mean the pipeline works yet: hdmi_tx's driver
+	 * hdmi_tx is NOT listed here. Its driver
 	 * (drivers/gpu/drm/bridge/tcc803x-dw-hdmi.c) is a DRM bridge, not a
-	 * component - it never calls component_add(), so the &hdmi_tx match
-	 * added here will never be satisfied and component_bind_all() keeps
-	 * waiting on it forever. See tcc803x_drm_drv.c's and
-	 * tcc803x_drm_vioc.c's status writeups for what's real vs. still
-	 * missing (drm_bridge_attach() from the VIOC CRTC driver is the
-	 * intended fix, not component matching).
+	 * component - it registers via dw_hdmi_probe()/drm_bridge_add() and
+	 * never calls component_add(), so a phandle in this match set would
+	 * never be satisfied and component_bind_all() would wait on it
+	 * forever. Instead, tcc803x_drm_vioc.c's ->bind() resolves hdmi_tx
+	 * through the vioc_crtc0/hdmi_tx OF-graph "port"/"endpoint" pair in
+	 * tcc803x.dtsi (devm_drm_of_get_bridge()) and calls
+	 * drm_bridge_attach() directly on its own CRTC-owned encoder - the
+	 * standard mainline pattern for a bridge behind a component CRTC
+	 * (cf. drivers/gpu/drm/mxsfb/lcdif_drv.c's lcdif_attach_bridge()).
 	 */
 	display: display-subsystem {
 		compatible = "telechips,tcc803x-display-subsystem";
-		ports = <&vioc_crtc0>, <&hdmi_tx>;
+		ports = <&vioc_crtc0>;
 	};
 };
 

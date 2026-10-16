@@ -77,12 +77,17 @@ static const struct drm_driver tcc803x_drm_driver = {
  *
  * drivers/gpu/drm/telechips/tcc803x_drm_vioc.c implements the VIOC CRTC
  * side as a real component (telechips,tcc803x-vioc-crtc, component_add()
- * in its ->probe()). drivers/gpu/drm/bridge/tcc803x-dw-hdmi.c implements
- * the HDMI side as a plain platform_driver around dw_hdmi_probe() - it is
- * a DRM bridge, not a component, and never calls component_add(). Listing
- * &hdmi_tx in "ports" (see tcc803x-avn.dts) therefore still leaves one
- * match in the set that nothing will ever satisfy; see the status note at
- * the bottom of this file.
+ * in its ->probe()) and is the only entry in "ports" (see tcc803x-avn.dts).
+ *
+ * drivers/gpu/drm/bridge/tcc803x-dw-hdmi.c implements the HDMI side as a
+ * plain platform_driver around dw_hdmi_probe() - a DRM bridge, not a
+ * component; it registers via drm_bridge_add(), not component_add(), and
+ * is deliberately NOT listed in "ports". A phandle this match set can
+ * never satisfy would leave component_bind_all() waiting forever. Instead
+ * tcc803x_drm_vioc.c's ->bind() finds it via the vioc_crtc0/hdmi_tx
+ * OF-graph endpoint pair in tcc803x.dtsi (devm_drm_of_get_bridge()) and
+ * drm_bridge_attach()es it to its own CRTC-owned encoder directly - see
+ * the status note at the bottom of this file.
  */
 
 static int tcc803x_drm_bind(struct device *dev)
@@ -264,24 +269,20 @@ MODULE_LICENSE("GPL");
  *    drivers/gpu/drm/Kconfig source line.
  *  - tcc803x_drm_vioc.c implements the VIOC CRTC/plane as a real component
  *    (telechips,tcc803x-vioc-crtc, component_add()/component_del() in
- *    probe/remove) and will bind successfully against this file's match set.
- *  - tcc803x-dw-hdmi.c implements the HDMI side and the display-subsystem
- *    node (arch/arm/boot/dts/telechips/tcc803x-avn.dts) lists both
- *    &vioc_crtc0 and &hdmi_tx under "ports", so dtbs_check/dtc are happy and
- *    tcc803x_drm_add_components() has real phandles to walk.
+ *    probe/remove) and will bind successfully against this file's match set,
+ *    which now lists only &vioc_crtc0 (see tcc803x-avn.dts).
+ *  - tcc803x-dw-hdmi.c implements the HDMI side as a DRM bridge
+ *    (dw_hdmi_probe(), drm_bridge_add()) and is deliberately NOT a
+ *    component match here: tcc803x_drm_vioc.c's ->bind() instead resolves
+ *    it via the vioc_crtc0/hdmi_tx OF-graph "port"/"endpoint" pair in
+ *    tcc803x.dtsi (devm_drm_of_get_bridge()) and drm_bridge_attach()s it to
+ *    its own CRTC-owned encoder - this closes the hang this file used to
+ *    describe here: component_bind_all() was waiting on a &hdmi_tx
+ *    component match that a plain drm_bridge platform_driver could never
+ *    satisfy, so tcc803x_drm_platform_probe() stayed deferred forever and
+ *    nothing downstream (DISP0 timing programming, fbcon) ever ran.
  *
  * NOT DONE / BLOCKED:
- *  - hdmi_tx's driver (tcc803x-dw-hdmi.c) is a plain platform_driver around
- *    dw_hdmi_probe() - a DRM BRIDGE, not a component. It never calls
- *    component_add(), so the &hdmi_tx entry in "ports" adds a match that
- *    nothing will ever satisfy: component_bind_all() will wait on it
- *    indefinitely and tcc803x_drm_platform_probe() will stay deferred
- *    forever instead of completing. The fix is for the VIOC CRTC driver to
- *    look up and drm_bridge_attach() the HDMI bridge directly (the usual
- *    pattern for a bridge behind a component CRTC), not to list it as a
- *    component match here. That attach call, and removing &hdmi_tx from
- *    "ports" once it's in place, is still TODO in tcc803x_drm_vioc.c, not
- *    this file.
  *  - mode_config min/max width/height are placeholders, not derived from
  *    real VIOC DISP timing-generator limits.
  *  - No IOMMU/VIOC-address-space wiring (tcc_drm_iommu.c in the vendor tree
@@ -289,8 +290,8 @@ MODULE_LICENSE("GPL");
  *    into whatever MMU sits in front of the VIOC RDMA/WDMA blocks, if any
  *    exists on TCC803x's VIOC generation (not yet confirmed).
  *
- * Bottom line: the CRTC side is real and will bind; the HDMI bridge exists
- * but isn't wired into the pipeline yet, so component_bind_all() still
- * never completes and there is no working display output tonight.
+ * Bottom line: the CRTC side is real and binds, and now pulls the HDMI
+ * bridge in directly instead of waiting on an unsatisfiable component
+ * match, so component_bind_all() can actually complete.
  * ===========================================================================
  */
