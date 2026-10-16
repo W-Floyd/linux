@@ -72,6 +72,20 @@ description: |
       power-on-reset value already selects DISP0 (SEL field value 0)
       for every output type -- plausible but not verified against a
       reset-value table in the extracted source.
+
+      Follow-up (exhaustive grep of every VIOC_OUTCFG_SetOutConfig()
+      caller in AVNT5W_TCC803XKK_kernel) confirms the above: MRGB (4)
+      is never an argument anywhere in the tree; every call site passes
+      HDMI, SDVENC or HDVENC. Structural counterpoint worth recording:
+      the only other board in this same vendor tree with a comparable
+      1920x720 panel (tianma TM123XDHP90, drivers/video/fbdev/tcc-fb/
+      lcd_TM123XDHP90.c, "telechips,lvds-tm123xdhp90",
+      arch/arm/boot/dts/mobis/tcc8030-android-lpd4321_sv0.1.dts:62-75)
+      is LVDS off DISP1, not MRGB off DISP0. See
+      telechips,tcc803x-mrgb-panel.yaml for the MRGB panel node this
+      mux feeds and its own caveat section on why MRGB routing here is
+      grounded in a live register read (outside this static-source
+      investigation), not vendor-source precedent.
     - MISCCFG's live/current value on real hardware: not read here.
     - D0CPUIF/D1CPUIF/D2CPUIF bitfields beyond their offsets: not
       decoded, since no caller of VIOC_OUTCFG_SetOutConfig() in this

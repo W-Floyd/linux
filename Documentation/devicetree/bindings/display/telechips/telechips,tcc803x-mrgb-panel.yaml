@@ -1,0 +1,174 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/display/telechips/telechips,tcc803x-mrgb-panel.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Telechips TCC803x VIOC MRGB (synchronous parallel-RGB) panel output
+
+maintainers:
+  - William Floyd <git@notmy.space>
+
+description: |
+  A panel driven directly off a VIOC DISP timing generator through the
+  OUTCFG MISCCFG.MRGBSEL mux documented in
+  telechips,tcc803x-output-config.yaml (selector value VIOC_OUTCFG_MRGB
+  = 4, include/video/tcc/vioc_outcfg.h:37,
+  AVNT5W_TCC803XKK_kernel). MRGBSEL only selects *which* DISP feeds the
+  MRGB output pins; it carries no format/timing configuration of its
+  own, and no other MRGB-specific register block exists anywhere in the
+  extracted vendor source (struct VIOC_OUTCFG, vioc_outcfg.h:81-86, is
+  4 x 32-bit words total: D0CPUIF/D1CPUIF/D2CPUIF/MISCCFG, nothing
+  named mrgb/MRGB beyond that). DISP0 itself generates the entire pixel
+  stream (timing generator, sync, pixel-clock divider) -- this output
+  type is structurally a thin, passive mux selection, not a separate
+  display controller.
+
+  Not MIPI DSI: the comment "// MIPI RGB OUTPUT" next to the MRGBSEL
+  bitfield in vioc_outcfg.h:71 (mirrored by "// MIPI I80 OUTPUT" on the
+  adjacent M80SEL field at vioc_outcfg.h:69) does not mean this is a
+  MIPI Alliance DSI/DBI serial link. The same vendor tree separately
+  defines a real, distinct MIPI DSI output type:
+    - enum TCC_DB_OUT_{RGB,LVDS,DSI,HDMI} (include/video/tcc/tcc_fb.h:
+      74-79, arch/arm/mach-tcc803x/include/mach/tcc_fb.h:74-79) --
+      TCC_DB_OUT_RGB and TCC_DB_OUT_DSI are sibling, independent
+      values, not variants of one path.
+    - drivers/video/fbdev/tcc-fb/tcc_mipi_dsi.c, a CONFIG_TCC_MIPI-
+      gated driver with its own "dsib" clock (tcc_mipi_dsi.c:70,
+      clk_get(0, "dsib"), currently #if 0'd out in that file) --
+      entirely separate code/clock from vioc_outcfg/MRGBSEL.
+    - TCC_DB_OUT_RGB's own dispatch is an empty no-op
+      (drivers/video/fbdev/tcc-fb/tcc_displayblock.c:20-21,
+      `case TCC_DB_OUT_RGB: break;` installs no ops struct at all),
+      unlike TCC_DB_OUT_DSI which installs &tcc_db_dsi_ops
+      (tcc_displayblock.c:26-28) -- consistent with RGB/MRGB needing no
+      protocol-level driver beyond DISP0's own timing generator plus
+      the OUTCFG mux bit.
+  Reading "MIPI" in the MISCCFG comments as Telechips' datasheet name
+  for the physical CPU-interface *pin group* shared by the M80
+  (8080-style MCU) and MRGB (synchronous RGB) output formatters is the
+  interpretation this binding assumes; no TCC803x MIPI D-PHY/DSI
+  hardware block is involved in the MRGB path.
+
+  IMPORTANT CAVEAT: VIOC_OUTCFG_MRGB (selector value 4) is never passed
+  to VIOC_OUTCFG_SetOutConfig() by any board file, platform driver, or
+  panel driver anywhere in the extracted AVNT5W_TCC803XKK_kernel tree --
+  every call site found greps to VIOC_OUTCFG_HDMI/_SDVENC/_HDVENC only
+  (arch/arm/mach-tcc803x/vioc/vioc_outcfg.c and
+  drivers/video/fbdev/tcc-fb/vioc/vioc_outcfg.c define the MRGB case,
+  but nothing calls it with that argument). The only other board in
+  this same vendor tree with a comparable 1920x720 panel (tianma
+  TM123XDHP90, drivers/video/fbdev/tcc-fb/lcd_TM123XDHP90.c,
+  "telechips,lvds-tm123xdhp90", arch/arm/boot/dts/mobis/
+  tcc8030-android-lpd4321_sv0.1.dts:62-75) is LVDS-driven off DISP1,
+  not MRGB off DISP0 -- a real, vendor-confirmed-working alternative
+  output type for a same-resolution panel, structurally worth keeping
+  in mind even though it is not what this binding documents. This
+  node's routing is grounded instead in a live MISCCFG register read
+  off the real running head unit (outside this static-source
+  investigation) showing MRGBSEL selecting DISP0; static vendor source
+  alone does not independently corroborate that selection.
+
+  Timing values below are not estimated: they are the same live DISP0
+  register capture (LHTIME1/2, LVTIME1/2) already used to program the
+  CRTC in drivers/gpu/drm/telechips/tcc803x_drm_vioc.c, decoded through
+  that file's DISP_LHTIME1/2 and DISP_LVTIME1/2 bitfield layout. They
+  describe DISP0's own timing generator, which this output path merely
+  passes through unmodified -- not an MRGB-specific register.
+  clock-frequency is deliberately left unlisted among this binding's
+  properties (and absent from its DT instance): the real pixel-clock
+  rate is the same open PLL/clock-source question tcc803x_drm_vioc.c's
+  atomic_enable() comment already tracks (live LCLKDIV reads
+  PXCLKDIV=0, ACDIV=0, which does not resolve cleanly against the
+  divider formula in that driver's own citation of
+  vioc_disp.h/tca_lcdc.c) -- supplying a number here would be a guess
+  presented as fact. This is a known, separately-tracked gap, not an
+  oversight.
+
+properties:
+  compatible:
+    description:
+      Placeholder compatible: the real panel's manufacturer and part
+      number are not identified in any vendor source found so far (the
+      touch-panel driver nodes in tcc8031-android-avn.dtsi give
+      1920x720 touch coordinates and panel-coords, not a display-panel
+      part number). Not "panel-dpi" -- that binding requires
+      power-supply, which is equally unconfirmed, and this node would
+      rather omit the property than guess a regulator.
+    const: telechips,tcc803x-mrgb-panel
+
+  width-mm:
+    const: 92
+
+  height-mm:
+    const: 243
+
+  port:
+    $ref: /schemas/graph.yaml#/properties/port
+    description:
+      Not yet connected to anything: no driver walks this node's graph
+      (or binds the vioc_crtc0/output_config nodes together) today.
+      Present for schema completeness and for whichever future MRGB/
+      CRTC driver wires the pipeline up for real.
+
+  panel-timing:
+    type: object
+    description:
+      Live-captured DISP0 hactive/vactive/porch/sync counts (see
+      description above). A reduced property set compared to the
+      generic panel-timing.yaml schema -- clock-frequency, which that
+      schema requires, is intentionally not among the properties below.
+    properties:
+      hactive:
+        const: 1920
+      vactive:
+        const: 720
+      hsync-len:
+        const: 31
+      hfront-porch:
+        const: 49
+      hback-porch:
+        const: 159
+      vsync-len:
+        const: 4
+      vfront-porch:
+        const: 14
+      vback-porch:
+        const: 27
+    required:
+      - hactive
+      - vactive
+      - hsync-len
+      - hfront-porch
+      - hback-porch
+      - vsync-len
+      - vfront-porch
+      - vback-porch
+    additionalProperties: false
+
+required:
+  - compatible
+  - panel-timing
+
+additionalProperties: false
+
+examples:
+  - |
+    panel {
+        compatible = "telechips,tcc803x-mrgb-panel";
+        width-mm = <92>;
+        height-mm = <243>;
+
+        panel-timing {
+            hactive = <1920>;
+            vactive = <720>;
+            hsync-len = <31>;
+            hfront-porch = <49>;
+            hback-porch = <159>;
+            vsync-len = <4>;
+            vfront-porch = <14>;
+            vback-porch = <27>;
+        };
+    };
+
+...
