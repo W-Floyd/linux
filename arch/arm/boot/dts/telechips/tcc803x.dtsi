@@ -526,6 +526,22 @@
 			clock-names = "ddi", "disp0";
 			telechips,planes = <&vioc_rdma0>;
 			status = "disabled";
+
+			/*
+			 * Output endpoint the VIOC CRTC driver resolves with
+			 * devm_drm_of_get_bridge(dev, dev->of_node, 0, 0) to find
+			 * hdmi_tx's struct drm_bridge and drm_bridge_attach() it to a
+			 * CRTC-owned encoder -- hdmi_tx is a bridge
+			 * (drivers/gpu/drm/bridge/tcc803x-dw-hdmi.c, dw_hdmi_probe(),
+			 * drm_bridge_add()), not a component, so this replaces the
+			 * display-subsystem "ports" component-match entry that used
+			 * to list it (see tcc803x-avn.dts).
+			 */
+			port {
+				vioc_crtc0_out: endpoint {
+					remote-endpoint = <&hdmi_tx_in>;
+				};
+			};
 		};
 
 		/*
@@ -625,6 +641,18 @@
 				      "hdmi_cec", "hdmi_hdcp14", "hdmi_hdcp22",
 				      "hdmi_ddibus";
 			status = "disabled";
+
+			/*
+			 * Input endpoint, paired with vioc_crtc0's "port" above:
+			 * lets devm_drm_of_get_bridge() walk from the VIOC CRTC
+			 * node to this node and find the drm_bridge this driver
+			 * registers via dw_hdmi_probe().
+			 */
+			port {
+				hdmi_tx_in: endpoint {
+					remote-endpoint = <&vioc_crtc0_out>;
+				};
+			};
 		};
 
 		/*

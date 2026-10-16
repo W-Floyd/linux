@@ -7,6 +7,8 @@ config DRM_TCC803X
 	select DRM_KMS_HELPER
 	select DRM_CLIENT_SELECTION
 	select DRM_FBDEV_EMULATION
+	select DRM_PANEL_BRIDGE
+	select DRM_BRIDGE_CONNECTOR
 	select VIDEOMODE_HELPERS
 	help
 	  Top-level KMS driver that binds the TCC803x VIOC display
@@ -17,7 +19,9 @@ config DRM_TCC803X
 	  debug console.
 
 	  This driver only provides the integration glue; it requires
-	  the VIOC and HDMI sub-drivers (selected separately) to be
-	  present and bound as components for any output to appear.
+	  the VIOC CRTC sub-driver (selected separately) to be present
+	  and bound as a component, and the HDMI bridge sub-driver to be
+	  present so the VIOC CRTC can drm_bridge_attach() it, for any
+	  output to appear.
 
 	  If in doubt, say N.

@@ -100,6 +100,17 @@ properties:
     $ref: /schemas/types.yaml#/definitions/uint32
     enum: [0, 1]
 
+  port:
+    $ref: /schemas/graph.yaml#/properties/port
+    description: |
+      Input endpoint from the VIOC CRTC driving this bridge (see
+      telechips,tcc803x-vioc-crtc.yaml's "port"). This node is a plain
+      platform_driver registering a struct drm_bridge
+      (drivers/gpu/drm/bridge/tcc803x-dw-hdmi.c, dw_hdmi_probe()), not a
+      DRM component; the CRTC driver finds it via this graph link and
+      drm_bridge_attach()es it directly, rather than through component
+      matching.
+
 required:
   - compatible
   - reg
