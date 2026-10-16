@@ -1,0 +1,131 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/mmc/telechips,tcc803x-sdhci.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Telechips TCC803x SD/MMC Host Controller
+
+maintainers:
+  - William Floyd <git@notmy.space>
+
+description: |
+  Telechips TCC803x SoCs integrate three SD/eMMC host controller
+  instances (SDHC0..SDHC2) built around a standard SDHCI core: the
+  vendor 3.18 driver (drivers/mmc/host/sdhci-tcc.c in the
+  AVNT5W_TCC803XKK_kernel vendor tree) is a platform glue driver
+  depending on MMC_SDHCI_PLTFM and operating on a struct sdhci_host,
+  not a from-scratch register interface. Each controller additionally
+  exposes a second, SoC-wide "channel control" register region shared
+  across all three instances (clock divider/gating and RX/TX tap delay
+  tuning registers for all channels, including a single shared
+  auto-tune-result register at a fixed offset read back by every
+  instance), plus an optional third "channel mux" region that the
+  vendor devicetree leaves unpopulated (zero address/size) on this
+  board. This shared-region layout is why a new, vendor-specific
+  binding is used instead of a single-region generic SDHCI binding.
+
+allOf:
+  - $ref: mmc-controller.yaml#
+
+properties:
+  compatible:
+    const: telechips,tcc803x-sdhci
+
+  reg:
+    description: |
+      Four regions, in this order:
+        1. The per-instance SDHCI core register set.
+        2. This instance's slice (a per-channel offset) of the SoC-wide
+           channel-control block (clock div/gating and TX/RX tap-delay
+           tuning registers for all three channels).
+        3. The channel-mux region. Unpopulated (0x0 0x0) on known
+           vendor boards.
+        4. The auto-tune-result register (4 bytes). Also at an
+           identical physical address on all three sdhc nodes -- one
+           shared status register read by every instance, indexed
+           internally by the driver using "controller-id".
+    minItems: 4
+    maxItems: 4
+
+  interrupts:
+    maxItems: 1
+
+  clocks:
+    items:
+      - description: SDHC core/bit-rate clock
+      - description: SDHC AHB/IO bus clock
+
+  clock-names:
+    items:
+      - const: mmc_fclk
+      - const: mmc_hclk
+
+  telechips,controller-id:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      Index of this SDHC instance (0, 1 or 2), used by the vendor
+      driver to select this channel's slice of the shared
+      channel-control and auto-tune-result registers described above.
+    minimum: 0
+    maximum: 2
+
+  reset-gpios:
+    maxItems: 1
+    description:
+      eMMC hardware reset line, if wired. Vendor equivalent is the
+      bespoke "tcc-mmc-reset" property (e.g. vendor mobis/tcc8031-
+      android-avn.dtsi:803, &gpsd0 14 0); this binding uses the
+      standard reset-gpios name instead. Optional -- the AVN eMMC
+      enables cap-mmc-hw-reset without this property today because no
+      GPIO controller/pinctrl driver exists yet for this board; the
+      driver treats an absent reset-gpios as a no-op, matching the
+      vendor driver's own gpio_is_valid() guard.
+
+  telechips,clk-out-tap:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      Output clock tap-delay override for this channel's TAPDLY
+      register. Mainline-named equivalent of the vendor's
+      "tcc-mmc-clk-out-tap" (sdhci-tcc.c sdhci_tcc_parse_channel_configs).
+      Driver default (also the vendor default) is 8 when unspecified.
+
+  telechips,cmd-tap:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      Command line tap-delay override for this channel's DELAY_CON0
+      register. Mainline-named equivalent of the vendor's
+      "tcc-mmc-cmd-tap". Driver default (also the vendor default) is
+      7 when unspecified.
+
+  telechips,data-tap:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      Data line tap-delay override for this channel's DELAY_CON1-4
+      registers. Mainline-named equivalent of the vendor's
+      "tcc-mmc-data-tap". Driver default (also the vendor default) is
+      7 when unspecified.
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - clocks
+  - clock-names
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    mmc@16440000 {
+      compatible = "telechips,tcc803x-sdhci";
+      reg = <0x16440000 0x100>, <0x16470000 0x200>,
+            <0x0 0x0>, <0x164700fc 0x4>;
+      interrupts = <GIC_SPI 74 IRQ_TYPE_LEVEL_HIGH>;
+      clocks = <&ckc 0>, <&ckc 1>;
+      clock-names = "mmc_fclk", "mmc_hclk";
+      telechips,controller-id = <0>;
+      bus-width = <8>;
+      non-removable;
+    };
