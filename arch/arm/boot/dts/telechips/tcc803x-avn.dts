@@ -58,6 +58,49 @@
 		compatible = "telechips,tcc803x-display-subsystem";
 		ports = <&vioc_crtc0>;
 	};
+
+	/*
+	 * MRGB (synchronous parallel-RGB) panel output: structural only.
+	 * Not in the "ports" component-match list above, and not OF-graph
+	 * connected to vioc_crtc0's own port/endpoint (that endpoint is
+	 * already paired 1:1 with hdmi_tx_in in tcc803x.dtsi; DISP0 is
+	 * understood to feed HDMI and MRGB simultaneously on real hardware,
+	 * but no driver here resolves a second, MRGB-side consumer yet, so
+	 * adding a second endpoint would describe a connection nothing
+	 * acts on). See Documentation/devicetree/bindings/display/
+	 * telechips/telechips,tcc803x-mrgb-panel.yaml for what is and is
+	 * not confirmed about this path -- notably, VIOC_OUTCFG_MRGB is
+	 * never called by any vendor driver found in
+	 * AVNT5W_TCC803XKK_kernel, and the only other same-resolution
+	 * panel in that vendor tree is LVDS, not MRGB. This node exists so
+	 * the real, live-captured DISP0 timing has somewhere honest to
+	 * live, not as a claim that an MRGB pipeline works end to end.
+	 */
+	mrgb_panel: panel {
+		compatible = "telechips,tcc803x-mrgb-panel";
+		width-mm = <92>;
+		height-mm = <243>;
+
+		panel-timing {
+			hactive = <1920>;
+			vactive = <720>;
+			hsync-len = <31>;
+			hfront-porch = <49>;
+			hback-porch = <159>;
+			vsync-len = <4>;
+			vfront-porch = <14>;
+			vback-porch = <27>;
+			/*
+			 * clock-frequency intentionally omitted -- see the
+			 * binding's description for why this is a tracked
+			 * gap, not an oversight. A dtbs_check run against
+			 * mainline's generic panel-timing.yaml (which lists
+			 * clock-frequency as required) will flag this node;
+			 * that failure is expected until the real pixel
+			 * clock is known, not a sign this node is wrong.
+			 */
+		};
+	};
 };
 
 &uart0 {
