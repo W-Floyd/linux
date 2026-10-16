@@ -328,6 +328,22 @@ config MMC_SDHCI_ESDHC_IMX
 
 	  If unsure, say N.
 
+config MMC_SDHCI_TCC803X
+	tristate "SDHCI support for Telechips TCC803x"
+	depends on ARCH_TCC803X || COMPILE_TEST
+	depends on MMC_SDHCI_PLTFM
+	depends on OF
+	help
+	  This selects the SDHCI platform glue for the SD/eMMC host
+	  controllers (SDHC0..SDHC2) on Telechips TCC803x SoCs.
+
+	  This covers default/legacy speed probe and I/O only; no
+	  HS200/HS400/UHS tuning is implemented yet.
+
+	  If you have a controller with this interface, say Y or M here.
+
+	  If unsure, say N.
+
 config MMC_SDHCI_DOVE
 	tristate "SDHCI support on Marvell's Dove SoC"
 	depends on ARCH_DOVE || MACH_DOVE || COMPILE_TEST
