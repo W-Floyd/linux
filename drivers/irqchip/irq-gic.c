@@ -1368,8 +1368,13 @@ static bool gic_enable_rmw_access(void *data)
 	 * The EMEV2 class of machines has a broken interconnect, and
 	 * locks up on accesses that are less than 32bit. So far, only
 	 * the affinity setting requires it.
+	 *
+	 * TCC803x's fabric answers a byte write to GICD_ITARGETSR with an
+	 * asynchronous external abort (the vendor GIC driver does a 32-bit
+	 * read-modify-write there too).
 	 */
-	if (of_machine_is_compatible("renesas,emev2")) {
+	if (of_machine_is_compatible("renesas,emev2") ||
+	    of_machine_is_compatible("telechips,tcc803x")) {
 		static_branch_enable(&needs_rmw_access);
 		return true;
 	}
@@ -1381,6 +1386,11 @@ static const struct gic_quirk gic_quirks[] = {
 	{
 		.desc		= "broken byte access",
 		.compatible	= "arm,pl390",
+		.init		= gic_enable_rmw_access,
+	},
+	{
+		.desc		= "broken byte access (TCC803x)",
+		.compatible	= "arm,gic-400",
 		.init		= gic_enable_rmw_access,
 	},
 	{ },
