@@ -72,9 +72,19 @@
 	 * not confirmed about this path -- notably, VIOC_OUTCFG_MRGB is
 	 * never called by any vendor driver found in
 	 * AVNT5W_TCC803XKK_kernel, and the only other same-resolution
-	 * panel in that vendor tree is LVDS, not MRGB. This node exists so
-	 * the real, live-captured DISP0 timing has somewhere honest to
-	 * live, not as a claim that an MRGB pipeline works end to end.
+	 * panel in that vendor tree is LVDS, off the same DISP0 this node
+	 * uses (not DISP1 as an earlier pass claimed -- that board's own
+	 * dts carries zero DISP overrides; it includes the real AVN
+	 * board's base dtsi unmodified, whose fbdisplay node is
+	 * fbdisplay_num=0). LVDS has a complete vendor driver, an on-die
+	 * PHY (lvds_phy@12370000 in tcc803x.dtsi), and the real AVN
+	 * board's own pinctrl names lvds_variant_check-gpio alongside
+	 * digital_variant_check-gpio -- real vendor source leans LVDS over
+	 * MRGB for the actual panel, even though this node stays MRGB
+	 * pending live confirmation (see the binding's caveat section).
+	 * This node exists so the real, live-captured DISP0 timing has
+	 * somewhere honest to live, not as a claim that an MRGB pipeline
+	 * works end to end.
 	 */
 	mrgb_panel: panel {
 		compatible = "telechips,tcc803x-mrgb-panel";
@@ -165,4 +175,28 @@
 
 &vioc_crtc0 {
 	status = "okay";
+};
+
+/*
+ * External USB-A host port: forced host-only (dr_mode), see dwc_otg's
+ * comment in tcc803x.dtsi for why device mode is physically unreachable
+ * on this connector. Enabled here as the board's intended debug-console
+ * path once no UART header is accessible -- plug a USB-to-TTL adapter
+ * (CP2102/CH340/FTDI-class) into this port and add
+ * "console=ttyUSB0,115200" (or ttyACM0 for a CDC-ACM adapter) to the
+ * kernel command line; see arch/arm/configs/multi_v7_defconfig's
+ * CONFIG_USB_SERIAL_* selections.
+ *
+ * status = "okay" here is a statement of board intent, not a claim this
+ * path is verified end-to-end: dwc_otg's clocks/clock-names are still
+ * unmodeled (see its comment) and dwc_otg_phy has no mainline driver
+ * yet, so a dtbs_check run against this node is expected to fail on the
+ * missing required clocks property until that driver work lands. Not
+ * reverted to "disabled" because the gap is in clock/PHY driver
+ * support, not in this node's own correctness -- same treatment as
+ * mrgb_panel's deliberately-omitted clock-frequency above.
+ */
+&dwc_otg {
+	status = "okay";
+	dr_mode = "host";
 };
