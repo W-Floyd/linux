@@ -1,0 +1,99 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/display/telechips/telechips,tcc803x-output-config.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Telechips TCC803x VIOC output-config (OUTCFG) block
+
+maintainers:
+  - William Floyd <git@notmy.space>
+
+description: |
+  Routing mux between the SoC's DISP0/DISP1/DISP2 timing-generator
+  outputs and its physical output interfaces (HDMI, SD/HD video encoder,
+  an MCU-style 8080 parallel panel interface, and a synchronous parallel
+  RGB panel interface). Confirmed real and at this exact address by the
+  vendor driver (AVNT5W_TCC803XKK_kernel):
+
+    arch/arm/mach-tcc803x/vioc/vioc_outcfg.c: vioc_outputconfig_init()
+    (arch_initcall) does
+    of_find_compatible_node(NULL, NULL, "telechips,output_config")
+    then of_iomap(np, 0) -- same compatible string and reg window as
+    the pre-existing arch/arm/boot/dts/mobis/tcc803x.dtsi:2306-2309
+    node this binding now documents formally.
+
+  Register layout (include/video/tcc/vioc_outcfg.h, struct VIOC_OUTCFG,
+  4 x 32-bit words = the 0x10 reg size):
+
+    0x00  D0CPUIF   CPU/MCU-interface control for a panel driven
+                     directly off DISP0 (bitfields: FMT, XA, CS, SI,
+                     EN, IV, ID -- not decoded further here, only the
+                     offset is confirmed real).
+    0x04  D1CPUIF   Same, for DISP1.
+    0x08  D2CPUIF   Same, for DISP2.
+    0x0C  MISCCFG   Output-type routing mux, 5 x 2-bit SEL fields,
+                     each selecting which DISP (0/1/2; 3 = reserved/
+                     "V_DV") feeds that physical output type:
+                       bits [1:0]   HDMISEL  (HDMI TX)
+                       bits [5:4]   SDVESEL  (SD video encoder /
+                                              composite)
+                       bits [9:8]   HDVESEL  (HD video encoder /
+                                              component)
+                       bits [13:12] M80SEL   (MCU/8080 parallel
+                                              interface)
+                       bits [17:16] MRGBSEL  (synchronous parallel
+                                              RGB interface)
+                     Set by VIOC_OUTCFG_SetOutConfig(type, disp) in
+                     vioc_outcfg.c, which does exactly this
+                     read-modify-write (tcc_vioc_bitcset) per type;
+                     bit positions above are taken directly from that
+                     function's shift amounts (0, 4, 8, 12, 16), which
+                     match the VIOC_OUTCFG_MISC bitfield struct in
+                     vioc_outcfg.h.
+
+  What still is NOT confirmed from static vendor source alone, and
+  would need a live register read (not attempted here) or a board-init
+  call site this tree doesn't have, to settle:
+
+    - Which output type the real DISP0-fed main panel uses. HDMI,
+      SDVENC and HDVENC are external video-format outputs, not
+      appropriate for a directly-driven LCD; M80 is a command-mode MCU
+      panel interface; MRGB is the standard synchronous parallel-RGB
+      panel interface and is the only structurally-plausible fit for a
+      conventional LCD panel among the five -- but VIOC_OUTCFG_MRGB is
+      only ever *defined* in this vendor tree (include/video/tcc/
+      vioc_outcfg.h:37 and duplicates), never passed to
+      VIOC_OUTCFG_SetOutConfig() by any board/driver file found here.
+      The only call site located (drivers/video/fbdev/tcc-fb/
+      tcc_vioc_fb.c:1033) hardcodes VIOC_OUTCFG_HDMI for an external
+      display path, not the main panel. It is possible the main panel
+      needs no explicit SetOutConfig() call at all, if MISCCFG's
+      power-on-reset value already selects DISP0 (SEL field value 0)
+      for every output type -- plausible but not verified against a
+      reset-value table in the extracted source.
+    - MISCCFG's live/current value on real hardware: not read here.
+    - D0CPUIF/D1CPUIF/D2CPUIF bitfields beyond their offsets: not
+      decoded, since no caller of VIOC_OUTCFG_SetOutConfig() in this
+      vendor tree touches them (only MISCCFG is written by that
+      function).
+
+properties:
+  compatible:
+    const: telechips,output_config
+
+  reg:
+    maxItems: 1
+
+required:
+  - compatible
+  - reg
+
+additionalProperties: false
+
+examples:
+  - |
+    output_config: output-config@12100200 {
+        compatible = "telechips,output_config";
+        reg = <0x12100200 0x10>;
+    };

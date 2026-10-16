@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/display/telechips/telechips,tcc803x-vioc-plane.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Telechips TCC803x VIOC RDMA (DRM plane)
+
+maintainers:
+  - William Floyd <git@notmy.space>
+
+description: |
+  One channel of the TCC803x VIOC's RDMA ("read-DMA") array: a memory-to-
+  VIOC image fetcher that feeds one input layer of a WMIX mixer. The VIOC
+  has 18 RDMA channels (vioc_rdma0..17); this binding describes a single
+  channel's own 0x48-byte register window (control, size, base-address,
+  offset, scale, alpha, status/irq-mask, 3D/sync bases, crop), not the
+  whole array.
+
+  Register layout confirmed against the real vendor Linux 3.18 tree
+  (AVNT5W_TCC803XKK_kernel, Hyundai Mobis supplier-portal release,
+  Telechips Inc., GPLv2):
+    arch/arm/mach-tcc803x/include/mach/vioc_rdma.h:214-234 (register map,
+      struct TYPEDEF_VIOC_RDMA)
+    arch/arm/mach-tcc803x/vioc/vioc_rdma.c (bit-level access: CTRL.FMT
+      bits[4:0], CTRL.UPD bit16, CTRL.IEN bit28; SIZE packs
+      (height<<16)|width)
+    arch/arm/boot/dts/mobis/tcc803x.dtsi:1994-1998 (RDMA0 base address
+      0x12000400; channels 1..17 step by 0x100)
+    include/dt-bindings/display/tcc803x-vioc.h:190 cites VIOC0_IRQI =
+      119, but live recon on the real board contradicts it: the vendor's
+      own tcc_vsync driver logs irq_num(151) at boot, and live
+      /proc/interrupts shows GIC 151 ("TCC_MAIN_D") actively firing while
+      GIC 119 is pl08xdmac (the DMA controller, unrelated). The shared
+      VIOC bus-0 interrupt every RDMA/WMIX/DISP channel multiplexes onto
+      is GIC SPI 151.
+
+  Only RDMA0 (0x12000400) is described in the SoC .dtsi so far, enough
+  for a single primary plane. The other 17 channels, and the companion
+  WDMA (write-DMA / capture) and scaler (SC) blocks that share the same
+  IRQ line and vioc-config IRQ-select registers, are not modeled yet.
+
+  No IOMMU is known to sit in front of this RDMA channel (not confirmed
+  either way for this VIOC generation), so the plane driver scans out
+  directly from whatever physical address a GEM-DMA framebuffer lands
+  at -- no "memory-region" carve-out is required or modeled here.
+
+properties:
+  compatible:
+    const: telechips,tcc803x-vioc-plane
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+    description: |
+      Shared VIOC bus-0 interrupt (VIOC0_IRQI = SPI 151). Every RDMA,
+      WMIX, DISP and WDMA channel on this VIOC bus multiplexes onto the
+      same GIC line; which channel actually raised it is read back from
+      the shared vioc-config interrupt-status registers (not yet bound
+      by this schema -- see telechips,tcc803x-vioc-config.yaml).
+
+required:
+  - compatible
+  - reg
+  - interrupts
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    vioc_rdma0: vioc-rdma@12000400 {
+        compatible = "telechips,tcc803x-vioc-plane";
+        reg = <0x12000400 0x48>;
+        interrupts = <GIC_SPI 151 IRQ_TYPE_LEVEL_HIGH>;
+    };
