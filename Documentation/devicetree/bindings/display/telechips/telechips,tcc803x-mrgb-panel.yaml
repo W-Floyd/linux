@@ -89,15 +89,44 @@ description: |
   independently corroborate that selection, and MRGBSEL=0 is equally
   consistent with that field simply never having been touched since
   reset -- LVDS does not route through MISCCFG at all, so that reading
-  carries no evidence either way between LVDS and MRGB. Net
-  assessment: LVDS off DISP0 is better supported by vendor source
-  (working driver, on-die PHY, explicit board-level variant-detection
-  GPIOs) than MRGB off DISP0 (zero consumers anywhere); this binding
-  is retained as honest scaffolding for the live-register-backed
-  hypothesis, not as the higher-confidence conclusion. Resolving this
-  for the specific unit needs either a live read of
-  lvds_variant_check-gpio / digital_variant_check-gpio, or confirming
-  whether DISP0's pixel stream reaches the panel through lvds_phy.
+  carries no evidence either way between LVDS and MRGB.
+
+  CORRECTION: lvds_variant_check-gpio / digital_variant_check-gpio
+  (referenced above as a possible tiebreaker) turned out to be
+  unrelated to the display panel -- drivers/misc/mobis/daudio_pinctrl.c:
+  608-617 reads them (alongside get_camera_variant_check-gpio) into a
+  3-bit cam_type value, consumed by drivers/media/platform/tcccam/atv/
+  daudio_lvds.c (a SerDes rear/cabin camera link driver, "tcccam" =
+  Telechips camera subsystem, "atv" = analog camera input). This is
+  camera-link variant detection, not display-panel detection; a live
+  read of these two GPIOs (both read 0 on the real unit) answers a
+  different question than the one this binding needs settled.
+
+  REAL LIVE EVIDENCE instead: a live register read of PERI_LVDS_PHY's
+  own CKC_PCLKCTRL gate (clock ID 105, CKC_PCLKCTRL(105) =
+  0x14000000 + 0x0D0 + 105*4 = 0x14000274) off the real running head
+  unit reads 0xe5000000 -- SEL=5=XIN, EN (bit 29) = 1, decoded via the
+  same PCLKCTRL field layout already confirmed tonight for PERI_UART0/
+  PERI_LCD0. The LVDS PHY's clock gate is genuinely enabled on this
+  live, stock system -- direct evidence the display-LVDS hardware path
+  is powered up, not just a vendor-source possibility. (The lvds_phy
+  block's own registers at 0x12370000/0x12370400/0x12360800/0x12360C00
+  all read 0x00000000 on that same live read; their bit-field layout
+  isn't confirmed from source the way PCLKCTRL's is, so this neither
+  strengthens nor contradicts the clock-gate finding -- just not yet
+  interpretable.)
+
+  Net assessment, updated: LVDS off DISP0 is now the strongly favored
+  hypothesis -- working driver, on-die PHY, same-board-family
+  precedent, zero MRGB consumers anywhere, and now a live-confirmed
+  enabled clock gate on the real unit. This binding (MRGB) is retained
+  as honest scaffolding for a weaker, live-register-backed hypothesis
+  whose only supporting evidence (MISCCFG=0) is now understood to be
+  uninformative, not as the higher-confidence conclusion. Fully
+  settling this still needs either a live register check of whether
+  DISP0's pixel stream actually reaches the panel through lvds_phy
+  (not just whether the PHY's clock is enabled), or a real LVDS
+  devicetree node + driver to test directly.
 
   Timing values below are not estimated: they are the same live DISP0
   register capture (LHTIME1/2, LVTIME1/2) already used to program the

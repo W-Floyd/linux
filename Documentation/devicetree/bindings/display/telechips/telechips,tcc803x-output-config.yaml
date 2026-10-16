@@ -95,26 +95,39 @@ description: |
       with unrelated VIOC_DISP1 references in that same vendor tree's
       video/VIQE sub-pipeline nodes (PIP/overlay scaling paths, not the
       main panel). What remains genuinely unresolved is LVDS vs MRGB,
-      not which DISP. The real AVN board file also names
-      `lvds_variant_check-gpio` and `digital_variant_check-gpio` side
-      by side in its `mobis-gpio-pinctrl` node
-      (arch/arm/boot/dts/mobis/tcc8031-android-avn.dtsi:~890), implying
-      two real production panel variants selected/detected at
-      board/runtime level -- LVDS (via the SoC's on-die
-      `lvds_phy@12370000`, clocked by `PERI_LVDS_PHY`, tcc803x.dtsi:
-      2266-2271, with a complete working driver,
-      lcd_TM123XDHP90.c) and a "digital" variant that is more likely
-      DISP0's own native parallel-RGB pins driven directly (no
-      MISCCFG/MRGBSEL involved at all) than the MISCCFG-routed MRGB aux
-      path documented above, since that path has zero consumers
-      anywhere in the vendor tree. See telechips,tcc803x-mrgb-panel.yaml
-      for the MRGB panel node this mux feeds and its own caveat section
-      on why MRGB routing here is grounded in a live register read
-      (outside this static-source investigation), not vendor-source
-      precedent. Resolving LVDS vs MRGB/digital for this specific unit
-      needs either a live read of lvds_variant_check-gpio /
-      digital_variant_check-gpio, or confirmation of whether DISP0's
-      pixel stream reaches the panel through the lvds_phy block.
+      not which DISP.
+
+      `lvds_variant_check-gpio` / `digital_variant_check-gpio`
+      (`mobis-gpio-pinctrl`, arch/arm/boot/dts/mobis/
+      tcc8031-android-avn.dtsi:~890) were considered as a possible
+      tiebreaker here, but turned out to be unrelated to the display
+      panel: drivers/misc/mobis/daudio_pinctrl.c:608-617 reads them
+      (with a third camera-variant GPIO) into a cam_type bitfield
+      consumed by the SerDes rear/cabin camera-link driver
+      (drivers/media/platform/tcccam/atv/daudio_lvds.c) -- camera-link
+      variant detection, not display-panel detection. A live read of
+      both (done off the real unit) returned 0/0, which answers a
+      different question than the one this needs settled.
+
+      Real live evidence instead: PERI_LVDS_PHY's own CKC_PCLKCTRL gate
+      (clock ID 105, CKC_PCLKCTRL(105) = 0x14000000 + 0x0D0 + 105*4 =
+      0x14000274) reads 0xe5000000 on the real running unit -- SEL=5=
+      XIN, EN (bit 29) = 1, same field layout already confirmed
+      tonight for PERI_UART0/PERI_LCD0. The LVDS PHY's clock gate is
+      genuinely enabled right now, not just present in vendor source.
+      (`lvds_phy@12370000`'s own registers all read 0x00000000 on that
+      same capture; their bit layout isn't confirmed from source, so
+      this is neither confirming nor contradicting -- just
+      uninterpreted.) Combined with the on-die PHY, the complete
+      working driver (lcd_TM123XDHP90.c), and zero MRGB consumers
+      anywhere in the vendor tree, LVDS off DISP0 is now the strongly
+      favored hypothesis for the real panel. See
+      telechips,tcc803x-mrgb-panel.yaml for the MRGB panel node this
+      mux feeds and its own updated caveat section. Fully settling this
+      still needs either a live check of whether DISP0's pixel stream
+      actually reaches the panel through lvds_phy (not just whether its
+      clock is enabled), or a real LVDS devicetree node + driver to
+      test directly.
     - MISCCFG's live/current value on real hardware: not read here.
     - D0CPUIF/D1CPUIF/D2CPUIF bitfields beyond their offsets: not
       decoded, since no caller of VIOC_OUTCFG_SetOutConfig() in this
