@@ -38,17 +38,18 @@
 
 	/*
 	 * Component-master glue (drivers/gpu/drm/telechips/tcc803x_drm_drv.c)
-	 * expects a "ports" phandle list naming its CRTC and encoder
-	 * components. hdmi_tx doubles as both the HDMI encoder and
-	 * connector component here (no separate connector node) --
-	 * confirmed against tcc803x_drm_drv.c's own component-match table
-	 * (telechips,tcc803x-vioc-crtc / telechips,tcc803x-hdmi).
+	 * walks this "ports" phandle list positionally (drm_of_component_match_add()),
+	 * not by compatible string. hdmi_tx doubles as both the HDMI encoder
+	 * and connector here (no separate connector node).
 	 *
-	 * This does NOT mean the pipeline works yet: there is still no
-	 * driver .c file bound to "telechips,tcc803x-hdmi" (only the DT
-	 * node/binding exist so far), so component_bind_all() will keep
-	 * waiting on that match forever. See tcc803x_drm_vioc.c's status
-	 * writeup for what VIOC-side is real vs. still missing.
+	 * This does NOT mean the pipeline works yet: hdmi_tx's driver
+	 * (drivers/gpu/drm/bridge/tcc803x-dw-hdmi.c) is a DRM bridge, not a
+	 * component - it never calls component_add(), so the &hdmi_tx match
+	 * added here will never be satisfied and component_bind_all() keeps
+	 * waiting on it forever. See tcc803x_drm_drv.c's and
+	 * tcc803x_drm_vioc.c's status writeups for what's real vs. still
+	 * missing (drm_bridge_attach() from the VIOC CRTC driver is the
+	 * intended fix, not component matching).
 	 */
 	display: display-subsystem {
 		compatible = "telechips,tcc803x-display-subsystem";

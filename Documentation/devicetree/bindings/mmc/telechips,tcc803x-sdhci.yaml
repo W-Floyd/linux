@@ -77,10 +77,15 @@ properties:
       bespoke "tcc-mmc-reset" property (e.g. vendor mobis/tcc8031-
       android-avn.dtsi:803, &gpsd0 14 0); this binding uses the
       standard reset-gpios name instead. Optional -- the AVN eMMC
-      enables cap-mmc-hw-reset without this property today because no
-      GPIO controller/pinctrl driver exists yet for this board; the
-      driver treats an absent reset-gpios as a no-op, matching the
-      vendor driver's own gpio_is_valid() guard.
+      enables cap-mmc-hw-reset without this property today not because
+      no GPIO driver exists (drivers/pinctrl/telechips/pinctrl-
+      tcc803x.c does implement a real gpio_chip), but because that
+      driver's static group table only wires up the uart0 pin group so
+      far -- the sdhc-side pin groups (gpsd0-14 and friends) aren't
+      defined yet, so there's nothing for a gpsd0 reset-gpios reference
+      to resolve against on this board. The driver treats an absent
+      reset-gpios as a no-op, matching the vendor driver's own
+      gpio_is_valid() guard.
 
   telechips,clk-out-tap:
     $ref: /schemas/types.yaml#/definitions/uint32
