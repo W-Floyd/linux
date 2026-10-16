@@ -113,6 +113,9 @@
 #include <asm/io.h>
 #include <asm/setup.h>
 #include <asm/sections.h>
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+#include <asm/tcc803x-hb.h>
+#endif
 #include <asm/cacheflush.h>
 
 #define CREATE_TRACE_POINTS
@@ -989,6 +992,9 @@ void start_kernel(void)
 	char *command_line;
 	char *after_dashes;
 
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	tcc803x_hb_band_direct(8, 0xff808080);	/* gray: start_kernel entered */
+#endif
 	set_task_stack_end_magic(&init_task);
 	smp_setup_processor_id();
 	debug_objects_early_init();
@@ -1007,6 +1013,9 @@ void start_kernel(void)
 	page_address_init();
 	pr_notice("%s", linux_banner);
 	setup_arch(&command_line);
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	tcc803x_hb_band_any(21, 0xff00ffff);	/* cyan: setup_arch returned */
+#endif
 	mm_core_init_early();
 	/* Static keys and static calls are needed by LSMs */
 	jump_label_init();
@@ -1046,7 +1055,13 @@ void start_kernel(void)
 	vfs_caches_init_early();
 	sort_main_extable();
 	trap_init();
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	tcc803x_hb_band_any(22, 0xffffa000);	/* amber: trap_init done */
+#endif
 	mm_core_init();
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	tcc803x_hb_band_any(23, 0xff00ff00);	/* green: mm_core_init done */
+#endif
 	maple_tree_init();
 	poking_init();
 	ftrace_init();
@@ -1060,6 +1075,9 @@ void start_kernel(void)
 	 * time - but meanwhile we still have a functioning scheduler.
 	 */
 	sched_init();
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	tcc803x_hb_band_any(24, 0xffff0080);	/* rose: sched_init done */
+#endif
 
 	if (WARN(!irqs_disabled(),
 		 "Interrupts were enabled *very* early, fixing it\n"))
@@ -1101,6 +1119,9 @@ void start_kernel(void)
 	vdso_setup_data_pages();
 	timekeeping_init();
 	time_init();
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	tcc803x_hb_band_any(25, 0xff4080ff);	/* azure: time_init done */
+#endif
 
 	/* This must be after timekeeping is initialized */
 	random_init();
@@ -1125,6 +1146,23 @@ void start_kernel(void)
 	 * this. But we do want output early, in case something goes wrong.
 	 */
 	console_init();
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	tcc803x_hb_band_any(26, 0xffffffff);	/* white: console_init done */
+	tcc803x_fbcon_register();
+#endif
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	{
+		/* Is the tick alive? Bounded spin on jiffies, then 27 (green) or 28 (red). */
+		unsigned long j = jiffies, n;
+
+		for (n = 0; n < 300000000UL && jiffies == j; n++)
+			cpu_relax();
+		if (jiffies != j)
+			tcc803x_hb_band_any(27, 0xff00ff00);	/* jiffies advanced */
+		else
+			tcc803x_hb_band_any(28, 0xffff0000);	/* no tick seen */
+	}
+#endif
 	if (panic_later)
 		panic("Too many boot %s vars at `%s'", panic_later,
 		      panic_param);
@@ -1154,6 +1192,9 @@ void start_kernel(void)
 		late_time_init();
 	sched_clock_init();
 	calibrate_delay();
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	tcc803x_hb_band_any(29, 0xffe0e000);	/* calibrate_delay done */
+#endif
 
 	arch_cpu_finalize_init();
 
@@ -1187,6 +1228,9 @@ void start_kernel(void)
 	kcsan_init();
 
 	/* Do the rest non-__init'ed, we're now alive */
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	tcc803x_hb_band_any(30, 0xff00e0e0);	/* about to rest_init */
+#endif
 	rest_init();
 
 	/*
@@ -1355,6 +1399,13 @@ int __init_or_module do_one_initcall(initcall_t fn)
 	char msgbuf[64];
 	int ret;
 
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	if (system_state < SYSTEM_FREEING_INITMEM) {
+		static unsigned int tcc_hb_initcall_n;
+
+		tcc803x_hb_counter(++tcc_hb_initcall_n);
+	}
+#endif
 	if (initcall_blacklisted(fn))
 		return -EPERM;
 
@@ -1631,7 +1682,15 @@ static int __ref kernel_init(void *unused)
 /* Open /dev/console, for stdin/stdout/stderr, this should never fail */
 void __init console_on_rootfs(void)
 {
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	struct file *file;
+
+	pr_emerg("TCC: console_on_rootfs: filp_open\n");
+	file = filp_open("/dev/console", O_RDWR, 0);
+	pr_emerg("TCC: console_on_rootfs: filp_open returned %ld\n", IS_ERR(file) ? PTR_ERR(file) : 0L);
+#else
 	struct file *file = filp_open("/dev/console", O_RDWR, 0);
+#endif
 
 	if (IS_ERR(file)) {
 		pr_err("Warning: unable to open an initial console.\n");
@@ -1641,6 +1700,9 @@ void __init console_on_rootfs(void)
 	init_dup(file);
 	init_dup(file);
 	fput(file);
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	pr_emerg("TCC: console_on_rootfs: done\n");
+#endif
 }
 
 static noinline void __init kernel_init_freeable(void)
@@ -1662,22 +1724,46 @@ static noinline void __init kernel_init_freeable(void)
 	init_mm_internals();
 
 	do_pre_smp_initcalls();
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	tcc803x_hb_band_any(31, 0xffe000e0);	/* do_pre_smp_initcalls done */
+#endif
 	lockup_detector_init();
 
 	smp_init();
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	tcc803x_hb_band_any(33, 0xff80ff00);	/* smp_init done */
+#endif
 	sched_init_smp();
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	tcc803x_hb_band_any(34, 0xff00a0ff);	/* sched_init_smp done */
+#endif
 
 	workqueue_init_topology();
 	async_init();
 	padata_init();
 	page_alloc_init_late();
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	tcc803x_hb_band_any(35, 0xffff00a0);	/* page_alloc_init_late done */
+#endif
 
 	do_basic_setup();
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	tcc803x_hb_band_any(32, 0xffff8000);	/* do_basic_setup (driver initcalls) done */
+#endif
 
 	kunit_run_all_tests();
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	pr_emerg("TCC: do_basic_setup returned\n");
+#endif
 
 	wait_for_initramfs();
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	pr_emerg("TCC: wait_for_initramfs returned\n");
+#endif
 	console_on_rootfs();
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	pr_emerg("TCC: console_on_rootfs returned\n");
+#endif
 
 	/*
 	 * check if there is an early userspace init.  If yes, let it do all
@@ -1690,7 +1776,13 @@ static noinline void __init kernel_init_freeable(void)
 			pr_warn("check access for rdinit=%s failed: %i, ignoring\n",
 				ramdisk_execute_command, ramdisk_command_access);
 		ramdisk_execute_command = NULL;
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+		pr_emerg("TCC: calling prepare_namespace\n");
+#endif
 		prepare_namespace();
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+		pr_emerg("TCC: prepare_namespace returned\n");
+#endif
 	}
 
 	/*

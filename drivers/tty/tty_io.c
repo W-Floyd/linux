@@ -74,6 +74,9 @@
 #include <linux/sched/task.h>
 #include <linux/interrupt.h>
 #include <linux/tty.h>
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+#include <asm/tcc803x-hb.h>
+#endif
 #include <linux/tty_driver.h>
 #include <linux/tty_flip.h>
 #include <linux/devpts_fs.h>
@@ -2084,6 +2087,9 @@ static int tty_open(struct inode *inode, struct file *filp)
 	unsigned saved_flags = filp->f_flags;
 
 	nonseekable_open(inode, filp);
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	tcc803x_hb_band_direct(42, 0xffff8000);	/* tty_open entered */
+#endif
 
 retry_open:
 	retval = tty_alloc_file(filp);
@@ -2093,6 +2099,9 @@ retry_open:
 	tty = tty_open_current_tty(device, filp);
 	if (!tty)
 		tty = tty_open_by_driver(device, filp);
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	tcc803x_hb_band_direct(43, IS_ERR(tty) ? 0xffff0000 : 0xff00ff00);	/* tty_open_by_driver: red=err, green=ok */
+#endif
 
 	if (IS_ERR(tty)) {
 		tty_free_file(filp);

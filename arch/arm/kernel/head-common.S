@@ -80,6 +80,8 @@ __mmap_switched:
 	mov	r8, r2
 	mov	r10, r0
 
+	tcc_hb_band	7, 0xffffff, r0, r1, r2, r3	@ white: MMU on, __mmap_switched
+
 	adr	r4, __mmap_switched_data
 	mov	fp, #0
 

@@ -469,7 +469,13 @@ void __init prepare_namespace(void)
 	 * For example, it is not atypical to wait 5 seconds here
 	 * for the touchpad of a laptop to initialize.
 	 */
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	pr_emerg("TCC: prepare_namespace: wait_for_device_probe\n");
+#endif
 	wait_for_device_probe();
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	pr_emerg("TCC: prepare_namespace: device probe done\n");
+#endif
 
 	md_run_setup();
 
@@ -480,6 +486,9 @@ void __init prepare_namespace(void)
 
 	if (root_wait)
 		wait_for_root(saved_root_name);
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	pr_emerg("TCC: prepare_namespace: mount_root\n");
+#endif
 	mount_root(saved_root_name);
 	devtmpfs_mount();
 

@@ -436,12 +436,19 @@ int dwc2_check_core_version(struct dwc2_hsotg *hsotg)
  * in the device private data. This allows the driver to access the dwc2_hsotg
  * structure on subsequent calls to driver methods for this device.
  */
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+#define TCC_DWC2(step) pr_emerg("TCC: dwc2: " step "\n")
+#else
+#define TCC_DWC2(step) do { } while (0)
+#endif
+
 static int dwc2_driver_probe(struct platform_device *dev)
 {
 	struct dwc2_hsotg *hsotg;
 	struct resource *res;
 	int retval;
 
+	TCC_DWC2("probe entered");
 	hsotg = devm_kzalloc(&dev->dev, sizeof(*hsotg), GFP_KERNEL);
 	if (!hsotg)
 		return -ENOMEM;
@@ -465,10 +472,12 @@ static int dwc2_driver_probe(struct platform_device *dev)
 
 	dev_dbg(&dev->dev, "mapped PA %08lx to VA %p\n",
 		(unsigned long)res->start, hsotg->regs);
+	TCC_DWC2("regs mapped");
 
 	retval = dwc2_lowlevel_hw_init(hsotg);
 	if (retval)
 		return retval;
+	TCC_DWC2("lowlevel_hw_init done (phy/clk/reset resolved)");
 
 	spin_lock_init(&hsotg->lock);
 
@@ -480,11 +489,14 @@ static int dwc2_driver_probe(struct platform_device *dev)
 			return retval;
 	}
 
+	TCC_DWC2("lowlevel_hw_enable...");
 	retval = dwc2_lowlevel_hw_enable(hsotg);
 	if (retval)
 		return retval;
+	TCC_DWC2("lowlevel_hw_enable done; first register read next");
 
 	hsotg->needs_byte_swap = dwc2_check_core_endianness(hsotg);
+	TCC_DWC2("core endianness read ok");
 
 	retval = dwc2_get_dr_mode(hsotg);
 	if (retval)
@@ -501,19 +513,23 @@ static int dwc2_driver_probe(struct platform_device *dev)
 	retval = dwc2_check_core_version(hsotg);
 	if (retval)
 		goto error;
+	TCC_DWC2("core version ok");
 
 	/*
 	 * Reset before dwc2_get_hwparams() then it could get power-on real
 	 * reset value form registers.
 	 */
+	TCC_DWC2("core reset...");
 	retval = dwc2_core_reset(hsotg, false);
 	if (retval)
 		goto error;
+	TCC_DWC2("core reset done");
 
 	/* Detect config values from hardware */
 	retval = dwc2_get_hwparams(hsotg);
 	if (retval)
 		goto error;
+	TCC_DWC2("hwparams read");
 
 	hsotg->irq = platform_get_irq(dev, 0);
 	if (hsotg->irq < 0) {
@@ -539,6 +555,7 @@ static int dwc2_driver_probe(struct platform_device *dev)
 	retval = dwc2_init_params(hsotg);
 	if (retval)
 		goto error;
+	TCC_DWC2("init_params done");
 
 	if (hsotg->params.activate_stm_id_vb_detection) {
 		u32 ggpio;

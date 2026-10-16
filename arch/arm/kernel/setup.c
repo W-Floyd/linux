@@ -31,6 +31,7 @@
 #include <linux/psci.h>
 
 #include <asm/unified.h>
+#include <asm/tcc803x-hb.h>
 #include <asm/cp15.h>
 #include <asm/cpu.h>
 #include <asm/cputype.h>
@@ -1097,6 +1098,7 @@ void __init setup_arch(char **cmdline_p)
 {
 	const struct machine_desc *mdesc = NULL;
 	void *atags_vaddr = NULL;
+	tcc803x_hb_band_direct(9, 0xff80ffff);	/* light cyan: setup_arch entered */
 
 	if (__atags_pointer)
 		atags_vaddr = FDT_VIRT_BASE(__atags_pointer);
@@ -1134,12 +1136,17 @@ void __init setup_arch(char **cmdline_p)
 
 	early_fixmap_init();
 	early_ioremap_init();
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	tcc803x_hb_band_direct(10, 0xff80ff80);	/* pale green: early_ioremap_init done */
+#endif
 
 	parse_early_param();
+	tcc803x_hb_band_direct(11, 0xffff6000);	/* orange-red: parse_early_param done */
 
 #ifdef CONFIG_MMU
 	early_mm_init(mdesc);
 #endif
+	tcc803x_hb_band_direct(12, 0xffc0ff00);	/* lime: early_mm_init done */
 	setup_dma_zone(mdesc);
 	xen_early_init();
 	arm_efi_init();
@@ -1149,12 +1156,17 @@ void __init setup_arch(char **cmdline_p)
 	 */
 	adjust_lowmem_bounds();
 	arm_memblock_init(mdesc);
+	tcc803x_hb_band_direct(13, 0xff00c080);	/* teal: arm_memblock_init done */
 	/* Memory may have been removed so recalculate the bounds. */
 	adjust_lowmem_bounds();
 
 	early_ioremap_reset();
+	tcc803x_hb_band_direct(14, 0xff8080ff);	/* periwinkle: about to paging_init */
 
 	paging_init(mdesc);
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	tcc803x_hb_band_direct(18, 0xffff80c0);	/* pink: paging_init done */
+#endif
 	kasan_init();
 	request_standard_resources(mdesc);
 
@@ -1164,6 +1176,9 @@ void __init setup_arch(char **cmdline_p)
 	}
 
 	unflatten_device_tree();
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	tcc803x_hb_band_direct(19, 0xffa05020);	/* brown: DT unflattened */
+#endif
 
 	arm_dt_init_cpu_maps();
 	psci_dt_init();
@@ -1189,6 +1204,10 @@ void __init setup_arch(char **cmdline_p)
 #if defined(CONFIG_VGA_CONSOLE)
 	vgacon_register_screen(&vgacon_screen_info);
 #endif
+#endif
+
+#ifdef CONFIG_DEBUG_TCC803X_FB_HEARTBEAT
+	tcc803x_hb_band_direct(20, 0xff8000ff);	/* purple: setup_arch finished */
 #endif
 
 	if (mdesc->init_early)
