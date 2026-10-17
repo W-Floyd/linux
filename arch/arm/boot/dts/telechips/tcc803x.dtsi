@@ -283,7 +283,7 @@
 		 */
 		ckc: clock-controller@14000000 {
 			compatible = "telechips,tcc803x-ckc";
-			reg = <0x14000000 0x1bc>, <0x12380000 0x8>;
+			reg = <0x14000000 0x1c4>, <0x12380000 0x8>;
 			reg-names = "ckc", "ddibus";
 			clocks = <&xin>;
 			clock-names = "xin";
@@ -341,6 +341,21 @@
 			 */
 			pinctrl-names = "default";
 			pinctrl-0 = <&uart0_grp>;
+			status = "disabled";
+		};
+
+		/*
+		 * The micom link (vendor /dev/ttyTCC2): vendor mobis/tcc803x.dtsi
+		 * :1422-1429. No pinctrl: the driver's group table only has uart0, and
+		 * the vendor's mux (gpc-8/-9, function 7) is left as Android set it.
+		 */
+		uart2: serial@16620000 {
+			compatible = "arm,pl011", "arm,primecell";
+			reg = <0x16620000 0x1000>;
+			interrupts = <GIC_SPI 90 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ckc TCC803X_CLK_PERI_UART2>, <&xin>;
+			clock-names = "uartclk", "apb_pclk";
+			reg-io-width = <4>;
 			status = "disabled";
 		};
 
