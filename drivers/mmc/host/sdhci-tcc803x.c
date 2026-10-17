@@ -225,6 +225,7 @@ static int sdhci_tcc803x_probe(struct platform_device *pdev)
 	struct sdhci_host *host;
 	struct sdhci_pltfm_host *pltfm_host;
 	struct sdhci_tcc803x *tcc;
+	struct resource *res;
 	u32 clk_out_tap, cmd_tap, data_tap;
 	int ret;
 
@@ -261,11 +262,17 @@ static int sdhci_tcc803x_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	tcc->chctrl_base = devm_platform_ioremap_resource(pdev, 1);
-	if (IS_ERR(tcc->chctrl_base)) {
-		ret = PTR_ERR(tcc->chctrl_base);
-		return ret;
-	}
+	/*
+	 * The channel-config block is shared: each controller's window in it
+	 * overlaps the others' (sdhc0 spans 0x16470000+0x200, sdhc1 and sdhc2
+	 * sit inside that), so it is mapped without claiming the region.
+	 */
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
+	if (!res)
+		return -EINVAL;
+	tcc->chctrl_base = devm_ioremap(dev, res->start, resource_size(res));
+	if (!tcc->chctrl_base)
+		return -ENOMEM;
 
 	tcc->reset_gpio = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_LOW);
 	if (IS_ERR(tcc->reset_gpio)) {
@@ -288,12 +295,15 @@ static int sdhci_tcc803x_probe(struct platform_device *pdev)
 	}
 
 	if (host->mmc->f_max) {
+		/*
+		 * mmc_fclk is shared with the eMMC host and may not be
+		 * re-rateable: SDHCI divides the base clock down to the bus
+		 * speed itself, so keep the rate it has.
+		 */
 		ret = clk_set_rate(pltfm_host->clk, host->mmc->f_max);
-		if (ret) {
-			dev_err(dev, "failed to set mmc_fclk to %u Hz: %d\n",
-				host->mmc->f_max, ret);
-			return ret;
-		}
+		if (ret)
+			dev_warn(dev, "mmc_fclk stays at %lu Hz (set to %u Hz: %d)\n",
+				 clk_get_rate(pltfm_host->clk), host->mmc->f_max, ret);
 	}
 
 	sdhci_tcc803x_set_channel_configs(host, clk_out_tap, cmd_tap, data_tap);
