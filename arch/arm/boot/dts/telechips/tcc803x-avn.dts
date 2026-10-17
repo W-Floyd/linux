@@ -27,6 +27,7 @@
 
 	aliases {
 		serial0 = &uart0;
+		serial2 = &uart2;
 	};
 
 	chosen {
@@ -141,6 +142,11 @@
 };
 
 &uart0 {
+	status = "okay";
+};
+
+/* The link to the micom, which resets the SoC unless userspace answers it. */
+&uart2 {
 	status = "okay";
 };
 
