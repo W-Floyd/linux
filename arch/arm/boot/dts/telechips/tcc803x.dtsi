@@ -238,6 +238,19 @@
 			     <GIC_PPI 10 IRQ_TYPE_LEVEL_LOW>;
 	};
 
+	/*
+	 * PMU watchdog, owned by the secure monitor and driven through SiP
+	 * calls (vendor tcc803x.dtsi watchdog@144000D0: clock-frequency 24 MHz,
+	 * clear-bit 0). The vendor kernel leaves it running across the kexec.
+	 */
+	watchdog@14300070 {
+		compatible = "telechips,tcc803x-wdt";
+		/* The timer watchdog's config/clear/count (vendor wdt_timer). */
+		reg = <0x14300070 0xc>;
+		clock-frequency = <24000000>;
+		telechips,clear-bit = <0>;
+	};
+
 	soc {
 		compatible = "simple-bus";
 		#address-cells = <1>;

@@ -988,6 +988,20 @@ config ARM_SMC_WATCHDOG
 	  To compile this driver as a module, choose M here: the
 	  module will be called arm_smc_wdt.
 
+config TCC803X_WATCHDOG
+	tristate "Telechips TCC803x PMU watchdog"
+	depends on ARCH_TCC803X || COMPILE_TEST
+	depends on OF
+	depends on HAVE_ARM_SMCCC
+	select WATCHDOG_CORE
+	help
+	  Say Y here to support the PMU watchdog of the Telechips TCC803x,
+	  which the secure monitor owns and is driven through SiP calls.
+	  A kernel that does not ping a watchdog the vendor kernel left
+	  running is reset by the PMU.
+	  To compile this driver as a module, choose M here: the module
+	  will be called tcc803x_wdt.
+
 config LPC18XX_WATCHDOG
 	tristate "LPC18xx/43xx Watchdog"
 	depends on ARCH_LPC18XX || COMPILE_TEST
