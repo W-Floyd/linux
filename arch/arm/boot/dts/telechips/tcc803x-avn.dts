@@ -18,6 +18,7 @@
 
 /dts-v1/;
 
+#include <dt-bindings/gpio/gpio.h>
 #include "tcc803x.dtsi"
 
 / {
@@ -313,5 +314,42 @@
 		interrupts = <GIC_SPI 3 IRQ_TYPE_LEVEL_HIGH>;
 		touchscreen-size-x = <1920>;
 		touchscreen-size-y = <720>;
+	};
+};
+
+/*
+ * Onboard Broadcom/Cypress BCM4359 Wi-Fi, a SDIO function on sdhc2
+ * (0x16460000; the vendor's "mmc1", SDR104 SDIO card). The vendor DT
+ * (mobis/tcc8031-android-avn.dtsi) has this host as 4-bit, 50 MHz, pinctrl
+ * sd2_{clk,cmd,bus4}/out0_clk (out0_clk supplies the chip's 32 kHz sleep clock; left as
+ * the vendor kernel set it up). WL_REG_ON is gpa 24 (the vendor log prints
+ * wifi_reg_on_port=24). Firmware: brcm/brcmfmac4359-sdio.{bin,txt,clm_blob}
+ * from the vendor's fw_bcmdhd.bin, bcmdhd.cal and 89359.clm_blob. No
+ * vmmc/vqmmc regulators are modeled, so signalling stays at 3.3 V
+ * (high-speed 50 MHz); the vendor kernel runs SDR104 at 1.8 V.
+ */
+/ {
+	wifi_pwrseq: wifi-pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		reset-gpios = <&pinctrl 24 GPIO_ACTIVE_LOW>;
+		post-power-on-delay-ms = <20>;
+		power-off-delay-us = <10000>;
+	};
+};
+
+&sdhc2 {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+	bus-width = <4>;
+	max-frequency = <50000000>;
+	non-removable;
+	cap-sdio-irq;
+	keep-power-in-suspend;
+	mmc-pwrseq = <&wifi_pwrseq>;
+
+	wifi@1 {
+		reg = <1>;
+		compatible = "brcm,bcm4329-fmac";
 	};
 };
