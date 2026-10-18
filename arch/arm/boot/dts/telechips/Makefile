@@ -6,3 +6,5 @@
 # guard does anything; until then this dtb is simply never selected.
 dtb-$(CONFIG_ARCH_TCC803X) += \
 	tcc803x-avn.dtb
+dtb-$(CONFIG_ARCH_TCC803X) += \
+	tcc803x-avn-gadget.dtb

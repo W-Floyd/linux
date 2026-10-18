@@ -870,14 +870,13 @@
 		 * targets) and not modeled as mainline ehci-platform/
 		 * ohci-platform nodes in this change.
 		 *
-		 * dr_mode is forced to "host": the external USB-A connector
-		 * this controller drives has no ID/CC signaling pins (bare
-		 * Type-A receptacle), so device/peripheral mode is physically
-		 * unreachable on this port regardless of software
-		 * configuration -- confirmed by a separate, failed attempt to
-		 * force device-mode enumeration tonight. Host mode is
-		 * independently confirmed working: it is how a USB stick
-		 * enumerates on this same port today under the vendor driver.
+		 * dr_mode "host" is the placeholder default. The connector has
+		 * no ID pin, so a role is fixed per board: tcc803x-avn-gadget.dts
+		 * runs the core as a peripheral with the B-session forced valid.
+		 * The earlier "device mode is unreachable" conclusion rested on a
+		 * ForceDevMode write alone (force_usb_device.sh), which leaves
+		 * OTGMUX on the EHCI side and the OTG PHY in power-on reset (see
+		 * ftp_usbregs_vendor.log: OTG PHY pcfg0 0x810000e5, otgmux 0x1e).
 		 *
 		 * clocks/clock-names are deliberately omitted, matching the
 		 * ISOIP_DDB_HDMI precedent above: the two clocks this block
@@ -908,6 +907,8 @@
 			reg = <0x11980000 0xd000>;
 			interrupts = <GIC_SPI 145 IRQ_TYPE_LEVEL_HIGH>;
 			dr_mode = "host";
+			phys = <&dwc_otg_phy>;
+			phy-names = "usb2-phy";
 			status = "disabled";
 		};
 
@@ -977,6 +978,7 @@
 		dwc_otg_phy: dwc-otg-phy@11da0100 {
 			compatible = "telechips,tcc803x-dwc-otg-phy";
 			reg = <0x11da0100 0x30>;
+			#phy-cells = <0>;
 			status = "disabled";
 		};
 	};

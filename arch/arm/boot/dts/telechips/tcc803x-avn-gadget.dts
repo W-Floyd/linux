@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * tcc803x-avn with the USB-A port in peripheral mode (ethernet-over-USB to a
+ * computer). The port's PHY is shared: an OTGMUX register hands it to either
+ * the EHCI/OHCI pair behind the mux or the DWC2 core, so the host pair is
+ * disabled here and the stick plugged into this port is not seen. Boot from
+ * RAM (initramfs) or from a stick on the other host pair, if it is wired out.
+ *
+ * The role is fixed, with the B-session forced valid (usb-role-switch +
+ * default mode), because VBUS sensing and the ID pin are unwired/unknown.
+ * Nothing here switches VBUS off: add vbus-gpios to &dwc_otg_phy once the
+ * port's enable pin and polarity are known (vendor: gpa 28 on dwc_otg_phy,
+ * gpb 11 on dwc_otg), and use a data-only A-to-A cable until then.
+ */
+
+#include "tcc803x-avn.dts"
+
+&ehci_mux {
+	status = "disabled";
+};
+
+&ohci_mux {
+	status = "disabled";
+};
+
+&dwc_otg_phy {
+	status = "okay";
+};
+
+&dwc_otg {
+	dr_mode = "peripheral";
+	usb-role-switch;
+	role-switch-default-mode = "peripheral";
+	status = "okay";
+};
