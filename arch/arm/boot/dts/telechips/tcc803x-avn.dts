@@ -29,6 +29,7 @@
 		serial0 = &uart0;
 		serial1 = &uart1;
 		serial2 = &uart2;
+		serial3 = &uart3;
 	};
 
 	chosen {
@@ -160,6 +161,17 @@
 		compatible = "brcm,bcm4349-bt";
 		shutdown-gpios = <&pinctrl 74 GPIO_ACTIVE_HIGH>;
 	};
+};
+
+/*
+ * The GNSS receiver (vendor ttyTCC3, /dev/ttyGPS0 to the stock HAL), 115200 8N1.
+ * Only the port is enabled: the receiver's power and reset lines (gpg-4
+ * GPS_ANT_PWR_ON, gpa-26 GPS_RESET_N, polarity per hardware revision) are not
+ * driven, so after a kexec from Android the chip is read as the stock left it.
+ * The stock HAL speaks a binary protocol on it ("hippo"), not NMEA.
+ */
+&uart3 {
+	status = "okay";
 };
 
 /*
