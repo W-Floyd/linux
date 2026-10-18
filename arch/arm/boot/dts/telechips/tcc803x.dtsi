@@ -214,6 +214,17 @@
 	};
 
 	/*
+	 * FBUS_GPU (SiP clkctrl id 8) belongs to the secure monitor and reads
+	 * enabled at 700 MHz at boot (clk-tcc803x-fbus.c). A stand-in until a SiP
+	 * clock driver can be the provider.
+	 */
+	gpu_clk: clock-700000000 {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <700000000>;
+	};
+
+	/*
 	 * Live /proc/iomem System RAM below 4G. The 0x86500000-0x9c2fffff hole
 	 * holds the stock firmware's scanout buffer (0x88000000), so it must
 	 * not be handed to the allocator.
@@ -359,6 +370,25 @@
 		 */
 		fbus: clock-fbus {
 			compatible = "telechips,tcc803x-fbus";
+		};
+
+		/*
+		 * Mali-G51 MP2 (vendor tcc803x.dtsi:1160 gpu0). The vendor DT and
+		 * glue have no power domain, isolation or reset for it, only the
+		 * clock. Disabled: the first register read is the risk (a block that
+		 * is off could stall the bus and reset the unit), so it is enabled
+		 * per board, on purpose. gpu1 (0x10200000, SPI 192-194) is disabled
+		 * in the vendor board DT and left out.
+		 */
+		gpu: gpu@10100000 {
+			compatible = "telechips,tcc803x-mali", "arm,mali-bifrost";
+			reg = <0x10100000 0x4000>;
+			interrupts = <GIC_SPI 128 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 129 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 130 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "job", "mmu", "gpu";
+			clocks = <&gpu_clk>;
+			status = "disabled";
 		};
 
 		/*
