@@ -2160,6 +2160,17 @@ config RTC_DRV_S32G
 	  This RTC module can be used as a wakeup source.
 	  Please note that it is not battery-powered.
 
+config RTC_DRV_TCC803X
+	tristate "Telechips TCC803x RTC"
+	depends on ARCH_TCC803X
+	help
+	  Say yes to enable the real-time clock of the Telechips TCC803x
+	  SoCs. Its clock gates are owned by the secure monitor and are
+	  reached through SiP SMC calls. Time only; no alarm.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called "rtc-tcc803x".
+
 comment "HID Sensor RTC drivers"
 
 config RTC_DRV_HID_SENSOR_TIME

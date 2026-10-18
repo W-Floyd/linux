@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/rtc/telechips,tcc803x-rtc.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Telechips TCC803x Real Time Clock
+
+maintainers:
+  - William Floyd <william.floyd@modopayments.com>
+
+description:
+  The block's clock gates belong to the secure monitor and are driven by the
+  driver through SiP SMC calls, so the node has no clocks property.
+
+allOf:
+  - $ref: rtc.yaml#
+
+properties:
+  compatible:
+    const: telechips,tcc803x-rtc
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+required:
+  - compatible
+  - reg
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+
+    rtc@16480000 {
+        compatible = "telechips,tcc803x-rtc";
+        reg = <0x16480000 0x50>;
+        interrupts = <GIC_SPI 73 IRQ_TYPE_LEVEL_HIGH>;
+    };
