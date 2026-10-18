@@ -8,9 +8,13 @@
  *
  * The role is fixed, with the B-session forced valid (usb-role-switch +
  * default mode), because VBUS sensing and the ID pin are unwired/unknown.
- * Nothing here switches VBUS off: add vbus-gpios to &dwc_otg_phy once the
- * port's enable pin and polarity are known (vendor: gpa 28 on dwc_otg_phy,
- * gpb 11 on dwc_otg), and use a data-only A-to-A cable until then.
+ *
+ * VBUS: the stock "vbus on|off" on dwc_otg drives gpa 28 through the PHY's
+ * set_vbus, inverted under CONFIG_WIDE_PE_COMMON (phy-tcc-dwc_otg.c:82-86),
+ * so off is physically high. WIDE_PE_COMMON is inferred (this board's DT has
+ * charger-ctrl-able, which needs it) but not confirmed against the shipped
+ * .config: if the polarity is wrong the PHY probe turns VBUS on. Check gpa 28
+ * with the stock "vbus off" before relying on it.
  */
 
 #include "tcc803x-avn.dts"
@@ -24,6 +28,7 @@
 };
 
 &dwc_otg_phy {
+	vbus-gpios = <&pinctrl 28 GPIO_ACTIVE_LOW>;
 	status = "okay";
 };
 
