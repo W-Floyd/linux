@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/clock/telechips,tcc803x-sipclk.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Telechips TCC803x audio clocks behind the secure monitor
+
+maintainers:
+  - William Floyd <git@notmy.space>
+
+description: |
+  The audio peripheral clocks (MDAI, MFLT, SRCH, MSPDIF) and the I/O-bus
+  gates of the audio blocks (ADMA, DAI, SPDIF). On the Cortex-A53 the vendor
+  kernel reaches them only through SiP SMC calls; the node has no registers.
+  Indices: include/dt-bindings/clock/telechips,tcc803x-clks.h
+  (TCC803X_SIPCLK_*).
+
+properties:
+  compatible:
+    const: telechips,tcc803x-sipclk
+
+  '#clock-cells':
+    const: 1
+
+  telechips,read-only:
+    type: boolean
+    description:
+      Enable, disable and set-rate do nothing; only the state queries reach
+      the monitor. Leaves the clock tree as the previous kernel left it.
+
+required:
+  - compatible
+  - '#clock-cells'
+
+additionalProperties: false
+
+examples:
+  - |
+    clock-controller {
+        compatible = "telechips,tcc803x-sipclk";
+        #clock-cells = <1>;
+        telechips,read-only;
+    };
