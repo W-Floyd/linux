@@ -16,6 +16,7 @@
 #include <linux/bcd.h>
 #include <linux/err.h>
 #include <linux/io.h>
+#include <linux/math64.h>
 #include <linux/mod_devicetable.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
@@ -72,6 +73,7 @@ static int tcc803x_rtc_read_time(struct device *dev, struct rtc_time *tm)
 {
 	struct tcc803x_rtc *rtc = dev_get_drvdata(dev);
 	u32 year;
+	s32 wday;
 	u8 sec;
 
 	tcc803x_rtc_set(rtc, RTCCON, RTCCON_WREN);
@@ -99,7 +101,8 @@ static int tcc803x_rtc_read_time(struct device *dev, struct rtc_time *tm)
 		return -EINVAL;
 
 	/* The weekday register's convention is not worth trusting. */
-	tm->tm_wday = (int)((rtc_tm_to_time64(tm) / 86400 + 4) % 7);
+	div_s64_rem(div_s64(rtc_tm_to_time64(tm), 86400) + 4, 7, &wday);
+	tm->tm_wday = wday;
 	return 0;
 }
 
