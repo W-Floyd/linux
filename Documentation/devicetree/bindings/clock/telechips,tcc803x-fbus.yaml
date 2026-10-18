@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/clock/telechips,tcc803x-fbus.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Telechips TCC803x CPU and bus clocks behind the secure monitor
+
+maintainers:
+  - William Floyd <git@notmy.space>
+
+description: |
+  The CLKCTRL channels (CPU, memory, GPU, video and I/O buses) and the clock
+  gates of the IOBUS, VPUBUS and ISOTOP. On the Cortex-A53 the vendor kernel
+  reaches them only through SiP SMC calls; the node has no registers. For now
+  the driver only asks the monitor for their state and times the CPU, to
+  check what the previous kernel left running.
+
+properties:
+  compatible:
+    const: telechips,tcc803x-fbus
+
+required:
+  - compatible
+
+additionalProperties: false
+
+examples:
+  - |
+    clock-fbus {
+        compatible = "telechips,tcc803x-fbus";
+    };

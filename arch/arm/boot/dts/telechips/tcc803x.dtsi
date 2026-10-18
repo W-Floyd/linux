@@ -260,6 +260,15 @@
 	};
 
 	/*
+	 * The CPU and bus clocks (CLKCTRL channels): owned by the secure monitor,
+	 * read and set by SiP SMC calls only (see clk-tcc803x-fbus.c). No
+	 * registers, so not under the soc bus.
+	 */
+	fbus: clock-fbus {
+		compatible = "telechips,tcc803x-fbus";
+	};
+
+	/*
 	 * PMU watchdog, owned by the secure monitor and driven through SiP
 	 * calls (vendor tcc803x.dtsi watchdog@144000D0: clock-frequency 24 MHz,
 	 * clear-bit 0). The vendor kernel leaves it running across the kexec.
@@ -426,14 +435,6 @@
 			pinctrl-names = "default";
 			pinctrl-0 = <&uart0_grp>;
 			status = "disabled";
-		};
-
-		/*
-		 * The CPU and bus clocks (CLKCTRL channels): owned by the secure
-		 * monitor, read and set by SiP SMC calls only (see clk-tcc803x-fbus.c).
-		 */
-		fbus: clock-fbus {
-			compatible = "telechips,tcc803x-fbus";
 		};
 
 		/*
