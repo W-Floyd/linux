@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR MIT)
+/*
+ * tcc803x-avn-audio, with the audio clocks writable: the driver may enable
+ * the audio gates and set the DAI clock rates through the secure monitor
+ * (SiP SMC). Only after the read-only variant has been seen to work.
+ */
+#include "tcc803x-avn-audio.dts"
+
+&sipclk {
+	/delete-property/ telechips,read-only;
+};

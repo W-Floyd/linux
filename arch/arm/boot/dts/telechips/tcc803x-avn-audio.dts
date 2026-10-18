@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR MIT)
+/*
+ * tcc803x-avn with the I2S3 audio card on, for the first bring-up steps.
+ * The audio clocks stay read-only (telechips,read-only): the secure monitor
+ * is only asked what state each one is in, and the previous kernel's clock
+ * tree is left alone. Nothing here has run on hardware; see the order in
+ * tcc803x-avn.dts. Use tcc803x-avn-audio-rw.dts for the step after.
+ */
+#include "tcc803x-avn.dts"
+
+&sipclk {
+	status = "okay";
+};
+
+&audio_chmux {
+	status = "okay";
+};
+
+&i2s3 {
+	status = "okay";
+};
+
+&i2s_dit {
+	status = "okay";
+};
+
+&sound_i2s3 {
+	status = "okay";
+};
