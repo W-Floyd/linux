@@ -373,6 +373,7 @@
 			clocks = <&ckc TCC803X_CLK_PERI_UART1>, <&xin>;
 			clock-names = "uartclk", "apb_pclk";
 			reg-io-width = <4>;
+			uart-has-rtscts;
 			status = "disabled";
 		};
 
