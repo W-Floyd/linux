@@ -303,7 +303,7 @@
 		 */
 		ckc: clock-controller@14000000 {
 			compatible = "telechips,tcc803x-ckc";
-			reg = <0x14000000 0x1c4>, <0x12380000 0x8>;
+			reg = <0x14000000 0x1c8>, <0x12380000 0x8>;
 			reg-names = "ckc", "ddibus";
 			clocks = <&xin>;
 			clock-names = "xin";
@@ -480,6 +480,23 @@
 			reg = <0x16620000 0x1000>;
 			interrupts = <GIC_SPI 90 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&ckc TCC803X_CLK_PERI_UART2>, <&xin>;
+			clock-names = "uartclk", "apb_pclk";
+			reg-io-width = <4>;
+			status = "disabled";
+		};
+
+		/*
+		 * The GNSS link (vendor /dev/ttyTCC3, ttyGPS0 to the HAL): vendor
+		 * mobis/tcc803x.dtsi:1431-1438, SPI 91. No pinctrl, as for uart1/2:
+		 * the vendor's mux (gpa-18/-19, function 7: uart8_data, board
+		 * tcc8031-android-avn.dtsi:1001) is left as Android set it. The vendor
+		 * board's UDMA channels are not used.
+		 */
+		uart3: serial@16630000 {
+			compatible = "arm,pl011", "arm,primecell";
+			reg = <0x16630000 0x1000>;
+			interrupts = <GIC_SPI 91 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ckc TCC803X_CLK_PERI_UART3>, <&xin>;
 			clock-names = "uartclk", "apb_pclk";
 			reg-io-width = <4>;
 			status = "disabled";

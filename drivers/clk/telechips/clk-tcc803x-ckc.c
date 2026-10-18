@@ -506,6 +506,7 @@ static const struct tcc803x_ckc_peri_desc tcc803x_ckc_peri_clocks[] = {
 	{ TCC803X_CLK_PERI_UART0,	"peri-uart0" },
 	{ TCC803X_CLK_PERI_UART1,	"peri-uart1" },
 	{ TCC803X_CLK_PERI_UART2,	"peri-uart2" },
+	{ TCC803X_CLK_PERI_UART3,	"peri-uart3" },
 	{ TCC803X_CLK_PERI_LCD0,	"peri-lcd0" },
 	{ TCC803X_CLK_PERI_HDMI_CORE,	"peri-hdmi-core" },
 	{ TCC803X_CLK_PERI_HDMI_AUDIO,	"peri-hdmi-audio" },
