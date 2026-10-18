@@ -252,10 +252,11 @@
 	/* The cores' PMU, one SPI each (vendor tcc803x.dtsi:238-244): for perf. */
 	pmu {
 		compatible = "arm,cortex-a15-pmu";
-		interrupts = <GIC_SPI 165 IRQ_TYPE_LEVEL_LOW>,
-			     <GIC_SPI 166 IRQ_TYPE_LEVEL_LOW>,
-			     <GIC_SPI 167 IRQ_TYPE_LEVEL_LOW>,
-			     <GIC_SPI 168 IRQ_TYPE_LEVEL_LOW>;
+		/* Level high: this GIC takes no level-low SPI (the vendor's patched one did). */
+		interrupts = <GIC_SPI 165 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 166 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 167 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 168 IRQ_TYPE_LEVEL_HIGH>;
 	};
 
 	/*
