@@ -345,6 +345,21 @@
 		};
 
 		/*
+		 * The Bluetooth link (vendor /dev/ttyTCC1), SPI 89. As for uart2: no
+		 * pinctrl, the mux (gpc-16..19, function 7: TX/RX, RTS/CTS) stays as
+		 * Android set it.
+		 */
+		uart1: serial@16610000 {
+			compatible = "arm,pl011", "arm,primecell";
+			reg = <0x16610000 0x1000>;
+			interrupts = <GIC_SPI 89 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ckc TCC803X_CLK_PERI_UART1>, <&xin>;
+			clock-names = "uartclk", "apb_pclk";
+			reg-io-width = <4>;
+			status = "disabled";
+		};
+
+		/*
 		 * The micom link (vendor /dev/ttyTCC2): vendor mobis/tcc803x.dtsi
 		 * :1422-1429. No pinctrl: the driver's group table only has uart0, and
 		 * the vendor's mux (gpc-8/-9, function 7) is left as Android set it.

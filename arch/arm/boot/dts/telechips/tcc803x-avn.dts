@@ -27,6 +27,7 @@
 
 	aliases {
 		serial0 = &uart0;
+		serial1 = &uart1;
 		serial2 = &uart2;
 	};
 
@@ -143,6 +144,22 @@
 
 &uart0 {
 	status = "okay";
+};
+
+/*
+ * The BCM4359 combo chip's Bluetooth: an HCI UART, hardware flow control,
+ * 115200 for the patch download. BT_RESET is gpc 13 (32 + 29 + 13 = pin 74),
+ * which hci_bcm holds low until the controller is opened. No BT_REG_ON or
+ * wake lines on this unit. The patch RAM (the stock bcm4349.hcd) is the
+ * userspace's to supply: brcm/BCM4349B1.hcd or brcm/BCM.hcd.
+ */
+&uart1 {
+	status = "okay";
+
+	bluetooth {
+		compatible = "brcm,bcm4349-bt";
+		shutdown-gpios = <&pinctrl 74 GPIO_ACTIVE_HIGH>;
+	};
 };
 
 /* The link to the micom, which resets the SoC unless userspace answers it. */
