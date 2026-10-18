@@ -238,6 +238,15 @@
 			     <GIC_PPI 10 IRQ_TYPE_LEVEL_LOW>;
 	};
 
+	/* The cores' PMU, one SPI each (vendor tcc803x.dtsi:238-244): for perf. */
+	pmu {
+		compatible = "arm,cortex-a15-pmu";
+		interrupts = <GIC_SPI 165 IRQ_TYPE_LEVEL_LOW>,
+			     <GIC_SPI 166 IRQ_TYPE_LEVEL_LOW>,
+			     <GIC_SPI 167 IRQ_TYPE_LEVEL_LOW>,
+			     <GIC_SPI 168 IRQ_TYPE_LEVEL_LOW>;
+	};
+
 	/*
 	 * PMU watchdog, owned by the secure monitor and driven through SiP
 	 * calls (vendor tcc803x.dtsi watchdog@144000D0: clock-frequency 24 MHz,
