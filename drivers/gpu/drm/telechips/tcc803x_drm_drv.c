@@ -134,9 +134,12 @@ static int tcc803x_drm_bind(struct device *dev)
 
 	drm_mode_config_reset(drm);
 
-	ret = drm_vblank_init(drm, drm->mode_config.num_crtc);
-	if (ret)
-		goto err_unbind;
+	/*
+	 * No drm_vblank_init(): the VIOC IRQ is not wired, so with vblank
+	 * "supported" the atomic helpers wait for a vblank/flip_done that
+	 * never comes. Without it they fake the event at commit time
+	 * (drm_atomic_helper_fake_vblank()).
+	 */
 
 	drm_kms_helper_poll_init(drm);
 

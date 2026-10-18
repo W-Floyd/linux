@@ -283,6 +283,13 @@
 #define RDMA_CTRL_IEN		BIT(28)
 #define RDMA_SIZE		0x08	/* (height << 16) | width -- vioc_rdma.c:191 */
 #define RDMA_BASE0		0x0C	/* vioc_rdma.c:202-211 */
+/*
+ * OFFSET0 bits[15:0] = bytes per line of plane 0 (vioc_rdma.h:107-108,
+ * vioc_rdma.c:269-300: 4 * width for ARGB8888). Without it the line pitch
+ * stays whatever the bootloader programmed (7680 for 1920 wide).
+ */
+#define RDMA_OFFSET		0x1C
+#define RDMA_OFFSET0_MASK	GENMASK(15, 0)
 
 /* VIOC_IMG_FMT_ARGB8888 = 12: include/video/tcc/vioc_global.h:58 (vendor path). */
 #define VIOC_IMG_FMT_ARGB8888	12
@@ -407,6 +414,12 @@ struct tcc803x_vioc_crtc {
 	void __iomem *disp;
 	void __iomem *rdma;
 	struct clk *disp0_clk;	/* DT clock-names "disp0" == PERI_LCD0, tcc803x.dtsi:518-519 */
+
+	/* RDMA0 state the bootloader left, restored on unbind (hand-back). */
+	u32 rdma_ctrl0;
+	u32 rdma_size0;
+	u32 rdma_base0;
+	u32 rdma_offset0;
 };
 
 #define to_tcc803x_crtc(c) container_of(c, struct tcc803x_vioc_crtc, base)
@@ -440,6 +453,8 @@ static void tcc803x_plane_atomic_update(struct drm_plane *plane,
 
 	writel(lower_32_bits(addr), crtc->rdma + RDMA_BASE0);
 	vioc_write_size(crtc->rdma, RDMA_SIZE, fb->width, fb->height);
+	writel(FIELD_PREP(RDMA_OFFSET0_MASK, fb->pitches[0]),
+	       crtc->rdma + RDMA_OFFSET);
 
 	ctrl = readl(crtc->rdma + RDMA_CTRL);
 	ctrl &= ~RDMA_CTRL_FMT_MASK;
@@ -495,7 +510,6 @@ static void tcc803x_crtc_atomic_enable(struct drm_crtc *crtc_base,
 	struct drm_crtc_state *crtc_state = crtc_base->state;
 	unsigned int w = crtc_state->mode.hdisplay;
 	unsigned int h = crtc_state->mode.vdisplay;
-	u32 ctrl;
 
 	/*
 	 * Deliberately NOT calling clk_set_rate() on crtc->disp0_clk
@@ -512,10 +526,11 @@ static void tcc803x_crtc_atomic_enable(struct drm_crtc *crtc_base,
 	 * making things worse, not better.
 	 */
 
-	/* WMIX0: layer 0 (RDMA0) on top, nothing else composited. */
-	ctrl = readl(crtc->wmix + WMIX_CTRL);
-	ctrl &= ~WMIX_CTRL_OVP_MASK;
-	writel(ctrl, crtc->wmix + WMIX_CTRL);
+	/*
+	 * WMIX0: OVP is left as the bootloader set it. Clearing it to 0 was
+	 * not traced to vendor source (the vendor's lcdc_initialize() writes
+	 * 24, tca_lcdc.c:127-133) and may reorder the layers.
+	 */
 	vioc_write_size(crtc->wmix, WMIX_SIZE, w, h);
 	writel(readl(crtc->wmix + WMIX_CTRL) | WMIX_CTRL_UPD, crtc->wmix + WMIX_CTRL);
 
@@ -569,12 +584,28 @@ static void tcc803x_crtc_atomic_enable(struct drm_crtc *crtc_base,
 static void tcc803x_crtc_atomic_disable(struct drm_crtc *crtc_base,
 					 struct drm_atomic_commit *state)
 {
-	struct tcc803x_vioc_crtc *crtc = to_tcc803x_crtc(crtc_base);
+	/*
+	 * DISP0 stays enabled: the LVDS serializer link is up and only the
+	 * bootloader/vendor kernel knows how to bring DISP0 and the PHY back
+	 * (no PHY init is implemented), so turning LEN off could leave the
+	 * panel black until a power cycle. The plane is still disabled, so
+	 * the panel shows the WMIX background. Unbind restores RDMA0.
+	 */
+}
 
-	writel(readl(crtc->disp + DISP_CTRL) & ~DISP_CTRL_LEN, crtc->disp + DISP_CTRL);
+/* The timing registers below are the one live-captured 1920x720 mode. */
+static enum drm_mode_status
+tcc803x_crtc_mode_valid(struct drm_crtc *crtc_base,
+			const struct drm_display_mode *mode)
+{
+	if (mode->hdisplay != DISP0_HDISPLAY || mode->vdisplay != DISP0_VDISPLAY)
+		return MODE_BAD;
+
+	return MODE_OK;
 }
 
 static const struct drm_crtc_helper_funcs tcc803x_crtc_helper_funcs = {
+	.mode_valid	= tcc803x_crtc_mode_valid,
 	.atomic_enable	= tcc803x_crtc_atomic_enable,
 	.atomic_disable	= tcc803x_crtc_atomic_disable,
 };
@@ -689,6 +720,11 @@ static int tcc803x_vioc_bind(struct device *dev, struct device *master, void *da
 	if (IS_ERR(crtc->rdma))
 		return PTR_ERR(crtc->rdma);
 
+	crtc->rdma_ctrl0 = readl(crtc->rdma + RDMA_CTRL);
+	crtc->rdma_size0 = readl(crtc->rdma + RDMA_SIZE);
+	crtc->rdma_base0 = readl(crtc->rdma + RDMA_BASE0);
+	crtc->rdma_offset0 = readl(crtc->rdma + RDMA_OFFSET);
+
 	ret = drm_universal_plane_init(drm, &crtc->primary, 0,
 					&tcc803x_plane_funcs,
 					tcc803x_plane_formats,
@@ -718,9 +754,18 @@ static int tcc803x_vioc_bind(struct device *dev, struct device *master, void *da
 
 static void tcc803x_vioc_unbind(struct device *dev, struct device *master, void *data)
 {
-	/* CRTC/plane are drm-managed (drmm_kzalloc'd container); DRM core
-	 * tears them down with the drm_device itself. Nothing to do here.
+	struct tcc803x_vioc_crtc *crtc = dev_get_drvdata(dev);
+
+	/*
+	 * Hand the scanout back to the bootloader's buffer (0x88000000, kept
+	 * out of System RAM in the DT) before the GEM buffers are freed, so
+	 * the panel keeps a valid picture and simpledrm/fbdev can take over
+	 * again. CRTC/plane objects are drm-managed.
 	 */
+	writel(crtc->rdma_base0, crtc->rdma + RDMA_BASE0);
+	writel(crtc->rdma_size0, crtc->rdma + RDMA_SIZE);
+	writel(crtc->rdma_offset0, crtc->rdma + RDMA_OFFSET);
+	writel(crtc->rdma_ctrl0 | RDMA_CTRL_UPD, crtc->rdma + RDMA_CTRL);
 }
 
 static const struct component_ops tcc803x_vioc_component_ops = {
