@@ -437,6 +437,19 @@
 		};
 
 		/*
+		 * Vendor tcc803x.dtsi:1151, SPI 73. No clocks: IOBUS_RTC and
+		 * ISOIP_TOP_RTC are secure-monitor gates the driver reaches by SMC.
+		 * Disabled: a register read of an unpowered block could stall the
+		 * bus, so it is enabled per board, on purpose.
+		 */
+		rtc: rtc@16480000 {
+			compatible = "telechips,tcc803x-rtc";
+			reg = <0x16480000 0x50>;
+			interrupts = <GIC_SPI 73 IRQ_TYPE_LEVEL_HIGH>;
+			status = "disabled";
+		};
+
+		/*
 		 * Mali-G51 MP2 (vendor tcc803x.dtsi:1160 gpu0). The vendor DT and
 		 * glue have no power domain, isolation or reset for it, only the
 		 * clock. Disabled: the first register read is the risk (a block that

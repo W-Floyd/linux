@@ -183,6 +183,10 @@
 	status = "okay";
 };
 
+&rtc {
+	status = "okay";
+};
+
 /* The link to the micom, which resets the SoC unless userspace answers it. */
 &uart2 {
 	status = "okay";
