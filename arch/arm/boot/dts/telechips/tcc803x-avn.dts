@@ -385,3 +385,49 @@
 		compatible = "brcm,bcm4329-fmac";
 	};
 };
+
+/*
+ * Audio out of the SoC: stereo I2S on audio block 3 (pads gpe-11/12/13:
+ * BCLK, LRCK, DAO0; vendor mobis/tcc8031-pinctrl.dtsi:2182-2212) and the
+ * 7.1ch block 0 (gpc-20..28), to whatever the amplifier path is. The vendor
+ * DT has no codec on either: every dai-link there has a dummy codec, and no
+ * mute/enable GPIO or amplifier I2C device appears in the kernel or its DT,
+ * so unmuting the stock amplifier is not understood (see the audio notes).
+ *
+ * DISABLED. Enabling this turns on the SMC-driven clock provider and the
+ * I2S/ADMA registers; none of it has run on hardware. Do it in this order:
+ * 1. &sipclk alone (telechips,read-only stays on): only SMC state queries.
+ * 2. add &i2s3 and &sound_i2s3: probe writes only the pads'
+ *    function-select (gpe-11/12/13, function 2, as the stock kernel does);
+ *    the first startup (aplay) writes the DAI and ADMA registers.
+ * 3. drop telechips,read-only from &sipclk to let the driver set rates.
+ */
+&i2s3 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2s3_grp>;
+};
+
+/ {
+	i2s_dit: audio-codec {
+		compatible = "linux,spdif-dit";
+		#sound-dai-cells = <0>;
+		status = "disabled";
+	};
+
+	sound_i2s3: sound-i2s3 {
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "tcc803x-i2s3";
+		simple-audio-card,format = "i2s";
+		simple-audio-card,bitclock-master = <&sound_i2s3_cpu>;
+		simple-audio-card,frame-master = <&sound_i2s3_cpu>;
+		status = "disabled";
+
+		sound_i2s3_cpu: simple-audio-card,cpu {
+			sound-dai = <&i2s3>;
+		};
+
+		simple-audio-card,codec {
+			sound-dai = <&i2s_dit>;
+		};
+	};
+};

@@ -311,6 +311,69 @@
 		};
 
 		/*
+		 * The audio clocks the vendor A53 kernel drives through SiP SMC
+		 * calls (clk-tcc803x-sipclk.c). Disabled, and read-only when
+		 * enabled: it only queries the monitor until that is removed.
+		 */
+		sipclk: clock-controller {
+			compatible = "telechips,tcc803x-sipclk";
+			#clock-cells = <1>;
+			telechips,read-only;
+			status = "disabled";
+		};
+
+		/*
+		 * IOBUS configuration registers routing each DAI/SPDIF to a pad
+		 * port: vendor tcc803x.dtsi:1618-1624 (audio_chmux@16051000,
+		 * reg size 0x98). Read and written only by the I2S driver.
+		 */
+		audio_chmux: syscon@16051000 {
+			compatible = "telechips,tcc803x-audio-chmux", "syscon";
+			reg = <0x16051000 0x98>;
+			status = "disabled";
+		};
+
+		/*
+		 * Audio block 0, the 7.1ch DAI (vendor tcc803x.dtsi:1763-1772
+		 * i2s0, :1805-1812 adma0; the vendor board puts it on chmux
+		 * port 1, mobis/tcc8031-android-avn.dtsi:640). The DAI window
+		 * is 0x58, not the vendor's 0x50: DCLKDIV is at 0x54.
+		 */
+		i2s0: i2s@16101000 {
+			compatible = "telechips,tcc803x-i2s";
+			reg = <0x16100000 0x200>, <0x16101000 0x58>;
+			reg-names = "adma", "dai";
+			interrupts = <GIC_SPI 80 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sipclk TCC803X_SIPCLK_PERI_MDAI0>,
+				 <&sipclk TCC803X_SIPCLK_IOBUS_DAI0>,
+				 <&sipclk TCC803X_SIPCLK_PERI_MFLT0_DAI>,
+				 <&sipclk TCC803X_SIPCLK_IOBUS_ADMA0>;
+			clock-names = "pclk", "hclk", "filter", "adma";
+			telechips,chmux = <&audio_chmux 0 1>;
+			#sound-dai-cells = <0>;
+			status = "disabled";
+		};
+
+		/*
+		 * Audio block 3, the stereo DAI (vendor :1775-1784 i2s3,
+		 * :1832-1839 adma3; chmux port 4, avn.dtsi:640).
+		 */
+		i2s3: i2s@16201000 {
+			compatible = "telechips,tcc803x-i2s";
+			reg = <0x16200000 0x200>, <0x16201000 0x58>;
+			reg-names = "adma", "dai";
+			interrupts = <GIC_SPI 82 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sipclk TCC803X_SIPCLK_PERI_SRCH0_CORE>,
+				 <&sipclk TCC803X_SIPCLK_IOBUS_SR_DAI0>,
+				 <&sipclk TCC803X_SIPCLK_PERI_SRCH0_FILTER>,
+				 <&sipclk TCC803X_SIPCLK_IOBUS_SR_ADMA0>;
+			clock-names = "pclk", "hclk", "filter", "adma";
+			telechips,chmux = <&audio_chmux 3 4>;
+			#sound-dai-cells = <0>;
+			status = "disabled";
+		};
+
+		/*
 		 * Confirmed address: iomap.h:28 (TCC_PA_TIMER), cross-confirmed
 		 * by vendor tcc803x.dtsi:839-841 (tcc_timer@14300000).
 		 * Legacy Telechips timer block; the architected timer above is
@@ -452,6 +515,23 @@
 			uart0_grp: uart0-grp {
 				telechips,pins = "gpsd0-11", "gpsd0-12";
 				telechips,pin-function = <7>;
+			};
+
+			/*
+			 * Audio pads, vendor mobis/tcc8031-pinctrl.dtsi:2093-2230
+			 * (the active branch). Used by the board's &i2s0/&i2s3;
+			 * the driver picks the group by node name.
+			 */
+			i2s0_grp: i2s0-grp {
+				telechips,pins = "gpc-20", "gpc-21", "gpc-22",
+						 "gpc-23", "gpc-24", "gpc-26",
+						 "gpc-27", "gpc-28";
+				telechips,pin-function = <1>;
+			};
+
+			i2s3_grp: i2s3-grp {
+				telechips,pins = "gpe-11", "gpe-12", "gpe-13";
+				telechips,pin-function = <2>;
 			};
 		};
 
