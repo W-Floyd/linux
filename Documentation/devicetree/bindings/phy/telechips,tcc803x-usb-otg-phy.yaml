@@ -29,8 +29,8 @@ properties:
   vbus-gpios:
     maxItems: 1
     description:
-      Port VBUS supply enable. Driven inactive for as long as the PHY is bound:
-      this PHY is only used in peripheral mode, where the host supplies VBUS.
+      Port VBUS supply enable. Driven inactive for as long as the PHY is bound,
+      as this PHY is only used in peripheral mode, where the host supplies VBUS.
 
 required:
   - compatible
