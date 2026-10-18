@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config SND_SOC_TCC803X_I2S
+	tristate "Telechips TCC803x I2S playback (ADMA)"
+	depends on ARCH_TCC803X || COMPILE_TEST
+	depends on HAS_IOMEM && COMMON_CLK
+	select MFD_SYSCON
+	help
+	  Stereo I2S transmit through the TCC803x audio DMA (ADMA) and DAI
+	  blocks. Playback only, 16-bit, I2S master. Use it with
+	  simple-audio-card and a dummy transmitter ("linux,spdif-dit"); see
+	  Documentation/devicetree/bindings/sound/telechips,tcc803x-i2s.yaml.
