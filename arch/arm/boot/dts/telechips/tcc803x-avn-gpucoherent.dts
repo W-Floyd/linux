@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR MIT)
+/*
+ * tcc803x-avn with the Mali declared I/O-coherent. An A/B test: tcc803x-avn.dts
+ * leaves it non-coherent (panfrost then flushes caches itself). If the black bars
+ * seen while a client renders on panfrost come from stale or missing tiles, one
+ * of the two DTBs shows them and the other does not. Nothing here has run on
+ * hardware; the vendor DT gives no dma-coherent for the GPU either way.
+ */
+#include "tcc803x-avn.dts"
+
+&gpu {
+	dma-coherent;
+};
