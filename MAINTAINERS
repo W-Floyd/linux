@@ -26977,6 +26977,7 @@ F:	Documentation/devicetree/bindings/clock/telechips,tcc803x-ckc.yaml
 F:	Documentation/devicetree/bindings/display/bridge/telechips,tcc803x-hdmi.yaml
 F:	Documentation/devicetree/bindings/display/telechips/
 F:	Documentation/devicetree/bindings/mmc/telechips,tcc803x-sdhci.yaml
+F:	Documentation/devicetree/bindings/phy/telechips,tcc803x-usb-otg-phy.yaml
 F:	Documentation/devicetree/bindings/pinctrl/telechips,tcc803x-pinctrl.yaml
 F:	Documentation/devicetree/bindings/watchdog/telechips,tcc803x-wdt.yaml
 F:	arch/arm/boot/dts/telechips/
@@ -26984,6 +26985,7 @@ F:	drivers/clk/telechips/
 F:	drivers/gpu/drm/bridge/tcc803x-dw-hdmi.c
 F:	drivers/gpu/drm/telechips/
 F:	drivers/mmc/host/sdhci-tcc803x.c
+F:	drivers/phy/telechips/
 F:	drivers/pinctrl/telechips/
 F:	drivers/watchdog/tcc803x_wdt.c
 F:	include/dt-bindings/clock/telechips,tcc803x-clks.h

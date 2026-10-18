@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Phy drivers for Telechips platforms
+#
+config PHY_TCC803X_USB_OTG
+	tristate "Telechips TCC803x USB OTG PHY driver"
+	depends on ARCH_TCC803X || COMPILE_TEST
+	depends on OF && HAS_IOMEM
+	select GENERIC_PHY
+	help
+	  Enable this to support the HS PHY behind the TCC803x DWC2 OTG core,
+	  used to run the USB-A port in peripheral (gadget) mode.

@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/phy/telechips,tcc803x-usb-otg-phy.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Telechips TCC803x USB OTG PHY
+
+maintainers:
+  - William Floyd <git@notmy.space>
+
+description: |
+  The HS PHY behind the DWC2 OTG core (vendor dwc_otg_phy@11DA0100). A mux in
+  its register block (OTGMUX) hands the PHY pins either to the OTG core or to
+  the EHCI/OHCI pair at 0x11900000; the driver selects the OTG core, so the
+  EHCI/OHCI mux pair must stay disabled while this PHY is in use. The HSIO bus
+  and ISOIP clocks are left as the firmware set them.
+
+properties:
+  compatible:
+    const: telechips,tcc803x-dwc-otg-phy
+
+  reg:
+    maxItems: 1
+
+  "#phy-cells":
+    const: 0
+
+  vbus-gpios:
+    maxItems: 1
+    description:
+      Port VBUS supply enable. Driven inactive for as long as the PHY is bound:
+      this PHY is only used in peripheral mode, where the host supplies VBUS.
+
+required:
+  - compatible
+  - reg
+  - "#phy-cells"
+
+additionalProperties: false
+
+examples:
+  - |
+    phy@11da0100 {
+        compatible = "telechips,tcc803x-dwc-otg-phy";
+        reg = <0x11da0100 0x30>;
+        #phy-cells = <0>;
+    };
