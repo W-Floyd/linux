@@ -147,7 +147,7 @@ description: |
 properties:
   compatible:
     description:
-      Placeholder compatible: the real panel's manufacturer and part
+      Placeholder compatible. The real panel's manufacturer and part
       number are not identified in any vendor source found so far (the
       touch-panel driver nodes in tcc8031-android-avn.dtsi give
       1920x720 touch coordinates and panel-coords, not a display-panel
@@ -165,7 +165,7 @@ properties:
   port:
     $ref: /schemas/graph.yaml#/properties/port
     description:
-      Not yet connected to anything: no driver walks this node's graph
+      Not yet connected to anything, as no driver walks this node's graph
       (or binds the vioc_crtc0/output_config nodes together) today.
       Present for schema completeness and for whichever future MRGB/
       CRTC driver wires the pipeline up for real.
