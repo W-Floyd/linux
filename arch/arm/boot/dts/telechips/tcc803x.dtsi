@@ -345,6 +345,14 @@
 		};
 
 		/*
+		 * The CPU and bus clocks (CLKCTRL channels): owned by the secure
+		 * monitor, read and set by SiP SMC calls only (see clk-tcc803x-fbus.c).
+		 */
+		fbus: clock-fbus {
+			compatible = "telechips,tcc803x-fbus";
+		};
+
+		/*
 		 * The Bluetooth link (vendor /dev/ttyTCC1), SPI 89. As for uart2: no
 		 * pinctrl, the mux (gpc-16..19, function 7: TX/RX, RTS/CTS) stays as
 		 * Android set it.
