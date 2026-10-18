@@ -46,13 +46,14 @@
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_bridge.h>
 #include <drm/drm_connector.h>
+#include <drm/drm_modes.h>
+#include <drm/drm_probe_helper.h>
 
 struct tcc803x_lvds {
 	struct device *dev;
 	struct drm_bridge bridge;
 	struct clk *phy_clk;
 	void __iomem *regs[4];
-	bool clk_enabled;
 };
 
 static const char * const tcc803x_lvds_reg_names[4] = {
@@ -70,6 +71,42 @@ static int tcc803x_lvds_attach(struct drm_bridge *bridge,
 {
 	/* Terminal bridge -- nothing further in the chain, see file header. */
 	return 0;
+}
+
+/*
+ * The one panel mode: live DISP0 timing captured off the running unit
+ * (tcc803x-avn.dts lvds-panel, tcc803x_drm_vioc.c DISP0_*). Sync polarity
+ * is the live CTRL.IP/IH/IV = 0, i.e. active high. The pixel clock is
+ * nominal (htotal * vtotal * 60): the real rate is whatever the
+ * bootloader left running and nothing here programs it.
+ */
+static int tcc803x_lvds_get_modes(struct drm_bridge *bridge,
+				  struct drm_connector *connector)
+{
+	struct drm_display_mode *mode;
+
+	mode = drm_mode_create(connector->dev);
+	if (!mode)
+		return 0;
+
+	mode->clock = 99100;
+	mode->hdisplay = 1920;
+	mode->hsync_start = mode->hdisplay + 49;
+	mode->hsync_end = mode->hsync_start + 31;
+	mode->htotal = mode->hsync_end + 159;
+	mode->vdisplay = 720;
+	mode->vsync_start = mode->vdisplay + 14;
+	mode->vsync_end = mode->vsync_start + 4;
+	mode->vtotal = mode->vsync_end + 27;
+	mode->flags = DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC;
+	mode->type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED;
+	drm_mode_set_name(mode);
+	drm_mode_probed_add(connector, mode);
+
+	connector->display_info.width_mm = 243;
+	connector->display_info.height_mm = 92;
+
+	return 1;
 }
 
 static enum drm_mode_status
@@ -90,15 +127,6 @@ static void tcc803x_lvds_atomic_enable(struct drm_bridge *bridge,
 					struct drm_atomic_commit *state)
 {
 	struct tcc803x_lvds *lvds = to_tcc803x_lvds(bridge);
-	int ret;
-
-	ret = clk_prepare_enable(lvds->phy_clk);
-	if (ret) {
-		dev_err(lvds->dev,
-			"PERI_LVDS_PHY clk_prepare_enable failed: %d\n", ret);
-		return;
-	}
-	lvds->clk_enabled = true;
 
 	/*
 	 * This is the real, honest boundary of what this driver does.
@@ -110,23 +138,22 @@ static void tcc803x_lvds_atomic_enable(struct drm_bridge *bridge,
 	 * oversight silently skipped.
 	 */
 	dev_info(lvds->dev,
-		 "PERI_LVDS_PHY clock enabled; PHY register-level init (regs @ %p/%p/%p/%p) is NOT implemented -- vendor source has no lower-level sequence than clk_prepare_enable(), see driver header\n",
+		 "PHY registers (%p/%p/%p/%p) left as the bootloader set them: no init sequence exists in any vendor or stock source\n",
 		 lvds->regs[0], lvds->regs[1], lvds->regs[2], lvds->regs[3]);
 }
 
 static void tcc803x_lvds_atomic_disable(struct drm_bridge *bridge,
 					 struct drm_atomic_commit *state)
 {
-	struct tcc803x_lvds *lvds = to_tcc803x_lvds(bridge);
-
-	if (lvds->clk_enabled) {
-		clk_disable_unprepare(lvds->phy_clk);
-		lvds->clk_enabled = false;
-	}
+	/*
+	 * Nothing to do: the PHY clock stays on (see probe) and the PHY is
+	 * never reprogrammed, so there is nothing here to undo.
+	 */
 }
 
 static const struct drm_bridge_funcs tcc803x_lvds_bridge_funcs = {
 	.attach			= tcc803x_lvds_attach,
+	.get_modes		= tcc803x_lvds_get_modes,
 	.mode_valid		= tcc803x_lvds_mode_valid,
 	.atomic_enable		= tcc803x_lvds_atomic_enable,
 	.atomic_disable		= tcc803x_lvds_atomic_disable,
@@ -140,6 +167,7 @@ static int tcc803x_lvds_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct tcc803x_lvds *lvds;
 	unsigned int i;
+	int ret;
 
 	lvds = devm_drm_bridge_alloc(dev, struct tcc803x_lvds, bridge,
 				      &tcc803x_lvds_bridge_funcs);
@@ -153,6 +181,17 @@ static int tcc803x_lvds_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, PTR_ERR(lvds->phy_clk),
 				      "Unable to get \"lvds-phy\" clock\n");
 
+	/*
+	 * Register the enable with the clock framework but never drop it:
+	 * the bootloader already runs the gate (live read 0xe5000000), and
+	 * gating it on disable or unload would take the panel down with no
+	 * way to bring the PHY back.
+	 */
+	ret = clk_prepare_enable(lvds->phy_clk);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				     "PERI_LVDS_PHY clk_prepare_enable failed\n");
+
 	for (i = 0; i < ARRAY_SIZE(lvds->regs); i++) {
 		lvds->regs[i] = devm_platform_ioremap_resource_byname(pdev,
 							tcc803x_lvds_reg_names[i]);
@@ -164,11 +203,12 @@ static int tcc803x_lvds_probe(struct platform_device *pdev)
 
 	lvds->bridge.of_node = dev->of_node;
 	lvds->bridge.type = DRM_MODE_CONNECTOR_LVDS;
+	lvds->bridge.ops = DRM_BRIDGE_OP_MODES;
 	drm_bridge_add(&lvds->bridge);
 
 	platform_set_drvdata(pdev, lvds);
 
-	dev_info(dev, "probed: clock path real and vendor-confirmed, PHY register init NOT implemented (see driver header)\n");
+	dev_info(dev, "probed: clock held on, PHY registers not touched (see driver header)\n");
 
 	return 0;
 }
