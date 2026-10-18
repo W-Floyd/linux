@@ -162,6 +162,15 @@
 	};
 };
 
+/*
+ * The Mali-G51. Enabled on purpose, though nothing in the vendor sources powers
+ * or resets the block: if its registers are not reachable, the first read at
+ * probe stalls the bus and the unit resets back to the stock Android.
+ */
+&gpu {
+	status = "okay";
+};
+
 /* The link to the micom, which resets the SoC unless userspace answers it. */
 &uart2 {
 	status = "okay";
