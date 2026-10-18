@@ -108,12 +108,30 @@ static struct tcc803x_bank tcc803x_banks[] = {
  */
 static unsigned int tcc803x_uart0_pins[2];
 
+/*
+ * Audio pads, function values from the vendor board pinctrl (the active
+ * branch, past the "#if 0" copies): arch/arm/boot/dts/mobis/
+ * tcc8031-pinctrl.dtsi:2093-2230.
+ *   i2s0 (block 0, 7.1ch): gpc-20 BCLK, gpc-21 LRCK, gpc-22/23/24 DAI0-2,
+ *     gpc-26/27/28 DAO0-2; function 1.
+ *   i2s3 (block 3, stereo): gpe-11 BCLK, gpe-12 LRCK, gpe-13 DAO0; function 2.
+ *   spdif2-tx: gpe-7, function 3.
+ */
+static unsigned int tcc803x_i2s0_pins[8];
+static const u8 tcc803x_i2s0_local[8] = { 20, 21, 22, 23, 24, 26, 27, 28 };
+static unsigned int tcc803x_i2s3_pins[3];
+static unsigned int tcc803x_spdif2_tx_pins[1];
+
 static const char * const tcc803x_uart0_groups[] = { "uart0-grp" };
+static const char * const tcc803x_i2s0_groups[] = { "i2s0-grp" };
+static const char * const tcc803x_i2s3_groups[] = { "i2s3-grp" };
+static const char * const tcc803x_spdif2_tx_groups[] = { "spdif2-tx-grp" };
 
 #define TCC803X_UART0_FUNC_VAL	7
 
 struct tcc803x_group {
 	const char *name;
+	const char *function;
 	const unsigned int *pins;
 	unsigned int npins;
 	unsigned int func_val;
@@ -122,15 +140,43 @@ struct tcc803x_group {
 static struct tcc803x_group tcc803x_groups[] = {
 	{
 		.name = "uart0-grp",
+		.function = "uart0",
 		.pins = tcc803x_uart0_pins,
 		.npins = ARRAY_SIZE(tcc803x_uart0_pins),
 		.func_val = TCC803X_UART0_FUNC_VAL,
+	},
+	{
+		.name = "i2s0-grp",
+		.function = "i2s0",
+		.pins = tcc803x_i2s0_pins,
+		.npins = ARRAY_SIZE(tcc803x_i2s0_pins),
+		.func_val = 1,
+	},
+	{
+		.name = "i2s3-grp",
+		.function = "i2s3",
+		.pins = tcc803x_i2s3_pins,
+		.npins = ARRAY_SIZE(tcc803x_i2s3_pins),
+		.func_val = 2,
+	},
+	{
+		.name = "spdif2-tx-grp",
+		.function = "spdif2-tx",
+		.pins = tcc803x_spdif2_tx_pins,
+		.npins = ARRAY_SIZE(tcc803x_spdif2_tx_pins),
+		.func_val = 3,
 	},
 };
 
 static const struct pinfunction tcc803x_functions[] = {
 	PINCTRL_PINFUNCTION("uart0", tcc803x_uart0_groups,
 			     ARRAY_SIZE(tcc803x_uart0_groups)),
+	PINCTRL_PINFUNCTION("i2s0", tcc803x_i2s0_groups,
+			     ARRAY_SIZE(tcc803x_i2s0_groups)),
+	PINCTRL_PINFUNCTION("i2s3", tcc803x_i2s3_groups,
+			     ARRAY_SIZE(tcc803x_i2s3_groups)),
+	PINCTRL_PINFUNCTION("spdif2-tx", tcc803x_spdif2_tx_groups,
+			     ARRAY_SIZE(tcc803x_spdif2_tx_groups)),
 };
 
 struct tcc803x_pinctrl {
@@ -264,22 +310,29 @@ static int tcc803x_pctl_dt_node_to_map(struct pinctrl_dev *pctldev,
 					 unsigned int *num_maps)
 {
 	/*
-	 * Groups are static (see KNOWN GAP note): the DT only names which
-	 * group to apply to a device via "telechips,pins"/pin-function",
-	 * matched against the compiled-in group table above by name.
+	 * Groups are static (see KNOWN GAP note): the DT node's name picks
+	 * the compiled-in group; its telechips,pins/pin-function are not read.
 	 */
 	unsigned int reserved = 0;
+	unsigned int i;
 	int ret;
 
 	*map = NULL;
 	*num_maps = 0;
+
+	for (i = 0; i < ARRAY_SIZE(tcc803x_groups); i++)
+		if (!strcmp(np->name, tcc803x_groups[i].name))
+			break;
+	if (i == ARRAY_SIZE(tcc803x_groups))
+		return -EINVAL;
 
 	ret = pinctrl_utils_reserve_map(pctldev, map, &reserved, num_maps, 1);
 	if (ret)
 		return ret;
 
 	return pinctrl_utils_add_map_mux(pctldev, map, &reserved, num_maps,
-					  np->name, "uart0");
+					  tcc803x_groups[i].name,
+					  tcc803x_groups[i].function);
 }
 
 static const struct pinctrl_ops tcc803x_pctl_ops = {
@@ -391,7 +444,7 @@ static int tcc803x_gpio_get_direction(struct gpio_chip *chip,
 
 static int tcc803x_build_pins(struct tcc803x_pinctrl *pctl)
 {
-	unsigned int bank_idx, pin_idx, n = 0;
+	unsigned int bank_idx, pin_idx, i, n = 0;
 
 	pctl->npins = 0;
 	for (bank_idx = 0; bank_idx < TCC803X_NBANKS; bank_idx++)
@@ -419,6 +472,14 @@ static int tcc803x_build_pins(struct tcc803x_pinctrl *pctl)
 	/* gpsd0 is tcc803x_banks[7]; see the comment above the pins array. */
 	tcc803x_uart0_pins[0] = tcc803x_banks[7].pin_base + 11;
 	tcc803x_uart0_pins[1] = tcc803x_banks[7].pin_base + 12;
+
+	/* gpc is tcc803x_banks[2], gpe tcc803x_banks[4]. */
+	for (i = 0; i < ARRAY_SIZE(tcc803x_i2s0_pins); i++)
+		tcc803x_i2s0_pins[i] = tcc803x_banks[2].pin_base +
+				       tcc803x_i2s0_local[i];
+	for (i = 0; i < ARRAY_SIZE(tcc803x_i2s3_pins); i++)
+		tcc803x_i2s3_pins[i] = tcc803x_banks[4].pin_base + 11 + i;
+	tcc803x_spdif2_tx_pins[0] = tcc803x_banks[4].pin_base + 7;
 
 	return 0;
 }
