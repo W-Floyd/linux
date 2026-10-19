@@ -3060,17 +3060,7 @@ enum coda_platform {
 	CODA_IMX6Q,
 	CODA_IMX6DL,
 	CODA_TCC803X,
-	CODA_TCC803X_C7,
 };
-
-/*
- * The vendor calls this block "VPU_C7" (drivers/char/vpu/vpu_type.h): which of
- * the CODA7541 and CODA960 register protocols its firmware speaks is not known
- * yet, so both are tried by hand until it is.
- */
-static bool tcc803x_c7;
-module_param(tcc803x_c7, bool, 0444);
-MODULE_PARM_DESC(tcc803x_c7, "TCC803x: treat the block as a CODA7541, not a CODA960");
 
 static const struct coda_devtype coda_devdata[] = {
 	[CODA_IMX27] = {
@@ -3155,6 +3145,8 @@ static const struct coda_devtype coda_devdata[] = {
 			"v4l-coda960-tcc803x.bin"
 		},
 		.product      = CODA_960,
+		/* The firmware reports 0xfc20 v3.0.0, a CODA960 that mainline's check does not know. */
+		.fw_product   = 0xfc20,
 		.codecs       = coda9_codecs,
 		.num_codecs   = ARRAY_SIZE(coda9_codecs),
 		.vdevs        = tcc803x_video_devices,
@@ -3162,20 +3154,6 @@ static const struct coda_devtype coda_devdata[] = {
 		.workbuf_size = 80 * 1024,
 		.tempbuf_size = 204 * 1024,
 		/* No on-chip SRAM is described for it: no iram_size, no pool. */
-	},
-	[CODA_TCC803X_C7] = {
-		.firmware     = {
-			"vpu_fw_tcc803x.bin",
-			"vpu/vpu_fw_tcc803x.bin",
-			"v4l-coda7541-tcc803x.bin"
-		},
-		.product      = CODA_7541,
-		.codecs       = coda7_codecs,
-		.num_codecs   = ARRAY_SIZE(coda7_codecs),
-		.vdevs        = tcc803x_video_devices,
-		.num_vdevs    = ARRAY_SIZE(tcc803x_video_devices),
-		.workbuf_size = 128 * 1024,
-		.tempbuf_size = 304 * 1024,
 	},
 };
 
@@ -3202,8 +3180,6 @@ static int coda_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	dev->devtype = of_device_get_match_data(&pdev->dev);
-	if (tcc803x_c7 && dev->devtype == &coda_devdata[CODA_TCC803X])
-		dev->devtype = &coda_devdata[CODA_TCC803X_C7];
 
 	dev->dev = &pdev->dev;
 	dev->clk_per = devm_clk_get(&pdev->dev, "per");

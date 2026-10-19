@@ -977,7 +977,8 @@ int coda_check_firmware(struct coda_dev *dev)
 	clk_disable_unprepare(dev->clk_per);
 	clk_disable_unprepare(dev->clk_ahb);
 
-	if (product != dev->devtype->product) {
+	if (product != dev->devtype->product &&
+	    !(dev->devtype->fw_product && product == dev->devtype->fw_product)) {
 		v4l2_err(&dev->v4l2_dev,
 			 "Wrong firmware. Hw: %s, Fw: %s, Version: %u.%u.%u\n",
 			 coda_product_name(dev->devtype->product),

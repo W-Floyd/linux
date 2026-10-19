@@ -58,6 +58,8 @@ struct coda_video_device;
 struct coda_devtype {
 	char			*firmware[3];
 	enum coda_product	product;
+	/* The product word a vendor build of the firmware reports, if not product. */
+	u16			fw_product;
 	const struct coda_codec	*codecs;
 	unsigned int		num_codecs;
 	const struct coda_video_device **vdevs;
