@@ -38,6 +38,7 @@
 #define SIP_CLK_ENABLE_VPUBUS	0x82000019
 #define SIP_CLK_DISABLE_VPUBUS	0x8200001a
 #define SIP_CLK_IS_VPUBUS	0x8200001b
+#define SIP_CLK_RESET_VPUBUS	0x8200001c
 
 struct tcc803x_sipclk {
 	struct clk_hw hw;
@@ -157,12 +158,22 @@ static const struct clk_ops sipclk_vpubus_ops = {
 };
 
 /*
- * One reset line, the CODA: power-cycle its bus and core gates, which is what
- * brings the BIT processor up cold (a start over a running one fails). The
- * monitor's RESET_VPUBUS call is not used: nothing in the vendor tree does, so
- * what it does is not known; disable then enable is the vendor's own reset
- * (clk.c tcc_vpubus_disable, then tcc_vpubus_enable).
+ * One reset line, the CODA. EXPERIMENTAL default: the monitor's RESET_VPUBUS
+ * call as the TOPST kernel's reset driver (drivers/reset/reset-telechips.c,
+ * telechips,vpubus-reset) uses it: (id, 1) asserts and (id, 0) releases a line,
+ * ids 1 and 2 for the CODA bus and core (the TCC805x manual's SWR1/SWR2, set
+ * together). Untested on the unit: it may power the block down the way DISABLE
+ * does, which kills a running firmware.
+ *
+ * vpubus_reset=0: power-cycle the bus and core gates, which brings the BIT
+ * processor up cold (a start over a running one fails); the vendor's own
+ * disable-then-enable (clk.c tcc_vpubus_disable, then tcc_vpubus_enable), and
+ * the one tested on the unit.
  */
+static bool vpubus_reset = true;
+module_param(vpubus_reset, bool, 0644);
+MODULE_PARM_DESC(vpubus_reset, "EXPERIMENTAL: reset the CODA with the monitor's RESET_VPUBUS (default) instead of cycling the gates (0, the tested path)");
+
 static int sipclk_reset(struct reset_controller_dev *rcdev, unsigned long id)
 {
 	static const u32 gates[] = {
@@ -173,6 +184,15 @@ static int sipclk_reset(struct reset_controller_dev *rcdev, unsigned long id)
 
 	if (id != TCC803X_SIPRST_CODA)
 		return -EINVAL;
+
+	if (vpubus_reset) {
+		for (i = 0; i < ARRAY_SIZE(gates); i++)
+			sip_call(SIP_CLK_RESET_VPUBUS, gates[i], 1, 0);
+		udelay(10);
+		for (i = ARRAY_SIZE(gates) - 1; i >= 0; i--)
+			sip_call(SIP_CLK_RESET_VPUBUS, gates[i], 0, 0);
+		return 0;
+	}
 
 	for (i = 0; i < ARRAY_SIZE(gates); i++)
 		sip_call(SIP_CLK_DISABLE_VPUBUS, gates[i], 0, 0);
