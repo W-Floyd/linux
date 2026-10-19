@@ -87,6 +87,7 @@ struct coda_dev {
 	const struct coda_devtype *devtype;
 	int			firmware;
 	bool			fw_selecting;
+	const char		*fw_name;
 	struct vdoa_data	*vdoa;
 
 	void __iomem		*regs_base;

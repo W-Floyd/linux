@@ -2942,10 +2942,13 @@ static void coda_copy_firmware(struct coda_dev *dev, const u8 * const buf,
 			       size_t size)
 {
 	u32 *src = (u32 *)buf;
+	size_t payload = size;
 
 	/* Check if the firmware has a 16-byte Freescale header, skip it */
-	if (buf[0] == 'M' && buf[1] == 'X')
+	if (size >= 16 && buf[0] == 'M' && buf[1] == 'X') {
 		src += 4;
+		payload -= 16;
+	}
 	/*
 	 * Check whether the firmware is in native order or pre-reordered for
 	 * memory access. The first instruction opcode always is 0xe40e.
@@ -2956,17 +2959,17 @@ static void coda_copy_firmware(struct coda_dev *dev, const u8 * const buf,
 
 		/* Firmware in native order, reorder while copying */
 		if (dev->devtype->product == CODA_DX6) {
-			for (i = 0; i < (size - 16) / 4; i++)
+			for (i = 0; i < payload / 4; i++)
 				dst[i] = (src[i] << 16) | (src[i] >> 16);
 		} else {
-			for (i = 0; i < (size - 16) / 4; i += 2) {
+			for (i = 0; i < payload / 4; i += 2) {
 				dst[i] = (src[i + 1] << 16) | (src[i + 1] >> 16);
 				dst[i + 1] = (src[i] << 16) | (src[i] >> 16);
 			}
 		}
 	} else {
 		/* Copy the already reordered firmware image */
-		memcpy(dev->codebuf.vaddr, src, size);
+		memcpy(dev->codebuf.vaddr, src, payload);
 	}
 }
 
@@ -2982,6 +2985,11 @@ static void coda_fw_callback(const struct firmware *fw, void *context);
 #define TCC803X_FW_ID1		0x1054
 #define TCC803X_FW_ID1_319	0x013352ad
 
+/*
+ * Read before the block's reset: the vendor's open path (vpu_mgr.c) does not
+ * reset before using the block either (its vmgr_hw_reset() call is commented
+ * out). coda_hw_init resets the block next.
+ */
 static const char *coda_tcc803x_select_firmware(struct coda_dev *dev)
 {
 	u32 id0, id1;
@@ -2997,7 +3005,7 @@ static const char *coda_tcc803x_select_firmware(struct coda_dev *dev)
 	clk_disable_unprepare(dev->clk_ahb);
 	clk_disable_unprepare(dev->clk_per);
 
-	dev_dbg(dev->dev, "firmware select registers %#x %#x\n", id0, id1);
+	dev_info(dev->dev, "firmware select registers %#x %#x\n", id0, id1);
 	if (!id0)
 		return "vpu/tcc803x/bit_code_111";
 	if (id1 == TCC803X_FW_ID1_319)
@@ -3018,6 +3026,7 @@ static int coda_firmware_request(struct coda_dev *dev)
 		fw = dev->devtype->firmware[dev->firmware];
 	}
 
+	dev->fw_name = fw;
 	dev_dbg(dev->dev, "requesting firmware '%s' for %s\n", fw,
 		coda_product_name(dev->devtype->product));
 
@@ -3050,6 +3059,8 @@ static void coda_fw_callback(const struct firmware *fw, void *context)
 		 */
 		dev_info(dev->dev, "Using fallback firmware %s\n",
 			 dev->devtype->firmware[dev->firmware]);
+	} else if (dev->devtype->select_firmware) {
+		dev_info(dev->dev, "Using firmware %s\n", dev->fw_name);
 	}
 
 	/* allocate auxiliary per-device code buffer for the BIT processor */
