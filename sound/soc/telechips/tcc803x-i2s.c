@@ -608,6 +608,29 @@ static int tcc803x_i2s_probe(struct platform_device *pdev)
 					       &tcc803x_i2s_dai, 1);
 }
 
+/*
+ * Reboot and kexec call .shutdown: a stream still open has the ADMA reading its
+ * buffer, which the next kernel will own. Nothing is touched when none is open
+ * (the clocks are off then, and the DMA idle).
+ */
+static void tcc803x_i2s_platform_shutdown(struct platform_device *pdev)
+{
+	struct tcc803x_i2s *i2s = platform_get_drvdata(pdev);
+	unsigned long flags;
+	bool open;
+	u32 v;
+
+	spin_lock_irqsave(&i2s->lock, flags);
+	open = i2s->substream;
+	spin_unlock_irqrestore(&i2s->lock, flags);
+	if (!open)
+		return;
+
+	reg_update(i2s->adma, ADMA_CHCTRL, CHCTRL_TX_IRQ | CHCTRL_TX_DMA, 0);
+	readl_poll_timeout(i2s->adma + ADMA_CHCTRL, v, !(v & CHCTRL_TX_DMA),
+			   10, 10000);
+}
+
 static const struct of_device_id tcc803x_i2s_of_match[] = {
 	{ .compatible = "telechips,tcc803x-i2s" },
 	{ }
@@ -616,6 +639,7 @@ MODULE_DEVICE_TABLE(of, tcc803x_i2s_of_match);
 
 static struct platform_driver tcc803x_i2s_driver = {
 	.probe = tcc803x_i2s_probe,
+	.shutdown = tcc803x_i2s_platform_shutdown,
 	.driver = {
 		.name = "tcc803x-i2s",
 		.of_match_table = tcc803x_i2s_of_match,
