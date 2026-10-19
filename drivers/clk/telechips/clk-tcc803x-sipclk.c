@@ -57,6 +57,12 @@ static unsigned long sip_call(unsigned long fn, unsigned long a1,
 	return res.a0;
 }
 
+/* The monitor answers an unknown call with a negative SMCCC code. */
+static bool sip_failed(unsigned long ret)
+{
+	return (long)ret < 0;
+}
+
 static int sipclk_peri_enable(struct clk_hw *hw)
 {
 	struct tcc803x_sipclk *c = to_sipclk(hw);
@@ -161,9 +167,12 @@ static const struct clk_ops sipclk_vpubus_ops = {
  * One reset line, the CODA. EXPERIMENTAL default: the monitor's RESET_VPUBUS
  * call as the TOPST kernel's reset driver (drivers/reset/reset-telechips.c,
  * telechips,vpubus-reset) uses it: (id, 1) asserts and (id, 0) releases a line,
- * ids 1 and 2 for the CODA bus and core (the TCC805x manual's SWR1/SWR2, set
- * together). Untested on the unit: it may power the block down the way DISABLE
- * does, which kills a running firmware.
+ * ids 1 and 2 for the CODA bus and core (the TCC805x manual says a codec's
+ * resets are asserted and released together; the order and the 10 us here are
+ * not from a vendor source). Untested on the unit: it may power the block down
+ * the way DISABLE does, which kills a running firmware. A failed call, or a gate
+ * left down, is handled: the gates are re-enabled and a failure falls back to
+ * the gate power-cycle.
  *
  * vpubus_reset=0: power-cycle the bus and core gates, which brings the BIT
  * processor up cold (a start over a running one fails); the vendor's own
@@ -186,12 +195,20 @@ static int sipclk_reset(struct reset_controller_dev *rcdev, unsigned long id)
 		return -EINVAL;
 
 	if (vpubus_reset) {
+		bool failed = false;
+
 		for (i = 0; i < ARRAY_SIZE(gates); i++)
-			sip_call(SIP_CLK_RESET_VPUBUS, gates[i], 1, 0);
+			failed |= sip_failed(sip_call(SIP_CLK_RESET_VPUBUS, gates[i], 1, 0));
 		udelay(10);
 		for (i = ARRAY_SIZE(gates) - 1; i >= 0; i--)
-			sip_call(SIP_CLK_RESET_VPUBUS, gates[i], 0, 0);
-		return 0;
+			failed |= sip_failed(sip_call(SIP_CLK_RESET_VPUBUS, gates[i], 0, 0));
+		/* The reset must not leave a gate down: IS_VPUBUS is 1 for down. */
+		for (i = 0; i < ARRAY_SIZE(gates); i++)
+			if (sip_call(SIP_CLK_IS_VPUBUS, gates[i], 0, 0) == 1)
+				sip_call(SIP_CLK_ENABLE_VPUBUS, gates[i], 0, 0);
+		if (!failed)
+			return 0;
+		pr_warn("tcc803x-sipclk: RESET_VPUBUS failed, cycling the gates instead\n");
 	}
 
 	for (i = 0; i < ARRAY_SIZE(gates); i++)
