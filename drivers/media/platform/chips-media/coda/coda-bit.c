@@ -1012,7 +1012,12 @@ static void coda9_set_frame_cache(struct coda_ctx *ctx, u32 fourcc)
 {
 	u32 cache_size, cache_config;
 
-	if (coda_tcc_quirks & 8) {
+	/*
+	 * The vendor library writes only a config word with the bypass bit
+	 * set and never the cache size. With the size written, predicted
+	 * chroma rows 1-7 of each macroblock repeat row 0.
+	 */
+	if (ctx->dev->devtype->fw_product && !(coda_tcc_quirks & 16)) {
 		coda_write(ctx->dev, 1 << CODA9_CACHE_BYPASS_OFFSET,
 			   CODA9_CMD_SET_FRAME_CACHE_CONFIG);
 		return;
