@@ -1012,6 +1012,11 @@ static void coda9_set_frame_cache(struct coda_ctx *ctx, u32 fourcc)
 {
 	u32 cache_size, cache_config;
 
+	if (coda_tcc_quirks & 8) {
+		coda_write(ctx->dev, 1 << CODA9_CACHE_BYPASS_OFFSET,
+			   CODA9_CMD_SET_FRAME_CACHE_CONFIG);
+		return;
+	}
 	if (ctx->tiled_map_type == GDI_LINEAR_FRAME_MAP) {
 		/* Luma 2x0 page, 2x6 cache, chroma 2x0 page, 2x4 cache size */
 		cache_size = 0x20262024;
@@ -2134,7 +2139,7 @@ static int __coda_start_decoding(struct coda_ctx *ctx)
 
 		coda_write(dev, max_mb_num << 16 | max_mb_x << 8 | max_mb_y,
 				CODA7_CMD_SET_FRAME_MAX_DEC_SIZE);
-	} else if (dev->devtype->product == CODA_960) {
+	} else if (dev->devtype->product == CODA_960 && !(coda_tcc_quirks & 4)) {
 		int max_mb_x = 1920 / 16;
 		int max_mb_y = 1088 / 16;
 		int max_mb_num = max_mb_x * max_mb_y;
