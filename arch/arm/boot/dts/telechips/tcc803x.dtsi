@@ -470,6 +470,25 @@
 		};
 
 		/*
+		 * The CODA960 (vendor vpu_dev_mgr, tcc803x.dtsi:2666). The VBUS
+		 * and CODA CKC channels are left running by the stock side; its
+		 * bus and core gates are the secure monitor's, through sipclk,
+		 * which is not read-only for them. The firmware comes from the
+		 * stock vpu_lib.ko (bit_code_319, chosen by VPU +0x1050/+0x1054).
+		 * Disabled: the board turns it on together with sipclk.
+		 */
+		vpu: video-codec@15000000 {
+			compatible = "telechips,tcc803x-vpu";
+			reg = <0x15000000 0x4000>;
+			interrupts = <GIC_SPI 134 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "bit";
+			clocks = <&sipclk TCC803X_SIPCLK_VPUBUS_CODA_CORE>,
+				 <&sipclk TCC803X_SIPCLK_VPUBUS_CODA_BUS>;
+			clock-names = "per", "ahb";
+			status = "disabled";
+		};
+
+		/*
 		 * The Bluetooth link (vendor /dev/ttyTCC1), SPI 89. As for uart2: no
 		 * pinctrl, the mux (gpc-16..19, function 7: TX/RX, RTS/CTS) stays as
 		 * Android set it.

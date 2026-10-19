@@ -187,6 +187,20 @@
 	status = "okay";
 };
 
+/*
+ * The CODA960 and the clock gates it needs. Its registers were read once from
+ * userspace (tools/vpu-probe in the nura repo) with the gates up, and the
+ * driver (a module, loaded by hand or by the firmware service once the
+ * firmware is staged) enables them the same way.
+ */
+&sipclk {
+	status = "okay";
+};
+
+&vpu {
+	status = "okay";
+};
+
 /* The link to the micom, which resets the SoC unless userspace answers it. */
 &uart2 {
 	status = "okay";
