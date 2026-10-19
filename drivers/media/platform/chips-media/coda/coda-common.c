@@ -298,6 +298,12 @@ static const struct coda_video_device *coda9_video_devices[] = {
 	&coda_bit_decoder,
 };
 
+/* The TCC803x's JPEG engine is a separate block (the JPU), not CODA960's own. */
+static const struct coda_video_device *tcc803x_video_devices[] = {
+	&coda_bit_encoder,
+	&coda_bit_decoder,
+};
+
 /*
  * Normalize all supported YUV 4:2:0 formats to the value used in the codec
  * tables.
@@ -3053,6 +3059,7 @@ enum coda_platform {
 	CODA_IMX53,
 	CODA_IMX6Q,
 	CODA_IMX6DL,
+	CODA_TCC803X,
 };
 
 static const struct coda_devtype coda_devdata[] = {
@@ -3130,6 +3137,22 @@ static const struct coda_devtype coda_devdata[] = {
 		.tempbuf_size = 204 * 1024,
 		.iram_size    = 0x1f000, /* leave 4k for suspend code */
 	},
+	[CODA_TCC803X] = {
+		/* The vendor's own build (bit_code_319), with the 16-byte "MX" header. */
+		.firmware     = {
+			"vpu_fw_tcc803x.bin",
+			"vpu/vpu_fw_tcc803x.bin",
+			"v4l-coda960-tcc803x.bin"
+		},
+		.product      = CODA_960,
+		.codecs       = coda9_codecs,
+		.num_codecs   = ARRAY_SIZE(coda9_codecs),
+		.vdevs        = tcc803x_video_devices,
+		.num_vdevs    = ARRAY_SIZE(tcc803x_video_devices),
+		.workbuf_size = 80 * 1024,
+		.tempbuf_size = 204 * 1024,
+		/* No on-chip SRAM is described for it: no iram_size, no pool. */
+	},
 };
 
 static const struct of_device_id coda_dt_ids[] = {
@@ -3138,6 +3161,7 @@ static const struct of_device_id coda_dt_ids[] = {
 	{ .compatible = "fsl,imx53-vpu", .data = &coda_devdata[CODA_IMX53] },
 	{ .compatible = "fsl,imx6q-vpu", .data = &coda_devdata[CODA_IMX6Q] },
 	{ .compatible = "fsl,imx6dl-vpu", .data = &coda_devdata[CODA_IMX6DL] },
+	{ .compatible = "telechips,tcc803x-vpu", .data = &coda_devdata[CODA_TCC803X] },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, coda_dt_ids);
@@ -3212,12 +3236,14 @@ static int coda_probe(struct platform_device *pdev)
 	}
 
 	/* Get IRAM pool from device tree */
-	pool = of_gen_pool_get(np, "iram", 0);
-	if (!pool) {
-		dev_err(&pdev->dev, "iram pool not available\n");
-		return -ENOMEM;
+	if (dev->devtype->iram_size) {
+		pool = of_gen_pool_get(np, "iram", 0);
+		if (!pool) {
+			dev_err(&pdev->dev, "iram pool not available\n");
+			return -ENOMEM;
+		}
+		dev->iram_pool = pool;
 	}
-	dev->iram_pool = pool;
 
 	/* Get vdoa_data if supported by the platform */
 	dev->vdoa = coda_get_vdoa_data();
@@ -3253,10 +3279,12 @@ static int coda_probe(struct platform_device *pdev)
 	}
 
 	dev->iram.size = dev->devtype->iram_size;
-	dev->iram.vaddr = gen_pool_dma_alloc(dev->iram_pool, dev->iram.size,
-					     &dev->iram.paddr);
+	if (dev->iram_pool)
+		dev->iram.vaddr = gen_pool_dma_alloc(dev->iram_pool, dev->iram.size,
+						     &dev->iram.paddr);
 	if (!dev->iram.vaddr) {
-		dev_warn(&pdev->dev, "unable to alloc iram\n");
+		if (dev->iram_pool)
+			dev_warn(&pdev->dev, "unable to alloc iram\n");
 	} else {
 		memset(dev->iram.vaddr, 0, dev->iram.size);
 		dev->iram.blob.data = dev->iram.vaddr;

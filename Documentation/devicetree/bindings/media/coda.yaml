@@ -30,6 +30,7 @@ properties:
               - fsl,imx6dl-vpu
               - fsl,imx6q-vpu
           - const: cnm,coda960
+      - const: telechips,tcc803x-vpu
 
   reg:
     maxItems: 1
