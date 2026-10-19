@@ -33,6 +33,9 @@
 #define SIP_CLK_IS_PERI		0x8200000c
 #define SIP_CLK_ENABLE_IOBUS	0x82000011
 #define SIP_CLK_IS_IOBUS	0x82000013
+#define SIP_CLK_ENABLE_VPUBUS	0x82000019
+#define SIP_CLK_DISABLE_VPUBUS	0x8200001a
+#define SIP_CLK_IS_VPUBUS	0x8200001b
 
 struct tcc803x_sipclk {
 	struct clk_hw hw;
@@ -125,6 +128,33 @@ static const struct clk_ops sipclk_iobus_ops = {
 	.is_enabled = sipclk_iobus_is_enabled,
 };
 
+/*
+ * The video-bus gates, enabled and disabled for real even where the node is
+ * read-only: a codec that asks for one needs it up (vendor clk.c
+ * tcc_vpubus_enable). IS_VPUBUS answers "powered down", like IS_IOBUS.
+ */
+static int sipclk_vpubus_enable(struct clk_hw *hw)
+{
+	sip_call(SIP_CLK_ENABLE_VPUBUS, to_sipclk(hw)->id, 0, 0);
+	return 0;
+}
+
+static void sipclk_vpubus_disable(struct clk_hw *hw)
+{
+	sip_call(SIP_CLK_DISABLE_VPUBUS, to_sipclk(hw)->id, 0, 0);
+}
+
+static int sipclk_vpubus_is_enabled(struct clk_hw *hw)
+{
+	return sip_call(SIP_CLK_IS_VPUBUS, to_sipclk(hw)->id, 0, 0) != 1;
+}
+
+static const struct clk_ops sipclk_vpubus_ops = {
+	.enable = sipclk_vpubus_enable,
+	.disable = sipclk_vpubus_disable,
+	.is_enabled = sipclk_vpubus_is_enabled,
+};
+
 static const struct {
 	const char *name;
 	unsigned int idx;
@@ -141,6 +171,9 @@ static const struct {
 	{ "sip_iobus_sr_dai0", TCC803X_SIPCLK_IOBUS_SR_DAI0 },
 	{ "sip_iobus_adma2", TCC803X_SIPCLK_IOBUS_ADMA2 },
 	{ "sip_iobus_spdif2", TCC803X_SIPCLK_IOBUS_SPDIF2 },
+}, sipclk_vpubus[] = {
+	{ "sip_vpubus_coda_bus", TCC803X_SIPCLK_VPUBUS_CODA_BUS },
+	{ "sip_vpubus_coda_core", TCC803X_SIPCLK_VPUBUS_CODA_CORE },
 };
 
 static int sipclk_register(struct device *dev, struct clk_hw_onecell_data *data,
@@ -205,7 +238,16 @@ static int sipclk_probe(struct platform_device *pdev)
 			return ret;
 	}
 
-	dev_info(dev, "audio clocks via the secure monitor%s\n",
+	for (i = 0; i < ARRAY_SIZE(sipclk_vpubus); i++) {
+		ret = sipclk_register(dev, data, sipclk_vpubus[i].name,
+				      sipclk_vpubus[i].idx,
+				      sipclk_vpubus[i].idx - TCC803X_SIPCLK_VPUBUS_BASE,
+				      &sipclk_vpubus_ops, false);
+		if (ret)
+			return ret;
+	}
+
+	dev_info(dev, "audio and video clocks via the secure monitor%s\n",
 		 read_only ? ", read-only" : "");
 
 	return devm_of_clk_add_hw_provider(dev, of_clk_hw_onecell_get, data);

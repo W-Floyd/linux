@@ -10,9 +10,10 @@ maintainers:
   - William Floyd <git@notmy.space>
 
 description: |
-  The audio peripheral clocks (MDAI, MFLT, SRCH, MSPDIF) and the I/O-bus
-  gates of the audio blocks (ADMA, DAI, SPDIF). On the Cortex-A53 the vendor
-  kernel reaches them only through SiP SMC calls; the node has no registers.
+  The audio peripheral clocks (MDAI, MFLT, SRCH, MSPDIF), the I/O-bus
+  gates of the audio blocks (ADMA, DAI, SPDIF) and the video-bus gates of the
+  CODA codec. On the Cortex-A53 the vendor kernel reaches them only through
+  SiP SMC calls; the node has no registers.
   Indices: include/dt-bindings/clock/telechips,tcc803x-clks.h
   (TCC803X_SIPCLK_*).
 
@@ -27,7 +28,8 @@ properties:
     type: boolean
     description:
       Enable, disable and set-rate do nothing; only the state queries reach
-      the monitor. Leaves the clock tree as the previous kernel left it.
+      the monitor. Leaves the clock tree as the previous kernel left it. Not
+      for the video-bus gates, which a codec needs enabled for real.
 
 required:
   - compatible
