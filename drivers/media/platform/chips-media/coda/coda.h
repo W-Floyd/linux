@@ -54,9 +54,12 @@ enum coda_product {
 };
 
 struct coda_video_device;
+struct coda_dev;
 
 struct coda_devtype {
 	char			*firmware[3];
+	/* Names the firmware the hardware asks for, tried before firmware[]; NULL: none. */
+	const char		*(*select_firmware)(struct coda_dev *dev);
 	enum coda_product	product;
 	/* The product word a vendor build of the firmware reports, if not product. */
 	u16			fw_product;
@@ -83,6 +86,7 @@ struct coda_dev {
 	struct device		*dev;
 	const struct coda_devtype *devtype;
 	int			firmware;
+	bool			fw_selecting;
 	struct vdoa_data	*vdoa;
 
 	void __iomem		*regs_base;

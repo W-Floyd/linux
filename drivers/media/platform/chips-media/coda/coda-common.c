@@ -2972,14 +2972,51 @@ static void coda_copy_firmware(struct coda_dev *dev, const u8 * const buf,
 
 static void coda_fw_callback(const struct firmware *fw, void *context);
 
+/*
+ * The vendor's VPU_Init picks one of three images from two registers: zero in
+ * +0x1050 is bit_code_111, else +0x1054 equal to 0x013352ad is bit_code_319,
+ * else bit_code_213. The images are extracted from the stock vpu_lib.ko by
+ * their symbol names (msm-firmware-loader: vpu_lib.ko@bit_code_[0-9]*).
+ */
+#define TCC803X_FW_ID0		0x1050
+#define TCC803X_FW_ID1		0x1054
+#define TCC803X_FW_ID1_319	0x013352ad
+
+static const char *coda_tcc803x_select_firmware(struct coda_dev *dev)
+{
+	u32 id0, id1;
+
+	if (clk_prepare_enable(dev->clk_per))
+		return NULL;
+	if (clk_prepare_enable(dev->clk_ahb)) {
+		clk_disable_unprepare(dev->clk_per);
+		return NULL;
+	}
+	id0 = readl(dev->regs_base + TCC803X_FW_ID0);
+	id1 = readl(dev->regs_base + TCC803X_FW_ID1);
+	clk_disable_unprepare(dev->clk_ahb);
+	clk_disable_unprepare(dev->clk_per);
+
+	dev_dbg(dev->dev, "firmware select registers %#x %#x\n", id0, id1);
+	if (!id0)
+		return "vpu/tcc803x/bit_code_111";
+	if (id1 == TCC803X_FW_ID1_319)
+		return "vpu/tcc803x/bit_code_319";
+	return "vpu/tcc803x/bit_code_213";
+}
+
 static int coda_firmware_request(struct coda_dev *dev)
 {
-	char *fw;
+	const char *fw = NULL;
 
-	if (dev->firmware >= ARRAY_SIZE(dev->devtype->firmware))
-		return -EINVAL;
-
-	fw = dev->devtype->firmware[dev->firmware];
+	if (dev->fw_selecting)
+		fw = dev->devtype->select_firmware(dev);
+	if (!fw) {
+		dev->fw_selecting = false;
+		if (dev->firmware >= ARRAY_SIZE(dev->devtype->firmware))
+			return -EINVAL;
+		fw = dev->devtype->firmware[dev->firmware];
+	}
 
 	dev_dbg(dev->dev, "requesting firmware '%s' for %s\n", fw,
 		coda_product_name(dev->devtype->product));
@@ -2994,7 +3031,10 @@ static void coda_fw_callback(const struct firmware *fw, void *context)
 	int i, ret;
 
 	if (!fw) {
-		dev->firmware++;
+		if (dev->fw_selecting)
+			dev->fw_selecting = false;
+		else
+			dev->firmware++;
 		ret = coda_firmware_request(dev);
 		if (ret < 0) {
 			v4l2_err(&dev->v4l2_dev, "firmware request failed\n");
@@ -3143,7 +3183,11 @@ static const struct coda_devtype coda_devdata[] = {
 		.iram_size    = 0x1f000, /* leave 4k for suspend code */
 	},
 	[CODA_TCC803X] = {
-		/* The vendor's own build (bit_code_319), with the 16-byte "MX" header. */
+		/*
+		 * The vendor's own build, with the 16-byte "MX" header: the image
+		 * the hardware selects first, these as a fallback (bit_code_319).
+		 */
+		.select_firmware = coda_tcc803x_select_firmware,
 		.firmware     = {
 			"vpu_fw_tcc803x.bin",
 			"vpu/vpu_fw_tcc803x.bin",
@@ -3320,6 +3364,7 @@ static int coda_probe(struct platform_device *pdev)
 	pm_runtime_set_active(&pdev->dev);
 	pm_runtime_enable(&pdev->dev);
 
+	dev->fw_selecting = !!dev->devtype->select_firmware;
 	ret = coda_firmware_request(dev);
 	if (ret)
 		goto err_alloc_workqueue;
