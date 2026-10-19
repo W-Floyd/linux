@@ -65,6 +65,11 @@ int coda_debug;
 module_param(coda_debug, int, 0644);
 MODULE_PARM_DESC(coda_debug, "Debug level (0-2)");
 
+/* Experiments on the TCC803x firmware, read when a decoder starts: 1 bypasses the frame cache. */
+unsigned int coda_tcc_quirks;
+module_param(coda_tcc_quirks, uint, 0644);
+MODULE_PARM_DESC(coda_tcc_quirks, "TCC803x experiments (bit 0: bypass the frame cache)");
+
 static int disable_tiling;
 module_param(disable_tiling, int, 0644);
 MODULE_PARM_DESC(disable_tiling, "Disable tiled frame buffers");

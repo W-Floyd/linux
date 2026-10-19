@@ -296,6 +296,7 @@ struct coda_ctx {
 };
 
 extern int coda_debug;
+extern unsigned int coda_tcc_quirks;
 
 #define coda_dbg(level, ctx, fmt, arg...)				\
 	do {								\

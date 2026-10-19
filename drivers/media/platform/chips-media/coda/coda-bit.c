@@ -1031,6 +1031,8 @@ static void coda9_set_frame_cache(struct coda_ctx *ctx, u32 fourcc)
 				8 << CODA9_CACHE_CR_BUFFER_SIZE_OFFSET |
 				8 << CODA9_CACHE_CB_BUFFER_SIZE_OFFSET;
 	}
+	if (coda_tcc_quirks & 1)
+		cache_config |= 1 << CODA9_CACHE_BYPASS_OFFSET;
 	coda_write(ctx->dev, cache_config, CODA9_CMD_SET_FRAME_CACHE_CONFIG);
 }
 
