@@ -3211,8 +3211,9 @@ static int coda_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	/* JPEG IRQ */
-	if (dev->devtype->product == CODA_960) {
+	/* JPEG IRQ (the TCC803x has no JPEG engine of its own to interrupt) */
+	if (dev->devtype->product == CODA_960 &&
+	    dev->devtype->vdevs != tcc803x_video_devices) {
 		irq = platform_get_irq_byname(pdev, "jpeg");
 		if (irq < 0)
 			return irq;
