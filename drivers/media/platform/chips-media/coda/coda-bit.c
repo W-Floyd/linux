@@ -803,7 +803,7 @@ static void coda_setup_iram(struct coda_ctx *ctx)
 	iram_info->next_paddr = dev->iram.paddr;
 	iram_info->remaining = dev->iram.size;
 
-	if (!dev->iram.vaddr || (coda_tcc_quirks & 2))
+	if (!dev->iram.vaddr)
 		return;
 
 	switch (dev->devtype->product) {

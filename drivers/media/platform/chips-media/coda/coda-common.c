@@ -68,7 +68,7 @@ MODULE_PARM_DESC(coda_debug, "Debug level (0-2)");
 /* Experiments on the TCC803x firmware, read when a decoder starts: 1 bypasses the frame cache. */
 unsigned int coda_tcc_quirks;
 module_param(coda_tcc_quirks, uint, 0644);
-MODULE_PARM_DESC(coda_tcc_quirks, "TCC803x experiments (bit 0: bypass the frame cache, bit 1: no secondary AXI areas, bit 4: write the cache size as mainline does)");
+MODULE_PARM_DESC(coda_tcc_quirks, "TCC803x experiments (bit 0: bypass the frame cache, bit 2: no MAX_DEC_SIZE, bit 4: write the cache size as mainline does)");
 
 static int disable_tiling;
 module_param(disable_tiling, int, 0644);
@@ -3157,12 +3157,8 @@ static const struct coda_devtype coda_devdata[] = {
 		.vdevs        = tcc803x_video_devices,
 		.num_vdevs    = ARRAY_SIZE(tcc803x_video_devices),
 		.workbuf_size = 80 * 1024,
-		.tempbuf_size = 512 * 1024,
-		/*
-		 * No on-chip SRAM, but the firmware needs the secondary AXI
-		 * working areas (the vendor's SEC_AXI_BUF_SIZE) somewhere: DRAM.
-		 */
-		.sec_axi_size = 128 * 1024,
+		.tempbuf_size = 204 * 1024,
+		/* No on-chip SRAM is described for it: no iram_size, no pool. */
 	},
 };
 
@@ -3291,13 +3287,6 @@ static int coda_probe(struct platform_device *pdev)
 	}
 
 	dev->iram.size = dev->devtype->iram_size;
-	if (!dev->iram_pool && dev->devtype->sec_axi_size) {
-		ret = coda_alloc_aux_buf(dev, &dev->iram,
-					 dev->devtype->sec_axi_size, "secaxi",
-					 dev->debugfs_root);
-		if (ret < 0)
-			goto err_v4l2_register;
-	}
 	if (dev->iram_pool)
 		dev->iram.vaddr = gen_pool_dma_alloc(dev->iram_pool, dev->iram.size,
 						     &dev->iram.paddr);
@@ -3359,11 +3348,9 @@ static void coda_remove(struct platform_device *pdev)
 	pm_runtime_disable(&pdev->dev);
 	v4l2_device_unregister(&dev->v4l2_dev);
 	destroy_workqueue(dev->workqueue);
-	if (dev->iram_pool && dev->iram.vaddr)
+	if (dev->iram.vaddr)
 		gen_pool_free(dev->iram_pool, (unsigned long)dev->iram.vaddr,
 			      dev->iram.size);
-	else
-		coda_free_aux_buf(dev, &dev->iram);
 	coda_free_aux_buf(dev, &dev->codebuf);
 	coda_free_aux_buf(dev, &dev->tempbuf);
 	coda_free_aux_buf(dev, &dev->workbuf);
