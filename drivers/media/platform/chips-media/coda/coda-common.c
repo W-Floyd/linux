@@ -3157,7 +3157,7 @@ static const struct coda_devtype coda_devdata[] = {
 		.vdevs        = tcc803x_video_devices,
 		.num_vdevs    = ARRAY_SIZE(tcc803x_video_devices),
 		.workbuf_size = 80 * 1024,
-		.tempbuf_size = 204 * 1024,
+		.tempbuf_size = 512 * 1024,
 		/*
 		 * No on-chip SRAM, but the firmware needs the secondary AXI
 		 * working areas (the vendor's SEC_AXI_BUF_SIZE) somewhere: DRAM.
