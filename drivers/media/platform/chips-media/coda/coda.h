@@ -67,6 +67,8 @@ struct coda_devtype {
 	size_t			workbuf_size;
 	size_t			tempbuf_size;
 	size_t			iram_size;
+	/* DRAM stand-in for the AXI SRAM, for SoCs without one. */
+	size_t			sec_axi_size;
 };
 
 struct coda_aux_buf {
