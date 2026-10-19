@@ -43,10 +43,11 @@
  *   calls it "CPU(A7SP)", FBUS_CPU1, apart from "CPU(CA53)", FBUS_CPU0), next
  *   to the Cortex-A53 quad/dual cluster and a Cortex-R5 (Telechips' TCC803x
  *   block diagram; the TOPST tree builds separate sub-core images for it).
- *   CA7S builds for that A7. This DT's cpus are the A53 cluster. Which core
- *   a given image runs on is not stated by this file: /proc/cpuinfo's CPU
- *   part says (0xd03 Cortex-A53, 0xc07 Cortex-A7). CPU_V7 fits either (an
- *   A53 runs AArch32 code under a 32-bit kernel via proc-v7.S).
+ *   CA7S builds for that A7. This DT's cpus are the A53 cluster, and this
+ *   unit's boot logs show four CPUs, so the kernel runs on the A53 quad, not
+ *   the single A7 (a CPU part of 0xd03 is Cortex-A53, 0xc07 Cortex-A7). CPU_V7
+ *   is right all the same: an A53 runs AArch32 code under a 32-bit kernel via
+ *   proc-v7.S.
  *
  * - Peripheral physical addresses, cross-confirmed between the vendor's
  *   C code (arch/arm/mach-tcc803x/include/mach/iomap.h and
