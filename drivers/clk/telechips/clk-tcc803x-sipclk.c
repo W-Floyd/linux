@@ -19,10 +19,12 @@
  */
 #include <linux/arm-smccc.h>
 #include <linux/clk-provider.h>
+#include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
+#include <linux/reset-controller.h>
 
 #include <dt-bindings/clock/telechips,tcc803x-clks.h>
 
@@ -154,6 +156,36 @@ static const struct clk_ops sipclk_vpubus_ops = {
 	.is_enabled = sipclk_vpubus_is_enabled,
 };
 
+/*
+ * One reset line, the CODA: power-cycle its bus and core gates, which is what
+ * brings the BIT processor up cold (a start over a running one fails). The
+ * monitor's RESET_VPUBUS call is not used: nothing in the vendor tree does, so
+ * what it does is not known; disable then enable is the vendor's own reset
+ * (clk.c tcc_vpubus_disable, then tcc_vpubus_enable).
+ */
+static int sipclk_reset(struct reset_controller_dev *rcdev, unsigned long id)
+{
+	static const u32 gates[] = {
+		TCC803X_SIPCLK_VPUBUS_CODA_CORE - TCC803X_SIPCLK_VPUBUS_BASE,
+		TCC803X_SIPCLK_VPUBUS_CODA_BUS - TCC803X_SIPCLK_VPUBUS_BASE,
+	};
+	int i;
+
+	if (id != TCC803X_SIPRST_CODA)
+		return -EINVAL;
+
+	for (i = 0; i < ARRAY_SIZE(gates); i++)
+		sip_call(SIP_CLK_DISABLE_VPUBUS, gates[i], 0, 0);
+	udelay(10);
+	for (i = ARRAY_SIZE(gates) - 1; i >= 0; i--)
+		sip_call(SIP_CLK_ENABLE_VPUBUS, gates[i], 0, 0);
+	return 0;
+}
+
+static const struct reset_control_ops sipclk_reset_ops = {
+	.reset = sipclk_reset,
+};
+
 static const struct {
 	const char *name;
 	unsigned int idx;
@@ -208,6 +240,7 @@ static int sipclk_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	bool read_only = of_property_read_bool(dev->of_node, "telechips,read-only");
 	struct clk_hw_onecell_data *data;
+	struct reset_controller_dev *rcdev;
 	unsigned int i;
 	int ret;
 
@@ -245,6 +278,17 @@ static int sipclk_probe(struct platform_device *pdev)
 		if (ret)
 			return ret;
 	}
+
+	rcdev = devm_kzalloc(dev, sizeof(*rcdev), GFP_KERNEL);
+	if (!rcdev)
+		return -ENOMEM;
+	rcdev->owner = THIS_MODULE;
+	rcdev->ops = &sipclk_reset_ops;
+	rcdev->of_node = dev->of_node;
+	rcdev->nr_resets = 1;
+	ret = devm_reset_controller_register(dev, rcdev);
+	if (ret)
+		return ret;
 
 	dev_info(dev, "audio and video clocks via the secure monitor%s\n",
 		 read_only ? ", read-only" : "");

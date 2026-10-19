@@ -328,6 +328,7 @@
 		sipclk: clock-controller {
 			compatible = "telechips,tcc803x-sipclk";
 			#clock-cells = <1>;
+			#reset-cells = <1>;
 			telechips,read-only;
 			status = "disabled";
 		};
@@ -485,6 +486,7 @@
 			clocks = <&sipclk TCC803X_SIPCLK_VPUBUS_CODA_CORE>,
 				 <&sipclk TCC803X_SIPCLK_VPUBUS_CODA_BUS>;
 			clock-names = "per", "ahb";
+			resets = <&sipclk TCC803X_SIPRST_CODA>;
 			status = "disabled";
 		};
 

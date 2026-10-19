@@ -112,4 +112,7 @@
 #define TCC803X_SIPCLK_VPUBUS_CODA_CORE		(TCC803X_SIPCLK_VPUBUS_BASE + 2)
 #define TCC803X_SIPCLK_NR			(TCC803X_SIPCLK_VPUBUS_BASE + 5)
 
+/* The provider's reset lines (#reset-cells): the CODA video codec. */
+#define TCC803X_SIPRST_CODA			0
+
 #endif /* _DT_BINDINGS_CLOCK_TELECHIPS_TCC803X_H */

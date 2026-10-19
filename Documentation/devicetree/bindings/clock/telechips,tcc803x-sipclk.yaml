@@ -24,6 +24,12 @@ properties:
   '#clock-cells':
     const: 1
 
+  '#reset-cells':
+    const: 1
+    description:
+      The CODA video codec (TCC803X_SIPRST_CODA, 0): a reset power-cycles its
+      bus and core gates.
+
   telechips,read-only:
     type: boolean
     description:

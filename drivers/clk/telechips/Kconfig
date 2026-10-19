@@ -4,6 +4,7 @@ config COMMON_CLK_TCC803X
 	bool "Clock driver for Telechips TCC803x CKC"
 	depends on ARCH_TCC803X || COMPILE_TEST
 	default ARCH_TCC803X
+	select RESET_CONTROLLER
 	help
 	  Partial clock driver for the Telechips TCC803x CKC ("Clock
 	  Controller"). Only the PERI_UART0 peripheral-clock gate is
