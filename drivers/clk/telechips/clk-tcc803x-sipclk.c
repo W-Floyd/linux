@@ -129,19 +129,19 @@ static const struct clk_ops sipclk_iobus_ops = {
 };
 
 /*
- * The video-bus gates, enabled and disabled for real even where the node is
- * read-only: a codec that asks for one needs it up (vendor clk.c
- * tcc_vpubus_enable). IS_VPUBUS answers "powered down", like IS_IOBUS.
+ * The video-bus gates, enabled for real even where the node is read-only: a
+ * codec that asks for one needs it up (vendor clk.c tcc_vpubus_enable).
+ * IS_VPUBUS answers "powered down", like IS_IOBUS.
+ *
+ * Never disabled. DISABLE_VPUBUS resets and powers the block down (vendor
+ * tcc_vpubus_disable: swreset, pwdn), and the coda driver drops its clocks
+ * right after starting the BIT processor, which on an i.MX only gates a clock:
+ * here it killed the firmware before it ran its first command.
  */
 static int sipclk_vpubus_enable(struct clk_hw *hw)
 {
 	sip_call(SIP_CLK_ENABLE_VPUBUS, to_sipclk(hw)->id, 0, 0);
 	return 0;
-}
-
-static void sipclk_vpubus_disable(struct clk_hw *hw)
-{
-	sip_call(SIP_CLK_DISABLE_VPUBUS, to_sipclk(hw)->id, 0, 0);
 }
 
 static int sipclk_vpubus_is_enabled(struct clk_hw *hw)
@@ -151,7 +151,6 @@ static int sipclk_vpubus_is_enabled(struct clk_hw *hw)
 
 static const struct clk_ops sipclk_vpubus_ops = {
 	.enable = sipclk_vpubus_enable,
-	.disable = sipclk_vpubus_disable,
 	.is_enabled = sipclk_vpubus_is_enabled,
 };
 
