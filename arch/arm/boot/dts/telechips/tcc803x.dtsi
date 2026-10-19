@@ -33,21 +33,20 @@
  *   written mach-tcc803x C code (see address list below), which gives
  *   confidence the cpus/gic/timer nodes describe this same silicon.
  *
- *   CAVEAT: arch/arm/plat-tcc/Kconfig:113-145 (Kconfig for ARCH_TCC803X,
- *   the 32-bit "mach-tcc803x" legacy boot path actually used to build
- *   this kernel) selects CPU_V7 and additionally defines a sub-option
+ *   NOTE: arch/arm/plat-tcc/Kconfig:113-145 (ARCH_TCC803X, the 32-bit
+ *   "mach-tcc803x" path this kernel is built from) selects CPU_V7, and
+ *   defines
  *     config TCC803X_CA7S
  *         bool "Build for TCC803X Cortex-A7 Single Core"
- *   (Kconfig:141-145). CPU_V7 is not actually in conflict with an A53 --
- *   a Cortex-A53 cluster runs ARMv7-A-compatible AArch32 code under a
- *   32-bit kernel via proc-v7.S, so CPU_V7 is the correct selection
- *   either way. The CA7S option's literal "Cortex-A7" text is the one
- *   piece of evidence pointing away from A53; it reads like it names a
- *   distinct single-core SKU/variant rather than the primary AP cluster
- *   described by the DT above. Treated here as a stale/variant Kconfig
- *   label, not as contradicting the DT's cortex-a53 cpus node, but this
- *   is a real discrepancy in the vendor tree and should be re-checked
- *   against a datasheet before upstream submission.
+ *   (Kconfig:141-145). That option is not a stale label: the TCC803x has a
+ *   second, separate application core, a single Cortex-A7 (the clock driver
+ *   calls it "CPU(A7SP)", FBUS_CPU1, apart from "CPU(CA53)", FBUS_CPU0), next
+ *   to the Cortex-A53 quad/dual cluster and a Cortex-R5 (Telechips' TCC803x
+ *   block diagram; the TOPST tree builds separate sub-core images for it).
+ *   CA7S builds for that A7. This DT's cpus are the A53 cluster. Which core
+ *   a given image runs on is not stated by this file: /proc/cpuinfo's CPU
+ *   part says (0xd03 Cortex-A53, 0xc07 Cortex-A7). CPU_V7 fits either (an
+ *   A53 runs AArch32 code under a 32-bit kernel via proc-v7.S).
  *
  * - Peripheral physical addresses, cross-confirmed between the vendor's
  *   C code (arch/arm/mach-tcc803x/include/mach/iomap.h and
