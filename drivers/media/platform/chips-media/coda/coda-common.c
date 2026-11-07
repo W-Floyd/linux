@@ -2450,6 +2450,9 @@ static void coda_decode_ctrls(struct coda_ctx *ctx)
 	if (ctx->dev->devtype->product == CODA_HX4 ||
 	    ctx->dev->devtype->product == CODA_7541)
 		max = V4L2_MPEG_VIDEO_H264_LEVEL_4_0;
+	else if (ctx->dev->devtype->vdevs == tcc803x_video_devices)
+		/* Telechips: H.264 decode to 4.2 (TCC805x manual), 1080p60 */
+		max = V4L2_MPEG_VIDEO_H264_LEVEL_4_2;
 	else if (ctx->dev->devtype->product == CODA_960)
 		max = V4L2_MPEG_VIDEO_H264_LEVEL_4_1;
 	else
