@@ -109,6 +109,13 @@ static struct tcc803x_bank tcc803x_banks[] = {
 static unsigned int tcc803x_uart0_pins[2];
 
 /*
+ * uart1 (the BCM4359's Bluetooth HCI): gpc-16..19, data and RTS/CTS,
+ * function 7, as the stock side leaves them. Claimed so the flow-control pads
+ * do not depend on what the bootloader or Android muxed.
+ */
+static unsigned int tcc803x_uart1_pins[4];
+
+/*
  * Audio pads, function values from the vendor board pinctrl (the active
  * branch, past the "#if 0" copies): arch/arm/boot/dts/mobis/
  * tcc8031-pinctrl.dtsi:2093-2230.
@@ -123,6 +130,7 @@ static unsigned int tcc803x_i2s3_pins[3];
 static unsigned int tcc803x_spdif2_tx_pins[1];
 
 static const char * const tcc803x_uart0_groups[] = { "uart0-grp" };
+static const char * const tcc803x_uart1_groups[] = { "uart1-grp" };
 static const char * const tcc803x_i2s0_groups[] = { "i2s0-grp" };
 static const char * const tcc803x_i2s3_groups[] = { "i2s3-grp" };
 static const char * const tcc803x_spdif2_tx_groups[] = { "spdif2-tx-grp" };
@@ -144,6 +152,13 @@ static struct tcc803x_group tcc803x_groups[] = {
 		.pins = tcc803x_uart0_pins,
 		.npins = ARRAY_SIZE(tcc803x_uart0_pins),
 		.func_val = TCC803X_UART0_FUNC_VAL,
+	},
+	{
+		.name = "uart1-grp",
+		.function = "uart1",
+		.pins = tcc803x_uart1_pins,
+		.npins = ARRAY_SIZE(tcc803x_uart1_pins),
+		.func_val = 7,
 	},
 	{
 		.name = "i2s0-grp",
@@ -171,6 +186,8 @@ static struct tcc803x_group tcc803x_groups[] = {
 static const struct pinfunction tcc803x_functions[] = {
 	PINCTRL_PINFUNCTION("uart0", tcc803x_uart0_groups,
 			     ARRAY_SIZE(tcc803x_uart0_groups)),
+	PINCTRL_PINFUNCTION("uart1", tcc803x_uart1_groups,
+			     ARRAY_SIZE(tcc803x_uart1_groups)),
 	PINCTRL_PINFUNCTION("i2s0", tcc803x_i2s0_groups,
 			     ARRAY_SIZE(tcc803x_i2s0_groups)),
 	PINCTRL_PINFUNCTION("i2s3", tcc803x_i2s3_groups,
@@ -266,6 +283,11 @@ static int tcc803x_pmx_set_mux(struct pinctrl_dev *pctldev,
 			(local % TCC803X_FUNC_PINS_PER_REG);
 
 		val = readl(reg);
+		/* What the bootloader or the stock side left is otherwise lost. */
+		if (((val >> shift) & 0xfU) != grp->func_val)
+			dev_info(pctl->dev, "%s: %s-%u function %u -> %u\n",
+				 grp->name, bank->name, local,
+				 (val >> shift) & 0xfU, grp->func_val);
 		val &= ~(0xfU << shift);
 		val |= (grp->func_val & 0xfU) << shift;
 		writel(val, reg);
@@ -474,6 +496,8 @@ static int tcc803x_build_pins(struct tcc803x_pinctrl *pctl)
 	tcc803x_uart0_pins[1] = tcc803x_banks[7].pin_base + 12;
 
 	/* gpc is tcc803x_banks[2], gpe tcc803x_banks[4]. */
+	for (i = 0; i < ARRAY_SIZE(tcc803x_uart1_pins); i++)
+		tcc803x_uart1_pins[i] = tcc803x_banks[2].pin_base + 16 + i;
 	for (i = 0; i < ARRAY_SIZE(tcc803x_i2s0_pins); i++)
 		tcc803x_i2s0_pins[i] = tcc803x_banks[2].pin_base +
 				       tcc803x_i2s0_local[i];
