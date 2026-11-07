@@ -570,6 +570,12 @@
 				telechips,pin-function = <7>;
 			};
 
+			/* uart1 data and RTS/CTS, the Bluetooth HCI on the AVN boards. */
+			uart1_grp: uart1-grp {
+				telechips,pins = "gpc-16", "gpc-17", "gpc-18", "gpc-19";
+				telechips,pin-function = <7>;
+			};
+
 			/*
 			 * Audio pads, vendor mobis/tcc8031-pinctrl.dtsi:2093-2230
 			 * (the active branch). Used by the board's &i2s0/&i2s3;

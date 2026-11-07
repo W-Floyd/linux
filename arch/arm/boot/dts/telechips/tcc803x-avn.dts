@@ -155,6 +155,13 @@
  * userspace's to supply: brcm/BCM4349B1.hcd or brcm/BCM.hcd.
  */
 &uart1 {
+	/*
+	 * Claimed so the flow-control pads are muxed whatever the stock side
+	 * left: with them unclaimed the controller stops mid-reply (Read Local
+	 * Name), as if its CTS were deasserted.
+	 */
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart1_grp>;
 	status = "okay";
 
 	bluetooth {
