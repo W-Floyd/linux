@@ -118,8 +118,13 @@ static void wave4_set_src_fmt(struct v4l2_pix_format *f)
 	f->width = clamp_t(u32, f->width, WAVE4_MIN_WIDTH, WAVE4_MAX_WIDTH);
 	f->height = clamp_t(u32, f->height, WAVE4_MIN_HEIGHT, WAVE4_MAX_HEIGHT);
 	f->bytesperline = 0;
-	f->sizeimage = clamp_t(u32, max_t(u32, f->sizeimage,
-					   f->width * f->height * 3 / 4),
+	/*
+	 * Half the raw 4:2:0 picture: about what a MinCr of 2 (the lowest
+	 * HEVC level limit) allows one coded picture.
+	 * Larger requests are not honoured: the bitstream buffer is twice
+	 * this, out of a CMA area other devices share.
+	 */
+	f->sizeimage = clamp_t(u32, f->width * f->height * 3 / 4,
 			       WAVE4_MIN_BS_SIZE, WAVE4_MAX_BS_SIZE);
 	f->sizeimage = PAGE_ALIGN(f->sizeimage);
 	f->flags = 0;
