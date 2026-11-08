@@ -258,42 +258,67 @@ static int tcc803x_pmx_get_function_groups(struct pinctrl_dev *pctldev,
 	return 0;
 }
 
+static int tcc803x_set_func(struct tcc803x_pinctrl *pctl, unsigned int pin,
+			    unsigned int func, const char *owner)
+{
+	unsigned int local;
+	const struct tcc803x_bank *bank = tcc803x_pin_to_bank(pin, &local);
+	void __iomem *reg;
+	unsigned int shift;
+	unsigned long flags;
+	u32 val;
+
+	if (!bank)
+		return -EINVAL;
+
+	/* reg = bank_base + FUNC + 4*(local/8); Cited above. */
+	reg = pctl->base + bank->reg_offset + TCC803X_GPIO_FUNC +
+		4 * (local / TCC803X_FUNC_PINS_PER_REG);
+	shift = TCC803X_FUNC_BITS * (local % TCC803X_FUNC_PINS_PER_REG);
+
+	spin_lock_irqsave(&pctl->lock, flags);
+	val = readl(reg);
+	/* What the bootloader or the stock side left is otherwise lost. */
+	if (((val >> shift) & 0xfU) != func)
+		dev_info(pctl->dev, "%s: %s-%u function %u -> %u\n", owner,
+			 bank->name, local, (val >> shift) & 0xfU, func);
+	val &= ~(0xfU << shift);
+	val |= (func & 0xfU) << shift;
+	writel(val, reg);
+	spin_unlock_irqrestore(&pctl->lock, flags);
+
+	return 0;
+}
+
 static int tcc803x_pmx_set_mux(struct pinctrl_dev *pctldev,
 				 unsigned int selector, unsigned int group)
 {
 	struct tcc803x_pinctrl *pctl = pinctrl_dev_get_drvdata(pctldev);
 	struct tcc803x_group *grp = &tcc803x_groups[group];
 	unsigned int i;
+	int ret;
 
 	for (i = 0; i < grp->npins; i++) {
-		unsigned int local;
-		const struct tcc803x_bank *bank =
-			tcc803x_pin_to_bank(grp->pins[i], &local);
-		void __iomem *reg;
-		unsigned int shift;
-		u32 val;
-
-		if (!bank)
-			return -EINVAL;
-
-		/* reg = bank_base + FUNC + 4*(local/8); Cited above. */
-		reg = pctl->base + bank->reg_offset + TCC803X_GPIO_FUNC +
-			4 * (local / TCC803X_FUNC_PINS_PER_REG);
-		shift = TCC803X_FUNC_BITS *
-			(local % TCC803X_FUNC_PINS_PER_REG);
-
-		val = readl(reg);
-		/* What the bootloader or the stock side left is otherwise lost. */
-		if (((val >> shift) & 0xfU) != grp->func_val)
-			dev_info(pctl->dev, "%s: %s-%u function %u -> %u\n",
-				 grp->name, bank->name, local,
-				 (val >> shift) & 0xfU, grp->func_val);
-		val &= ~(0xfU << shift);
-		val |= (grp->func_val & 0xfU) << shift;
-		writel(val, reg);
+		ret = tcc803x_set_func(pctl, grp->pins[i], grp->func_val,
+				       grp->name);
+		if (ret)
+			return ret;
 	}
 
 	return 0;
+}
+
+/*
+ * A requested GPIO gets function 0: the data and output-enable registers
+ * drive a pad only in that function, so a line the stock side left on a
+ * peripheral function would otherwise ignore every write.
+ */
+static int tcc803x_pmx_gpio_request_enable(struct pinctrl_dev *pctldev,
+					   struct pinctrl_gpio_range *range,
+					   unsigned int pin)
+{
+	return tcc803x_set_func(pinctrl_dev_get_drvdata(pctldev), pin, 0,
+				"gpio");
 }
 
 static const struct pinmux_ops tcc803x_pmx_ops = {
@@ -301,6 +326,7 @@ static const struct pinmux_ops tcc803x_pmx_ops = {
 	.get_function_name	= tcc803x_pmx_get_function_name,
 	.get_function_groups	= tcc803x_pmx_get_function_groups,
 	.set_mux		= tcc803x_pmx_set_mux,
+	.gpio_request_enable	= tcc803x_pmx_gpio_request_enable,
 };
 
 /* --- pinctrl_ops --- */
@@ -508,6 +534,15 @@ static int tcc803x_build_pins(struct tcc803x_pinctrl *pctl)
 	return 0;
 }
 
+/* GPIO n is pin n: without a range, gpiochip_generic_request never muxes. */
+static int tcc803x_gpio_add_pin_ranges(struct gpio_chip *chip)
+{
+	struct tcc803x_pinctrl *pctl = gpiochip_get_data(chip);
+
+	return gpiochip_add_pin_range(chip, dev_name(pctl->dev), 0, 0,
+				      pctl->npins);
+}
+
 static int tcc803x_pinctrl_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -548,6 +583,7 @@ static int tcc803x_pinctrl_probe(struct platform_device *pdev)
 	pctl->gpio_chip.owner = THIS_MODULE;
 	pctl->gpio_chip.request = gpiochip_generic_request;
 	pctl->gpio_chip.free = gpiochip_generic_free;
+	pctl->gpio_chip.add_pin_ranges = tcc803x_gpio_add_pin_ranges;
 	pctl->gpio_chip.get_direction = tcc803x_gpio_get_direction;
 	pctl->gpio_chip.direction_input = tcc803x_gpio_direction_input;
 	pctl->gpio_chip.direction_output = tcc803x_gpio_direction_output;
