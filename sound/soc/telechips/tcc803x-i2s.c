@@ -35,6 +35,7 @@
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
+#include <sound/tlv.h>
 
 /* ADMA block, tcc_audio_hw.h:38-96 */
 #define ADMA_TRANSCTRL		0x038
@@ -123,6 +124,50 @@ struct tcc803x_i2s {
 	spinlock_t lock;
 	struct snd_pcm_substream *substream;
 	bool pclk_on;
+	unsigned int amp_volume;
+};
+
+/*
+ * The amplifier's volume belongs to the board's microcontroller, not to this
+ * block: "Master Playback Volume" only holds a level, for userspace to send
+ * there, so that the sound server takes it for a hardware volume and leaves the
+ * samples at full scale. The cap is a conservative ceiling on what the AVN head
+ * unit's own system was seen to use (22-31). The dB scale is nominal: 1 dB a
+ * step, the lowest muting.
+ */
+#define AMP_VOLUME_MAX		30
+#define AMP_VOLUME_DEFAULT	22
+static const DECLARE_TLV_DB_SCALE(amp_volume_tlv, -3000, 100, 1);
+
+static int tcc803x_i2s_amp_volume_get(struct snd_kcontrol *kcontrol,
+				      struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct tcc803x_i2s *i2s = snd_soc_component_get_drvdata(component);
+
+	ucontrol->value.integer.value[0] = i2s->amp_volume;
+	return 0;
+}
+
+static int tcc803x_i2s_amp_volume_put(struct snd_kcontrol *kcontrol,
+				      struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct tcc803x_i2s *i2s = snd_soc_component_get_drvdata(component);
+	long v = ucontrol->value.integer.value[0];
+
+	if (v < 0 || v > AMP_VOLUME_MAX)
+		return -EINVAL;
+	if (v == i2s->amp_volume)
+		return 0;
+	i2s->amp_volume = v;
+	return 1;
+}
+
+static const struct snd_kcontrol_new tcc803x_i2s_controls[] = {
+	SOC_SINGLE_EXT_TLV("Master Playback Volume", SND_SOC_NOPM, 0,
+			   AMP_VOLUME_MAX, 0, tcc803x_i2s_amp_volume_get,
+			   tcc803x_i2s_amp_volume_put, amp_volume_tlv),
 };
 
 static void reg_update(void __iomem *base, unsigned int off, u32 mask, u32 val)
@@ -518,6 +563,8 @@ static const struct snd_soc_component_driver tcc803x_i2s_component = {
 	.trigger = tcc803x_i2s_pcm_trigger,
 	.pointer = tcc803x_i2s_pcm_pointer,
 	.pcm_new = tcc803x_i2s_pcm_new,
+	.controls = tcc803x_i2s_controls,
+	.num_controls = ARRAY_SIZE(tcc803x_i2s_controls),
 	.legacy_dai_naming = 1,
 };
 
@@ -570,6 +617,7 @@ static int tcc803x_i2s_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	i2s->dev = dev;
+	i2s->amp_volume = AMP_VOLUME_DEFAULT;
 	spin_lock_init(&i2s->lock);
 	platform_set_drvdata(pdev, i2s);
 
