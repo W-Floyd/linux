@@ -671,8 +671,9 @@ static void wave4_run_decode(struct wave4_ctx *ctx)
 
 	if (res.dec_idx >= 0 && res.dec_idx < ctx->num_fbs)
 		ctx->ts[res.dec_idx] = ctx->cur_ts;
-	else if (res.dec_idx == -1 && ctx->bs_rd == rd && !ctx->eos)
-		ctx->need_fb = true;	/* every free frame is held */
+	else if (res.dec_idx == -1 && ctx->bs_rd == rd && res.disp_idx < 0)
+		/* Every free frame is held; draining needs one as well. */
+		ctx->need_fb = true;
 
 	ctx->bs_pending = !ctx->eos && ctx->bs_rd < ctx->bs_wr;
 
