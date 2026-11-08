@@ -33,6 +33,7 @@
 #define WAVE4_WORK_SIZE		(3 * SZ_1M)	/* per instance */
 #define WAVE4_MAX_INSTANCES	4
 #define WAVE4_MAX_FBS		31	/* DISP_FLAG is a 32-bit mask */
+#define WAVE4_TS_QUEUE		4
 
 #define WAVE4_MIN_WIDTH		8
 #define WAVE4_MIN_HEIGHT	8
@@ -119,7 +120,9 @@ struct wave4_ctx {
 	struct wave4_dpb_buf fbc_c_tbl[WAVE4_MAX_FBS];
 	struct wave4_dpb_buf mv_col[WAVE4_MAX_FBS];
 	u64 ts[WAVE4_MAX_FBS];	/* by decoded frame, for reordered output */
-	u64 cur_ts;		/* of the OUTPUT buffer being decoded */
+	/* OUTPUT buffers fed whose picture the firmware has not reported yet */
+	u64 ts_q[WAVE4_TS_QUEUE];
+	unsigned int ts_head, ts_count;
 	/*
 	 * DISP_FLAG as the firmware last returned it: a frame's bit is set from
 	 * its decode until the host releases it, so a frame decoded but not

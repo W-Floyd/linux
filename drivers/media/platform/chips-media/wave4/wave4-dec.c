@@ -491,6 +491,7 @@ static void wave4_stop_streaming(struct vb2_queue *q)
 			ctx->state = WAVE4_STATE_NEED_SEQ;
 		}
 		ctx->eos = false;
+		ctx->ts_count = 0;
 	}
 
 	v4l2_m2m_update_stop_streaming_state(m2m, q);
@@ -537,6 +538,31 @@ static int wave4_queue_init(void *priv, struct vb2_queue *src,
 }
 
 /*
+ * A DEC_PIC reports the picture of the buffer fed before it (see
+ * wave4_feed()), so timestamps wait in a queue until their picture shows up.
+ */
+static void wave4_ts_push(struct wave4_ctx *ctx, u64 ts)
+{
+	if (ctx->ts_count == WAVE4_TS_QUEUE) {
+		ctx->ts_head = (ctx->ts_head + 1) % WAVE4_TS_QUEUE;
+		ctx->ts_count--;
+	}
+	ctx->ts_q[(ctx->ts_head + ctx->ts_count++) % WAVE4_TS_QUEUE] = ts;
+}
+
+static u64 wave4_ts_pop(struct wave4_ctx *ctx)
+{
+	u64 ts;
+
+	if (!ctx->ts_count)
+		return 0;
+	ts = ctx->ts_q[ctx->ts_head];
+	ctx->ts_head = (ctx->ts_head + 1) % WAVE4_TS_QUEUE;
+	ctx->ts_count--;
+	return ts;
+}
+
+/*
  * Copy the next OUTPUT buffer into the bitstream buffer and return it.
  *
  * The firmware finishes a picture only when the next DEC_PIC shows it the
@@ -567,7 +593,7 @@ static bool wave4_feed(struct wave4_ctx *ctx)
 	ctx->bs_rd = ctx->bs.daddr + off;
 	ctx->bs_wr = ctx->bs_rd + len;
 	ctx->bs_pending = true;
-	ctx->cur_ts = src->vb2_buf.timestamp;
+	wave4_ts_push(ctx, src->vb2_buf.timestamp);
 	v4l2_m2m_buf_done(src, VB2_BUF_STATE_DONE);
 	return true;
 }
@@ -587,6 +613,7 @@ static void wave4_run_init_seq(struct wave4_ctx *ctx)
 	if (ret) {
 		/* No usable header here: drop it and wait for the next buffer. */
 		ctx->bs_pending = false;
+		ctx->ts_count = 0;
 		if (m2m->is_draining && !v4l2_m2m_num_src_bufs_ready(m2m))
 			wave4_finish_drain(ctx);
 		return;
@@ -670,7 +697,10 @@ static void wave4_run_decode(struct wave4_ctx *ctx)
 	}
 
 	if (res.dec_idx >= 0 && res.dec_idx < ctx->num_fbs)
-		ctx->ts[res.dec_idx] = ctx->cur_ts;
+		ctx->ts[res.dec_idx] = wave4_ts_pop(ctx);
+	else if (res.dec_idx == -2 && ctx->ts_count > 1)
+		/* A skipped picture; with one queued it is still in progress. */
+		wave4_ts_pop(ctx);
 	else if (res.dec_idx == -1 && ctx->bs_rd == rd && res.disp_idx < 0)
 		/* Every free frame is held; draining needs one as well. */
 		ctx->need_fb = true;
