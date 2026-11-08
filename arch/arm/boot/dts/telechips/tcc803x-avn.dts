@@ -170,12 +170,19 @@
 	 */
 	pinctrl-names = "default";
 	pinctrl-0 = <&uart1_grp>;
+	/* As stock: RX by DMA rather than one interrupt per FIFO's worth. */
+	dmas = <&udma1 2 2>, <&udma1 3 2>;
+	dma-names = "tx", "rx";
 	status = "okay";
 
 	bluetooth {
 		compatible = "brcm,bcm4349-bt";
 		shutdown-gpios = <&pinctrl 74 GPIO_ACTIVE_HIGH>;
 	};
+};
+
+&udma1 {
+	status = "okay";
 };
 
 /*

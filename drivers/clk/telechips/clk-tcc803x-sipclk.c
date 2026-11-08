@@ -248,6 +248,7 @@ static const struct {
 	{ "sip_iobus_dai0", TCC803X_SIPCLK_IOBUS_DAI0 },
 	{ "sip_iobus_sr_adma0", TCC803X_SIPCLK_IOBUS_SR_ADMA0 },
 	{ "sip_iobus_sr_dai0", TCC803X_SIPCLK_IOBUS_SR_DAI0 },
+	{ "sip_iobus_udma1", TCC803X_SIPCLK_IOBUS_UDMA1 },
 	{ "sip_iobus_adma2", TCC803X_SIPCLK_IOBUS_ADMA2 },
 	{ "sip_iobus_spdif2", TCC803X_SIPCLK_IOBUS_SPDIF2 },
 }, sipclk_vpubus[] = {
