@@ -131,13 +131,13 @@ struct tcc803x_i2s {
  * The amplifier's volume belongs to the board's microcontroller, not to this
  * block: "Master Playback Volume" only holds a level, for userspace to send
  * there, so that the sound server takes it for a hardware volume and leaves the
- * samples at full scale. The cap is a conservative ceiling on what the AVN head
- * unit's own system was seen to use (22-31). The dB scale is nominal: 1 dB a
- * step, the lowest muting.
+ * samples at full scale. The cap is a conservative ceiling: the AVN head unit's
+ * own system was seen at 22-31, and its maximum is not known. The dB scale is
+ * nominal: 1 dB a step, the lowest muting.
  */
-#define AMP_VOLUME_MAX		30
+#define AMP_VOLUME_MAX		35
 #define AMP_VOLUME_DEFAULT	22
-static const DECLARE_TLV_DB_SCALE(amp_volume_tlv, -3000, 100, 1);
+static const DECLARE_TLV_DB_SCALE(amp_volume_tlv, -3500, 100, 1);
 
 static int tcc803x_i2s_amp_volume_get(struct snd_kcontrol *kcontrol,
 				      struct snd_ctl_elem_value *ucontrol)
