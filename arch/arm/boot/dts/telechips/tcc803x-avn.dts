@@ -55,6 +55,8 @@
 			height = <720>;
 			stride = <7680>;
 			format = "a8r8g8b8";
+			/* simpledrm takes the physical size from here, else assumes 96 dpi */
+			panel = <&lvds_panel>;
 		};
 	};
 
@@ -118,8 +120,9 @@
 	 */
 	mrgb_panel: panel {
 		compatible = "telechips,tcc803x-mrgb-panel";
-		width-mm = <92>;
-		height-mm = <243>;
+		/* 12.3" diagonal at 8:3 (1920x720), square pixels */
+		width-mm = <293>;
+		height-mm = <110>;
 
 		panel-timing {
 			hactive = <1920>;
@@ -286,8 +289,9 @@
 / {
 	lvds_panel: lvds-panel {
 		compatible = "telechips,tcc803x-lvds-panel";
-		width-mm = <92>;
-		height-mm = <243>;
+		/* 12.3" diagonal at 8:3 (1920x720), square pixels */
+		width-mm = <293>;
+		height-mm = <110>;
 
 		panel-timing {
 			hactive = <1920>;
