@@ -172,13 +172,14 @@ static int wave4_enum_framesizes(struct file *file, void *priv,
 			     fsize->pixel_format != V4L2_PIX_FMT_NV12))
 		return -EINVAL;
 
-	fsize->type = V4L2_FRMSIZE_TYPE_STEPWISE;
+	/* The conformance window crops the coded size to any size at all. */
+	fsize->type = V4L2_FRMSIZE_TYPE_CONTINUOUS;
 	fsize->stepwise.min_width = WAVE4_MIN_WIDTH;
 	fsize->stepwise.max_width = WAVE4_MAX_WIDTH;
-	fsize->stepwise.step_width = 8;
+	fsize->stepwise.step_width = 1;
 	fsize->stepwise.min_height = WAVE4_MIN_HEIGHT;
 	fsize->stepwise.max_height = WAVE4_MAX_HEIGHT;
-	fsize->stepwise.step_height = 8;
+	fsize->stepwise.step_height = 1;
 	return 0;
 }
 
