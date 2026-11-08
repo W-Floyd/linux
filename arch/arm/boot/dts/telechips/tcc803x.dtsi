@@ -491,6 +491,24 @@
 		};
 
 		/*
+		 * The Wave410 HEVC decoder (TOPST kernel-5.10 tcc803x-vpu.dtsi
+		 * hevc_dev_mgr; SPI 136 = stock "GIC 168"). As for the CODA, the
+		 * VBUS, CHEVC and BHEVC channels are left running by the stock
+		 * side. Firmware: the bit_code array of the stock hevc_lib.ko.
+		 * Disabled until it has run on the unit.
+		 */
+		hevc: video-codec@15200000 {
+			compatible = "telechips,tcc803x-wave410";
+			reg = <0x15200000 0xa000>;
+			interrupts = <GIC_SPI 136 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sipclk TCC803X_SIPCLK_VPUBUS_HEVC_CORE>,
+				 <&sipclk TCC803X_SIPCLK_VPUBUS_HEVC_BUS>;
+			clock-names = "core", "bus";
+			resets = <&sipclk TCC803X_SIPRST_HEVC>;
+			status = "disabled";
+		};
+
+		/*
 		 * The Bluetooth link (vendor /dev/ttyTCC1), SPI 89. As for uart2: no
 		 * pinctrl, the mux (gpc-16..19, function 7: TX/RX, RTS/CTS) stays as
 		 * Android set it.
