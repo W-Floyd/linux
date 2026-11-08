@@ -105,7 +105,9 @@ struct wave4_ctx {
 	struct wave4_seq_info seq;
 
 	struct wave4_dpb_buf work;
-	struct wave4_dpb_buf bs;
+	struct wave4_dpb_buf bs;	/* two halves, see wave4_feed() */
+	u32 bs_half;
+	bool bs_upper;		/* the next buffer goes to the upper half */
 	u32 bs_rd, bs_wr;
 	bool bs_pending;	/* bitstream left over from the last job */
 	bool eos;		/* stream end flagged to the firmware */

@@ -10,8 +10,8 @@
  * decodes it; the driver hands the flags back unchanged except for the
  * frames user space has queued again since, which it clears.
  *
- * Bitstream goes in "picture end" mode: each OUTPUT buffer is copied to a
- * linear bitstream buffer and decoded up to its end; nothing wraps.
+ * Bitstream goes in "picture end" mode: each OUTPUT buffer is copied to one
+ * half of a linear bitstream buffer and decoded up to its end; nothing wraps.
  */
 #include <linux/dma-mapping.h>
 #include <media/v4l2-event.h>
@@ -401,11 +401,15 @@ static void wave4_return_bufs(struct wave4_ctx *ctx, bool output,
 static int wave4_start_output(struct wave4_ctx *ctx)
 {
 	struct wave4_dev *dev = ctx->dev;
+	int ret;
 
-	if (ctx->bs.size >= ctx->src_fmt.sizeimage)
+	ctx->bs_upper = false;
+	if (ctx->bs_half >= ctx->src_fmt.sizeimage)
 		return 0;
 	wave4_coherent_free(dev, &ctx->bs);
-	return wave4_coherent_alloc(dev, &ctx->bs, ctx->src_fmt.sizeimage);
+	ret = wave4_coherent_alloc(dev, &ctx->bs, 2 * ctx->src_fmt.sizeimage);
+	ctx->bs_half = ret ? 0 : ctx->src_fmt.sizeimage;
+	return ret;
 }
 
 static int wave4_start_capture(struct wave4_ctx *ctx, struct vb2_queue *q)
@@ -532,11 +536,19 @@ static int wave4_queue_init(void *priv, struct vb2_queue *src,
 	return vb2_queue_init(dst);
 }
 
-/* Copy the next OUTPUT buffer into the bitstream buffer and return it. */
+/*
+ * Copy the next OUTPUT buffer into the bitstream buffer and return it.
+ *
+ * The firmware finishes a picture only when the next DEC_PIC shows it the
+ * start of the following one (or the stream end), and it still reads the
+ * previous buffer's data then. So consecutive buffers go to alternate
+ * halves: the one before stays intact while the next is decoded.
+ */
 static bool wave4_feed(struct wave4_ctx *ctx)
 {
 	struct v4l2_m2m_ctx *m2m = ctx->fh.m2m_ctx;
 	struct vb2_v4l2_buffer *src = v4l2_m2m_src_buf_remove(m2m);
+	u32 off = ctx->bs_upper ? ctx->bs_half : 0;
 	size_t len;
 	void *va;
 
@@ -545,14 +557,15 @@ static bool wave4_feed(struct wave4_ctx *ctx)
 
 	len = vb2_get_plane_payload(&src->vb2_buf, 0);
 	va = vb2_plane_vaddr(&src->vb2_buf, 0);
-	if (!va || !len || len > ctx->bs.size) {
+	if (!va || !len || len > ctx->bs_half) {
 		v4l2_m2m_buf_done(src, VB2_BUF_STATE_ERROR);
 		return false;
 	}
 
-	memcpy(ctx->bs.vaddr, va, len);
-	ctx->bs_rd = ctx->bs.daddr;
-	ctx->bs_wr = ctx->bs.daddr + len;
+	memcpy(ctx->bs.vaddr + off, va, len);
+	ctx->bs_upper = !ctx->bs_upper;
+	ctx->bs_rd = ctx->bs.daddr + off;
+	ctx->bs_wr = ctx->bs_rd + len;
 	ctx->bs_pending = true;
 	ctx->cur_ts = src->vb2_buf.timestamp;
 	v4l2_m2m_buf_done(src, VB2_BUF_STATE_DONE);
