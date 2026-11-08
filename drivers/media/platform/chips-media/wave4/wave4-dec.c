@@ -693,6 +693,7 @@ static void wave4_run_decode(struct wave4_ctx *ctx)
 		dev_warn(ctx->dev->dev, "sequence change %#x not supported\n",
 			 res.seq_changed);
 		ctx->state = WAVE4_STATE_ERROR;
+		vb2_queue_error(v4l2_m2m_get_src_vq(m2m));
 		vb2_queue_error(v4l2_m2m_get_dst_vq(m2m));
 		return;
 	}
