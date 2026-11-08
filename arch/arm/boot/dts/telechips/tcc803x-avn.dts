@@ -57,6 +57,11 @@
 			format = "a8r8g8b8";
 			/* simpledrm takes the physical size from here, else assumes 96 dpi */
 			panel = <&lvds_panel>;
+			/*
+			 * No driver binds the panel node: without this, fw_devlink
+			 * holds simpledrm back until the deferred-probe timeout.
+			 */
+			post-init-providers = <&lvds_panel>;
 		};
 	};
 
