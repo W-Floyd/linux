@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/media/telechips,tcc803x-wave410.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Chips&Media Wave410 HEVC decoder in the Telechips TCC803x
+
+maintainers:
+  - William Floyd <git@notmy.space>
+
+description:
+  A Chips&Media Wave4 series HEVC (Main profile) decoder with its own VCPU
+  firmware, next to the CODA960 on the TCC803x video bus. Its bus and core
+  clocks are video-bus gates owned by the secure monitor.
+
+properties:
+  compatible:
+    const: telechips,tcc803x-wave410
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+  clocks:
+    items:
+      - description: HEVC core video-bus gate
+      - description: HEVC bus video-bus gate
+
+  clock-names:
+    items:
+      - const: core
+      - const: bus
+
+  resets:
+    maxItems: 1
+
+  firmware-name:
+    maxItems: 1
+    description:
+      Firmware image to load; defaults to vpu/tcc803x/hevc_bit_code.
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - clocks
+  - clock-names
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/clock/telechips,tcc803x-clks.h>
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+
+    video-codec@15200000 {
+        compatible = "telechips,tcc803x-wave410";
+        reg = <0x15200000 0xa000>;
+        interrupts = <GIC_SPI 136 IRQ_TYPE_LEVEL_HIGH>;
+        clocks = <&sipclk TCC803X_SIPCLK_VPUBUS_HEVC_CORE>,
+                 <&sipclk TCC803X_SIPCLK_VPUBUS_HEVC_BUS>;
+        clock-names = "core", "bus";
+        resets = <&sipclk TCC803X_SIPRST_HEVC>;
+    };
