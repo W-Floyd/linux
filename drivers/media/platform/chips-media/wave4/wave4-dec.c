@@ -6,8 +6,9 @@
  * linear NV12 copy of each displayed frame into the frame registered at the
  * same index ("write to linear"). The CAPTURE buffers are those linear frames,
  * so their count is fixed at STREAMON: every CAPTURE buffer pairs with one
- * driver-owned FBC frame, and the firmware learns which CAPTURE buffers user
- * space holds through DISP_FLAG.
+ * driver-owned FBC frame. The firmware marks a frame in DISP_FLAG when it
+ * decodes it; the driver hands the flags back unchanged except for the
+ * frames user space has queued again since, which it clears.
  *
  * Bitstream goes in "picture end" mode: each OUTPUT buffer is copied to a
  * linear bitstream buffer and decoded up to its end; nothing wraps.
@@ -380,7 +381,7 @@ static void wave4_buf_queue(struct vb2_buffer *vb)
 			v4l2_m2m_last_buffer_done(m2m, vbuf);
 			return;
 		}
-		clear_bit(vb->index, &ctx->disp_hold);
+		set_bit(vb->index, &ctx->disp_clr);
 		ctx->need_fb = false;
 	}
 	v4l2_m2m_buf_queue(m2m, vbuf);
@@ -441,10 +442,11 @@ static int wave4_start_capture(struct wave4_ctx *ctx, struct vb2_queue *q)
 	}
 
 	/* Hold every frame user space has not queued yet. */
-	ctx->disp_hold = GENMASK(n - 1, 0);
+	ctx->disp_flag = GENMASK(n - 1, 0);
+	ctx->disp_clr = 0;
 	v4l2_m2m_for_each_dst_buf(ctx->fh.m2m_ctx, b) {
 		vbuf = &b->vb;
-		clear_bit(vbuf->vb2_buf.index, &ctx->disp_hold);
+		ctx->disp_flag &= ~BIT(vbuf->vb2_buf.index);
 	}
 	ctx->need_fb = false;
 	ctx->state = WAVE4_STATE_DECODING;
@@ -612,7 +614,7 @@ static void wave4_finish_drain(struct wave4_ctx *ctx)
 		m2m->next_buf_last = true;
 		return;
 	}
-	set_bit(dst->vb2_buf.index, &ctx->disp_hold);
+	ctx->disp_flag |= BIT(dst->vb2_buf.index);
 	dst->field = V4L2_FIELD_NONE;
 	vb2_set_plane_payload(&dst->vb2_buf, 0, 0);
 	v4l2_m2m_last_buffer_done(m2m, dst);
@@ -668,7 +670,7 @@ static void wave4_run_decode(struct wave4_ctx *ctx)
 				 res.disp_idx);
 			return;
 		}
-		set_bit(res.disp_idx, &ctx->disp_hold);
+		ctx->disp_flag |= BIT(res.disp_idx);
 		dst->vb2_buf.timestamp = ctx->ts[res.disp_idx];
 		dst->field = V4L2_FIELD_NONE;
 		vb2_set_plane_payload(&dst->vb2_buf, 0, ctx->dst_fmt.sizeimage);

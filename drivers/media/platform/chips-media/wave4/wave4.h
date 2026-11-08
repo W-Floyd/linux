@@ -118,7 +118,13 @@ struct wave4_ctx {
 	struct wave4_dpb_buf mv_col[WAVE4_MAX_FBS];
 	u64 ts[WAVE4_MAX_FBS];	/* by decoded frame, for reordered output */
 	u64 cur_ts;		/* of the OUTPUT buffer being decoded */
-	unsigned long disp_hold;	/* CAPTURE buffers the driver does not own */
+	/*
+	 * DISP_FLAG as the firmware last returned it: a frame's bit is set from
+	 * its decode until the host releases it, so a frame decoded but not
+	 * shown yet is protected too. Only the worker touches it.
+	 */
+	u32 disp_flag;
+	unsigned long disp_clr;	/* CAPTURE buffers queued since the last DEC_PIC */
 };
 
 static inline struct wave4_ctx *fh_to_ctx(struct v4l2_fh *fh)

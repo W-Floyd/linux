@@ -398,7 +398,8 @@ int wave4_hw_decode(struct wave4_ctx *ctx, struct wave4_dec_result *res)
 
 	mutex_lock(&dev->hw_lock);
 	w4_set_dec_params(ctx, true);
-	w4_write(dev, W4_CMD_DEC_DISP_FLAG, READ_ONCE(ctx->disp_hold));
+	w4_write(dev, W4_CMD_DEC_DISP_FLAG,
+		 ctx->disp_flag & ~(u32)xchg(&ctx->disp_clr, 0));
 	w4_write(dev, W4_CMD_DEC_TEMPORAL_ID_PLUS1, W4_TEMPORAL_ID_ALL);
 	w4_write(dev, W4_CMD_SEQ_CHANGE_ENABLE_FLAG,
 		 W4_SEQ_CHANGE_ENABLE_ALL_HEVC);
@@ -420,6 +421,7 @@ int wave4_hw_decode(struct wave4_ctx *ctx, struct wave4_dec_result *res)
 	val = w4_read(dev, W4_RET_DEC_DECODED_INDEX);
 	res->dec_idx = (s16)(val >> 16);
 	ctx->bs_rd = w4_read(dev, W4_BS_RD_PTR);
+	ctx->disp_flag = w4_read(dev, W4_CMD_DEC_DISP_FLAG);
 out:
 	mutex_unlock(&dev->hw_lock);
 	return ret;
