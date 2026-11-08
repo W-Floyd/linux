@@ -105,14 +105,18 @@
 #define TCC803X_SIPCLK_IOBUS_SPDIF2		(TCC803X_SIPCLK_IOBUS_BASE + 102)
 /*
  * The video-bus gates (SIP_CLK_*_VPUBUS, vendor VIDEOBUS_* 0 to 4): the CODA
- * bus and core are the ones the CODA960 needs.
+ * bus and core for the CODA960, the HEVC bus and core for the Wave410
+ * (TOPST kernel-5.10 include/dt-bindings/clock/telechips,tcc803x-clks.h:339-344).
  */
 #define TCC803X_SIPCLK_VPUBUS_BASE		400
 #define TCC803X_SIPCLK_VPUBUS_CODA_BUS		(TCC803X_SIPCLK_VPUBUS_BASE + 1)
 #define TCC803X_SIPCLK_VPUBUS_CODA_CORE		(TCC803X_SIPCLK_VPUBUS_BASE + 2)
+#define TCC803X_SIPCLK_VPUBUS_HEVC_BUS		(TCC803X_SIPCLK_VPUBUS_BASE + 3)
+#define TCC803X_SIPCLK_VPUBUS_HEVC_CORE		(TCC803X_SIPCLK_VPUBUS_BASE + 4)
 #define TCC803X_SIPCLK_NR			(TCC803X_SIPCLK_VPUBUS_BASE + 5)
 
-/* The provider's reset lines (#reset-cells): the CODA video codec. */
+/* The provider's reset lines (#reset-cells): the CODA and the Wave410. */
 #define TCC803X_SIPRST_CODA			0
+#define TCC803X_SIPRST_HEVC			1
 
 #endif /* _DT_BINDINGS_CLOCK_TELECHIPS_TCC803X_H */

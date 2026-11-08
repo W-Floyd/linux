@@ -12,7 +12,7 @@ maintainers:
 description: |
   The audio peripheral clocks (MDAI, MFLT, SRCH, MSPDIF), the I/O-bus
   gates of the audio blocks (ADMA, DAI, SPDIF) and the video-bus gates of the
-  CODA codec. On the Cortex-A53 the vendor kernel reaches them only through
+  CODA and Wave410 codecs. On the Cortex-A53 the vendor kernel reaches them only through
   SiP SMC calls; the node has no registers.
   Indices: include/dt-bindings/clock/telechips,tcc803x-clks.h
   (TCC803X_SIPCLK_*).
@@ -27,8 +27,9 @@ properties:
   '#reset-cells':
     const: 1
     description:
-      The CODA video codec (TCC803X_SIPRST_CODA, 0): a reset power-cycles its
-      bus and core gates.
+      The CODA (TCC803X_SIPRST_CODA, 0) and Wave410 (TCC803X_SIPRST_HEVC, 1)
+      video codecs: a reset resets or power-cycles a codec's bus and core
+      gates.
 
   telechips,read-only:
     type: boolean

@@ -164,10 +164,11 @@ static const struct clk_ops sipclk_vpubus_ops = {
 };
 
 /*
- * One reset line, the CODA. EXPERIMENTAL default: the monitor's RESET_VPUBUS
- * call as the TOPST kernel's reset driver (drivers/reset/reset-telechips.c,
- * telechips,vpubus-reset) uses it: (id, 1) asserts and (id, 0) releases a line,
- * ids 1 and 2 for the CODA bus and core (the TCC805x manual says a codec's
+ * Two reset lines, the CODA and the Wave410. EXPERIMENTAL default: the
+ * monitor's RESET_VPUBUS call as the TOPST kernel's reset driver
+ * (drivers/reset/reset-telechips.c, telechips,vpubus-reset) uses it: (id, 1)
+ * asserts and (id, 0) releases a line, ids 1 and 2 for the CODA bus and core,
+ * 3 and 4 for the HEVC bus and core (the TCC805x manual says a codec's
  * resets are asserted and released together; the order and the 10 us here are
  * not from a vendor source). Untested on the unit: it may power the block down
  * the way DISABLE does, which kills a running firmware. A failed call, or a gate
@@ -181,29 +182,39 @@ static const struct clk_ops sipclk_vpubus_ops = {
  */
 static bool vpubus_reset = true;
 module_param(vpubus_reset, bool, 0644);
-MODULE_PARM_DESC(vpubus_reset, "EXPERIMENTAL: reset the CODA with the monitor's RESET_VPUBUS (default) instead of cycling the gates (0, the tested path)");
+MODULE_PARM_DESC(vpubus_reset, "EXPERIMENTAL: reset the codecs with the monitor's RESET_VPUBUS (default) instead of cycling the gates (0, the tested path)");
+
+static const u32 sipclk_reset_gates[][2] = {
+	[TCC803X_SIPRST_CODA] = {
+		TCC803X_SIPCLK_VPUBUS_CODA_CORE - TCC803X_SIPCLK_VPUBUS_BASE,
+		TCC803X_SIPCLK_VPUBUS_CODA_BUS - TCC803X_SIPCLK_VPUBUS_BASE,
+	},
+	[TCC803X_SIPRST_HEVC] = {
+		TCC803X_SIPCLK_VPUBUS_HEVC_CORE - TCC803X_SIPCLK_VPUBUS_BASE,
+		TCC803X_SIPCLK_VPUBUS_HEVC_BUS - TCC803X_SIPCLK_VPUBUS_BASE,
+	},
+};
 
 static int sipclk_reset(struct reset_controller_dev *rcdev, unsigned long id)
 {
-	static const u32 gates[] = {
-		TCC803X_SIPCLK_VPUBUS_CODA_CORE - TCC803X_SIPCLK_VPUBUS_BASE,
-		TCC803X_SIPCLK_VPUBUS_CODA_BUS - TCC803X_SIPCLK_VPUBUS_BASE,
-	};
+	const int n = ARRAY_SIZE(sipclk_reset_gates[0]);
+	const u32 *gates;
 	int i;
 
-	if (id != TCC803X_SIPRST_CODA)
+	if (id >= ARRAY_SIZE(sipclk_reset_gates))
 		return -EINVAL;
+	gates = sipclk_reset_gates[id];
 
 	if (vpubus_reset) {
 		bool failed = false;
 
-		for (i = 0; i < ARRAY_SIZE(gates); i++)
+		for (i = 0; i < n; i++)
 			failed |= sip_failed(sip_call(SIP_CLK_RESET_VPUBUS, gates[i], 1, 0));
 		udelay(10);
-		for (i = ARRAY_SIZE(gates) - 1; i >= 0; i--)
+		for (i = n - 1; i >= 0; i--)
 			failed |= sip_failed(sip_call(SIP_CLK_RESET_VPUBUS, gates[i], 0, 0));
 		/* The reset must not leave a gate down: IS_VPUBUS is 1 for down. */
-		for (i = 0; i < ARRAY_SIZE(gates); i++)
+		for (i = 0; i < n; i++)
 			if (sip_call(SIP_CLK_IS_VPUBUS, gates[i], 0, 0) == 1)
 				sip_call(SIP_CLK_ENABLE_VPUBUS, gates[i], 0, 0);
 		if (!failed)
@@ -211,10 +222,10 @@ static int sipclk_reset(struct reset_controller_dev *rcdev, unsigned long id)
 		pr_warn("tcc803x-sipclk: RESET_VPUBUS failed, cycling the gates instead\n");
 	}
 
-	for (i = 0; i < ARRAY_SIZE(gates); i++)
+	for (i = 0; i < n; i++)
 		sip_call(SIP_CLK_DISABLE_VPUBUS, gates[i], 0, 0);
 	udelay(10);
-	for (i = ARRAY_SIZE(gates) - 1; i >= 0; i--)
+	for (i = n - 1; i >= 0; i--)
 		sip_call(SIP_CLK_ENABLE_VPUBUS, gates[i], 0, 0);
 	return 0;
 }
@@ -242,6 +253,8 @@ static const struct {
 }, sipclk_vpubus[] = {
 	{ "sip_vpubus_coda_bus", TCC803X_SIPCLK_VPUBUS_CODA_BUS },
 	{ "sip_vpubus_coda_core", TCC803X_SIPCLK_VPUBUS_CODA_CORE },
+	{ "sip_vpubus_hevc_bus", TCC803X_SIPCLK_VPUBUS_HEVC_BUS },
+	{ "sip_vpubus_hevc_core", TCC803X_SIPCLK_VPUBUS_HEVC_CORE },
 };
 
 static int sipclk_register(struct device *dev, struct clk_hw_onecell_data *data,
@@ -322,7 +335,7 @@ static int sipclk_probe(struct platform_device *pdev)
 	rcdev->owner = THIS_MODULE;
 	rcdev->ops = &sipclk_reset_ops;
 	rcdev->of_node = dev->of_node;
-	rcdev->nr_resets = 1;
+	rcdev->nr_resets = ARRAY_SIZE(sipclk_reset_gates);
 	ret = devm_reset_controller_register(dev, rcdev);
 	if (ret)
 		return ret;
