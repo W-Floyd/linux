@@ -208,9 +208,10 @@ static void w4_set_dec_params(struct wave4_ctx *ctx, bool dec_pic)
 	w4_write(dev, W4_BS_RD_PTR, ctx->bs_rd);
 	w4_write(dev, W4_BS_WR_PTR, ctx->bs_wr);
 	w4_write(dev, W4_BS_OPTION, opt);
-	w4_write(dev, W4_ADDR_SEC_AXI, common + WAVE4_SEC_AXI_OFFSET);
-	w4_write(dev, W4_SEC_AXI_SIZE, WAVE4_SEC_AXI_SIZE);
-	w4_write(dev, W4_USE_SEC_AXI, W4_USE_SEC_AXI_ALL);
+	/* Secondary AXI off, as stock with SEC_AXI_BUS_DISABLE_SDRAM. */
+	w4_write(dev, W4_ADDR_SEC_AXI, 0);
+	w4_write(dev, W4_SEC_AXI_SIZE, 0);
+	w4_write(dev, W4_USE_SEC_AXI, 0);
 	w4_write(dev, W4_ADDR_WORK_BASE, ctx->work.daddr);
 	w4_write(dev, W4_WORK_SIZE, ctx->work.size);
 	w4_write(dev, W4_WORK_PARAM, 0);
