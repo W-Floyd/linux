@@ -473,6 +473,14 @@ static int wave4_start_streaming(struct vb2_queue *q, unsigned int count)
 	return ret;
 }
 
+/* Return the OUTPUT buffer whose bitstream was being decoded (wave4_feed()). */
+static void wave4_release_src(struct wave4_ctx *ctx, enum vb2_buffer_state state)
+{
+	if (ctx->src_held)
+		v4l2_m2m_buf_done(ctx->src_held, state);
+	ctx->src_held = NULL;
+}
+
 static void wave4_stop_streaming(struct vb2_queue *q)
 {
 	struct wave4_ctx *ctx = vb2_get_drv_priv(q);
@@ -480,6 +488,7 @@ static void wave4_stop_streaming(struct vb2_queue *q)
 
 	if (V4L2_TYPE_IS_OUTPUT(q->type)) {
 		wave4_return_bufs(ctx, true, VB2_BUF_STATE_ERROR);
+		wave4_release_src(ctx, VB2_BUF_STATE_ERROR);
 		/* A seek: drop the leftover; the firmware resyncs on an IRAP. */
 		ctx->bs_pending = false;
 	} else {
@@ -564,7 +573,10 @@ static u64 wave4_ts_pop(struct wave4_ctx *ctx)
 }
 
 /*
- * Copy the next OUTPUT buffer into the bitstream buffer and return it.
+ * Copy the next OUTPUT buffer into the bitstream buffer. The buffer itself
+ * is held until its data is consumed: with OUTPUT drained and CAPTURE not
+ * streaming yet, poll() reports an error, and GStreamer, which waits for
+ * the source change in poll() after dequeuing its header buffer, gives up.
  *
  * The firmware finishes a picture only when the next DEC_PIC shows it the
  * start of the following one (or the stream end), and it still reads the
@@ -581,8 +593,9 @@ static bool wave4_feed(struct wave4_ctx *ctx)
 
 	if (!src)
 		return false;
+	wave4_release_src(ctx, VB2_BUF_STATE_DONE);
 
-	len = vb2_get_plane_payload(&src->vb2_buf, 0);
+	len =vb2_get_plane_payload(&src->vb2_buf, 0);
 	va = vb2_plane_vaddr(&src->vb2_buf, 0);
 	if (!va || !len || len > ctx->bs_half) {
 		v4l2_m2m_buf_done(src, VB2_BUF_STATE_ERROR);
@@ -595,7 +608,7 @@ static bool wave4_feed(struct wave4_ctx *ctx)
 	ctx->bs_wr = ctx->bs_rd + len;
 	ctx->bs_pending = true;
 	wave4_ts_push(ctx, src->vb2_buf.timestamp);
-	v4l2_m2m_buf_done(src, VB2_BUF_STATE_DONE);
+	ctx->src_held = src;
 	return true;
 }
 
@@ -615,6 +628,7 @@ static void wave4_run_init_seq(struct wave4_ctx *ctx)
 		/* No usable header here: drop it and wait for the next buffer. */
 		ctx->bs_pending = false;
 		ctx->ts_count = 0;
+		wave4_release_src(ctx, VB2_BUF_STATE_DONE);
 		if (m2m->is_draining && !v4l2_m2m_num_src_bufs_ready(m2m))
 			wave4_finish_drain(ctx);
 		return;
@@ -708,6 +722,8 @@ static void wave4_run_decode(struct wave4_ctx *ctx)
 		ctx->need_fb = true;
 
 	ctx->bs_pending = !ctx->eos && ctx->bs_rd < ctx->bs_wr;
+	if (!ctx->bs_pending)
+		wave4_release_src(ctx, VB2_BUF_STATE_DONE);
 
 	if (res.disp_idx >= 0 && res.disp_idx < ctx->num_fbs) {
 		dst = v4l2_m2m_dst_buf_remove_by_idx(m2m, res.disp_idx);

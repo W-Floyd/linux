@@ -111,6 +111,7 @@ struct wave4_ctx {
 	bool bs_upper;		/* the next buffer goes to the upper half */
 	u32 bs_rd, bs_wr;
 	bool bs_pending;	/* bitstream left over from the last job */
+	struct vb2_v4l2_buffer *src_held;	/* OUTPUT buffer of that bitstream */
 	bool eos;		/* stream end flagged to the firmware */
 	bool need_fb;		/* last DEC_PIC found no free frame buffer */
 
