@@ -82,6 +82,7 @@ struct wave4_dpb_buf {
 	void *vaddr;
 	dma_addr_t daddr;
 	size_t size;
+	bool pages;	/* from the page allocator, streaming-mapped */
 };
 
 enum wave4_state {

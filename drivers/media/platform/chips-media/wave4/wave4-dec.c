@@ -36,15 +36,41 @@ static void wave4_dpb_free(struct wave4_dev *dev, struct wave4_dpb_buf *b)
 {
 	if (!b->size)
 		return;
-	dma_free_attrs(dev->dev, b->size, b->vaddr, b->daddr,
-		       DMA_ATTR_NO_KERNEL_MAPPING);
+	if (b->pages) {
+		dma_unmap_single(dev->dev, b->daddr, b->size, DMA_BIDIRECTIONAL);
+		free_pages_exact(b->vaddr, b->size);
+	} else {
+		dma_free_attrs(dev->dev, b->size, b->vaddr, b->daddr,
+			       DMA_ATTR_NO_KERNEL_MAPPING);
+	}
 	memset(b, 0, sizeof(*b));
 }
 
+/*
+ * Zeroed memory only the VPU touches. On 32-bit ARM dma_alloc_attrs() takes
+ * every buffer from the CMA area, which the display and the CODA decoder
+ * share and which two instances' frames would exhaust; so take it from the
+ * page allocator where it can be had in one piece, and from CMA otherwise.
+ */
 static int wave4_dpb_alloc(struct wave4_dev *dev, struct wave4_dpb_buf *b,
 			   size_t size)
 {
 	b->size = PAGE_ALIGN(size);
+	if (get_order(b->size) <= MAX_PAGE_ORDER) {
+		b->vaddr = alloc_pages_exact(b->size, GFP_KERNEL | __GFP_ZERO |
+					     __GFP_NOWARN);
+		if (b->vaddr) {
+			/* Writes the zeroes back: no dirty line is left over it. */
+			b->daddr = dma_map_single(dev->dev, b->vaddr, b->size,
+						  DMA_BIDIRECTIONAL);
+			if (!dma_mapping_error(dev->dev, b->daddr)) {
+				b->pages = true;
+				return 0;
+			}
+			free_pages_exact(b->vaddr, b->size);
+		}
+	}
+
 	b->vaddr = dma_alloc_attrs(dev->dev, b->size, &b->daddr, GFP_KERNEL,
 				   DMA_ATTR_NO_KERNEL_MAPPING);
 	if (!b->vaddr) {
@@ -815,7 +841,7 @@ static int wave4_open(struct file *file)
 		goto err_free;
 	}
 
-	ret = wave4_coherent_alloc(dev, &ctx->work, WAVE4_WORK_SIZE);
+	ret = wave4_dpb_alloc(dev, &ctx->work, WAVE4_WORK_SIZE);
 	if (ret)
 		goto err_ida;
 
@@ -858,7 +884,7 @@ err_ctrls:
 	v4l2_fh_exit(&ctx->fh);
 	wave4_hw_fini_seq(ctx);
 err_work:
-	wave4_coherent_free(dev, &ctx->work);
+	wave4_dpb_free(dev, &ctx->work);
 err_ida:
 	ida_free(&dev->inst_ida, ctx->id);
 err_free:
@@ -879,7 +905,7 @@ static int wave4_release(struct file *file)
 	wave4_hw_fini_seq(ctx);
 	wave4_free_fbs(ctx);
 	wave4_coherent_free(dev, &ctx->bs);
-	wave4_coherent_free(dev, &ctx->work);
+	wave4_dpb_free(dev, &ctx->work);
 
 	v4l2_ctrl_handler_free(&ctx->ctrls);
 	v4l2_fh_del(&ctx->fh, file);
