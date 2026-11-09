@@ -414,7 +414,6 @@ static void wave4_buf_queue(struct vb2_buffer *vb)
 			return;
 		}
 		set_bit(vb->index, &ctx->disp_clr);
-		ctx->need_fb = false;
 	}
 	v4l2_m2m_buf_queue(m2m, vbuf);
 }
@@ -748,9 +747,9 @@ static void wave4_run_decode(struct wave4_ctx *ctx)
 	else if (res.dec_idx == -2 && ctx->ts_count > 1)
 		/* A skipped picture; with one queued it is still in progress. */
 		wave4_ts_pop(ctx);
-	else if (res.dec_idx == -1 && ctx->bs_rd == rd && res.disp_idx < 0)
-		/* Every free frame is held; draining needs one as well. */
-		ctx->need_fb = true;
+
+	/* Every free frame is held; draining needs one as well. */
+	ctx->need_fb = res.dec_idx == -1 && ctx->bs_rd == rd && res.disp_idx < 0;
 
 	ctx->bs_pending = !ctx->eos && ctx->bs_rd < ctx->bs_wr;
 	if (!ctx->bs_pending)
@@ -807,7 +806,13 @@ static int wave4_job_ready(void *priv)
 	case WAVE4_STATE_NEED_SEQ:
 		return have_src;
 	case WAVE4_STATE_DECODING:
-		if (v4l2_m2m_has_stopped(m2m) || ctx->need_fb ||
+		/*
+		 * After a DEC_PIC that found no free frame, wait for a CAPTURE
+		 * buffer queued since: its bit in disp_clr, which that DEC_PIC
+		 * consumed, so a QBUF racing with the job is not lost.
+		 */
+		if (v4l2_m2m_has_stopped(m2m) ||
+		    (ctx->need_fb && !READ_ONCE(ctx->disp_clr)) ||
 		    !v4l2_m2m_num_dst_bufs_ready(m2m))
 			return 0;
 		return have_src || m2m->is_draining;
