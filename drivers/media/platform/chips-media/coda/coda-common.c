@@ -3394,15 +3394,13 @@ err_v4l2_register:
 }
 
 /*
- * Reboot and kexec call .shutdown, not .remove. The BIT processor keeps running
- * after the driver is gone (nothing here gates the clocks off on the TCC803x),
- * and its code, work and frame buffers are memory the next kernel will use:
- * halt it and let its AXI bus go idle first, as coda_hw_reset() does before a
- * reset. Best effort: nothing waits for a job.
+ * The BIT processor keeps running after the driver is gone (nothing here gates
+ * the clocks off on the TCC803x), and its code, work and frame buffers are
+ * memory someone else gets next: halt it and let its AXI bus go idle first, as
+ * coda_hw_reset() does before a reset. Best effort: nothing waits for a job.
  */
-static void coda_shutdown(struct platform_device *pdev)
+static void coda_halt(struct coda_dev *dev)
 {
-	struct coda_dev *dev = platform_get_drvdata(pdev);
 	unsigned long timeout;
 
 	/* The firmware request is asynchronous: until it ran nothing is started. */
@@ -3430,6 +3428,12 @@ static void coda_shutdown(struct platform_device *pdev)
 	clk_disable_unprepare(dev->clk_per);
 }
 
+/* Reboot and kexec call .shutdown, not .remove. */
+static void coda_shutdown(struct platform_device *pdev)
+{
+	coda_halt(platform_get_drvdata(pdev));
+}
+
 static void coda_remove(struct platform_device *pdev)
 {
 	struct coda_dev *dev = platform_get_drvdata(pdev);
@@ -3444,6 +3448,8 @@ static void coda_remove(struct platform_device *pdev)
 	pm_runtime_disable(&pdev->dev);
 	v4l2_device_unregister(&dev->v4l2_dev);
 	destroy_workqueue(dev->workqueue);
+	/* The idle firmware keeps running: stop it before its buffers go. */
+	coda_halt(dev);
 	if (dev->iram.vaddr)
 		gen_pool_free(dev->iram_pool, (unsigned long)dev->iram.vaddr,
 			      dev->iram.size);
