@@ -65,11 +65,6 @@ int coda_debug;
 module_param(coda_debug, int, 0644);
 MODULE_PARM_DESC(coda_debug, "Debug level (0-2)");
 
-/* Experiments on the TCC803x firmware, read when a decoder starts: 1 bypasses the frame cache. */
-unsigned int coda_tcc_quirks;
-module_param(coda_tcc_quirks, uint, 0644);
-MODULE_PARM_DESC(coda_tcc_quirks, "TCC803x experiments (bit 0: bypass the frame cache, bit 2: no MAX_DEC_SIZE, bit 4: write the cache size as mainline does)");
-
 static int disable_tiling;
 module_param(disable_tiling, int, 0644);
 MODULE_PARM_DESC(disable_tiling, "Disable tiled frame buffers");
@@ -832,7 +827,8 @@ static int coda_s_fmt(struct coda_ctx *ctx, struct v4l2_format *f,
 		break;
 	case V4L2_PIX_FMT_NV12:
 		if (!disable_tiling && ctx->use_bit &&
-		    ctx->dev->devtype->product == CODA_960) {
+		    ctx->dev->devtype->product == CODA_960 &&
+		    !(ctx->dev->devtype->quirks & CODA_QUIRK_LINEAR_ONLY)) {
 			ctx->tiled_map_type = GDI_TILED_FRAME_MB_RASTER_MAP;
 			break;
 		}
@@ -2626,9 +2622,14 @@ static int coda_open(struct file *file)
 
 	if (dev->devtype->product == CODA_DX6)
 		max = CODADX6_MAX_INSTANCES - 1;
+	else if (dev->devtype->max_instances)
+		max = dev->devtype->max_instances - 1;
 	idx = ida_alloc_max(&dev->ida, max, GFP_KERNEL);
 	if (idx < 0) {
 		ret = idx;
+		/* idx goes to RUN_INDEX: past the cap it overruns firmware tables. */
+		if (ret == -ENOSPC && dev->devtype->max_instances)
+			ret = -EBUSY;
 		goto err_coda_max;
 	}
 
@@ -2795,9 +2796,7 @@ static const struct v4l2_file_operations coda_fops = {
 
 static int coda_hw_init(struct coda_dev *dev)
 {
-	u32 data;
-	u16 *p;
-	int i, ret;
+	int ret;
 
 	ret = clk_prepare_enable(dev->clk_per);
 	if (ret)
@@ -2808,6 +2807,30 @@ static int coda_hw_init(struct coda_dev *dev)
 		goto err_clk_ahb;
 
 	reset_control_reset(dev->rstc);
+
+	coda_hw_load(dev);
+	coda_write(dev, CODA_REG_RUN_ENABLE, CODA_REG_BIT_CODE_RUN);
+
+	clk_disable_unprepare(dev->clk_ahb);
+	clk_disable_unprepare(dev->clk_per);
+
+	return 0;
+
+err_clk_ahb:
+	clk_disable_unprepare(dev->clk_per);
+err_clk_per:
+	return ret;
+}
+
+/*
+ * Download the code and program the global registers, leaving the BIT
+ * processor stopped. Clocks on, block just reset.
+ */
+void coda_hw_load(struct coda_dev *dev)
+{
+	u32 data;
+	u16 *p;
+	int i;
 
 	/*
 	 * Copy the first CODA_ISRAM_SIZE in the internal SRAM.
@@ -2872,24 +2895,13 @@ static int coda_hw_init(struct coda_dev *dev)
 	coda_write(dev, CODA_INT_INTERRUPT_ENABLE,
 		      CODA_REG_BIT_INT_ENABLE);
 
-	/* Reset VPU and start processor */
+	/* Reset the BIT processor; the caller starts it */
 	data = coda_read(dev, CODA_REG_BIT_CODE_RESET);
 	data |= CODA_REG_RESET_ENABLE;
 	coda_write(dev, data, CODA_REG_BIT_CODE_RESET);
 	udelay(10);
 	data &= ~CODA_REG_RESET_ENABLE;
 	coda_write(dev, data, CODA_REG_BIT_CODE_RESET);
-	coda_write(dev, CODA_REG_RUN_ENABLE, CODA_REG_BIT_CODE_RUN);
-
-	clk_disable_unprepare(dev->clk_ahb);
-	clk_disable_unprepare(dev->clk_per);
-
-	return 0;
-
-err_clk_ahb:
-	clk_disable_unprepare(dev->clk_per);
-err_clk_per:
-	return ret;
 }
 
 static int coda_register_device(struct coda_dev *dev, int i)
@@ -2978,58 +2990,15 @@ static void coda_copy_firmware(struct coda_dev *dev, const u8 * const buf,
 
 static void coda_fw_callback(const struct firmware *fw, void *context);
 
-/*
- * The vendor's VPU_Init picks one of three images from two registers: zero in
- * +0x1050 is bit_code_111, else +0x1054 equal to 0x013352ad is bit_code_319,
- * else bit_code_213. The images are extracted from the stock vpu_lib.ko by
- * their symbol names (msm-firmware-loader: vpu_lib.ko@bit_code_[0-9]*).
- */
-#define TCC803X_FW_ID0		0x1050
-#define TCC803X_FW_ID1		0x1054
-#define TCC803X_FW_ID1_319	0x013352ad
-
-/*
- * Read before the block's reset: the vendor's open path (vpu_mgr.c) does not
- * reset before using the block either (its vmgr_hw_reset() call is commented
- * out). coda_hw_init resets the block next.
- */
-static const char *coda_tcc803x_select_firmware(struct coda_dev *dev)
-{
-	u32 id0, id1;
-
-	if (clk_prepare_enable(dev->clk_per))
-		return NULL;
-	if (clk_prepare_enable(dev->clk_ahb)) {
-		clk_disable_unprepare(dev->clk_per);
-		return NULL;
-	}
-	id0 = readl(dev->regs_base + TCC803X_FW_ID0);
-	id1 = readl(dev->regs_base + TCC803X_FW_ID1);
-	clk_disable_unprepare(dev->clk_ahb);
-	clk_disable_unprepare(dev->clk_per);
-
-	dev_info(dev->dev, "firmware select registers %#x %#x\n", id0, id1);
-	if (!id0)
-		return "vpu/tcc803x/bit_code_111";
-	if (id1 == TCC803X_FW_ID1_319)
-		return "vpu/tcc803x/bit_code_319";
-	return "vpu/tcc803x/bit_code_213";
-}
-
 static int coda_firmware_request(struct coda_dev *dev)
 {
-	const char *fw = NULL;
+	char *fw;
 
-	if (dev->fw_selecting)
-		fw = dev->devtype->select_firmware(dev);
-	if (!fw) {
-		dev->fw_selecting = false;
-		if (dev->firmware >= ARRAY_SIZE(dev->devtype->firmware))
-			return -EINVAL;
-		fw = dev->devtype->firmware[dev->firmware];
-	}
+	if (dev->firmware >= ARRAY_SIZE(dev->devtype->firmware))
+		return -EINVAL;
 
-	dev->fw_name = fw;
+	fw = dev->devtype->firmware[dev->firmware];
+
 	dev_dbg(dev->dev, "requesting firmware '%s' for %s\n", fw,
 		coda_product_name(dev->devtype->product));
 
@@ -3043,10 +3012,7 @@ static void coda_fw_callback(const struct firmware *fw, void *context)
 	int i, ret;
 
 	if (!fw) {
-		if (dev->fw_selecting)
-			dev->fw_selecting = false;
-		else
-			dev->firmware++;
+		dev->firmware++;
 		ret = coda_firmware_request(dev);
 		if (ret < 0) {
 			v4l2_err(&dev->v4l2_dev, "firmware request failed\n");
@@ -3062,8 +3028,6 @@ static void coda_fw_callback(const struct firmware *fw, void *context)
 		 */
 		dev_info(dev->dev, "Using fallback firmware %s\n",
 			 dev->devtype->firmware[dev->firmware]);
-	} else if (dev->devtype->select_firmware) {
-		dev_info(dev->dev, "Using firmware %s\n", dev->fw_name);
 	}
 
 	/* allocate auxiliary per-device code buffer for the BIT processor */
@@ -3198,13 +3162,16 @@ static const struct coda_devtype coda_devdata[] = {
 	},
 	[CODA_TCC803X] = {
 		/*
-		 * The vendor's own build, with the 16-byte "MX" header: the image
-		 * the hardware selects first, these as a fallback (bit_code_319).
+		 * The vendor's own build (bit_code_319 from vpu_lib.ko) with the
+		 * 16-byte "MX" header. The vendor's VPU_Init picks one of three
+		 * images from VPU +0x1050/+0x1054 (zero: 111; +0x1054 0x013352ad:
+		 * 319; else 213); the Kia unit's 803x reads 319, unverified on
+		 * other 803x parts. A part needing 111 or 213 gets its own
+		 * compatible.
 		 */
-		.select_firmware = coda_tcc803x_select_firmware,
 		.firmware     = {
+			"vpu/tcc803x/bit_code_319",
 			"vpu_fw_tcc803x.bin",
-			"vpu/vpu_fw_tcc803x.bin",
 			"v4l-coda960-tcc803x.bin"
 		},
 		.product      = CODA_960,
@@ -3217,6 +3184,17 @@ static const struct coda_devtype coda_devdata[] = {
 		.workbuf_size = 80 * 1024,
 		.tempbuf_size = 204 * 1024,
 		/* No on-chip SRAM is described for it: no iram_size, no pool. */
+		/* The vendor library's MAX_NUM_INSTANCE. */
+		.max_instances = 4,
+		/*
+		 * The vendor library offers linear/interleaved frames only. Its
+		 * reset is a VPU bus gate cycle (sipclk), which loses the code
+		 * and the global registers.
+		 */
+		.quirks       = CODA_QUIRK_FRAME_CACHE_BYPASS |
+				CODA_QUIRK_LINEAR_ONLY |
+				CODA_QUIRK_SLEEP_WAIT |
+				CODA_QUIRK_RESET_RELOAD,
 	},
 };
 
@@ -3378,7 +3356,6 @@ static int coda_probe(struct platform_device *pdev)
 	pm_runtime_set_active(&pdev->dev);
 	pm_runtime_enable(&pdev->dev);
 
-	dev->fw_selecting = !!dev->devtype->select_firmware;
 	ret = coda_firmware_request(dev);
 	if (ret)
 		goto err_alloc_workqueue;

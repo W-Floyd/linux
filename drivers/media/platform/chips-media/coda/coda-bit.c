@@ -9,6 +9,8 @@
  */
 
 #include <linux/clk.h>
+#include <linux/delay.h>
+#include <linux/iopoll.h>
 #include <linux/irqreturn.h>
 #include <linux/kernel.h>
 #include <linux/log2.h>
@@ -53,6 +55,12 @@ static inline unsigned long coda_isbusy(struct coda_dev *dev)
 static int coda_wait_timeout(struct coda_dev *dev)
 {
 	unsigned long timeout = jiffies + msecs_to_jiffies(1000);
+	unsigned long busy;
+
+	/* Sleeps: callers hold coda_mutex or run from the firmware callback. */
+	if (dev->devtype->quirks & CODA_QUIRK_SLEEP_WAIT)
+		return read_poll_timeout(coda_isbusy, busy, !busy, 100,
+					 1000 * USEC_PER_MSEC, false, dev);
 
 	while (coda_isbusy(dev)) {
 		if (time_after(jiffies, timeout))
@@ -108,6 +116,8 @@ static int coda_command_sync(struct coda_ctx *ctx, int cmd)
 	return ret;
 }
 
+static void coda_kfifo_sync_to_device_full(struct coda_ctx *ctx);
+
 int coda_hw_reset(struct coda_ctx *ctx)
 {
 	struct coda_dev *dev = ctx->dev;
@@ -135,6 +145,22 @@ int coda_hw_reset(struct coda_ctx *ctx)
 	ret = reset_control_reset(dev->rstc);
 	if (ret < 0)
 		return ret;
+	usleep_range(1000, 2000);
+
+	if (dev->devtype->quirks & CODA_QUIRK_RESET_RELOAD) {
+		coda_hw_load(dev);
+		/*
+		 * coda_hw_load() re-zeroes the per-instance read/write
+		 * pointer registers along with the global ones; without this
+		 * ctx's next PIC_RUN would read its bitstream from offset 0
+		 * instead of wherever its kfifo actually is. Every *other*
+		 * open instance is still left with a stale hardware pointer
+		 * here — this driver has no list of open contexts to walk and
+		 * fix up the rest, so they're not recovered by this path.
+		 * Unverified on hardware.
+		 */
+		coda_kfifo_sync_to_device_full(ctx);
+	}
 
 	if (dev->devtype->product == CODA_960)
 		coda_write(dev, 0x00, CODA9_GDI_BUS_CTRL);
@@ -1017,7 +1043,7 @@ static void coda9_set_frame_cache(struct coda_ctx *ctx, u32 fourcc)
 	 * set and never the cache size. With the size written, predicted
 	 * chroma rows 1-7 of each macroblock repeat row 0.
 	 */
-	if (ctx->dev->devtype->fw_product && !(coda_tcc_quirks & 16)) {
+	if (ctx->dev->devtype->quirks & CODA_QUIRK_FRAME_CACHE_BYPASS) {
 		coda_write(ctx->dev, 1 << CODA9_CACHE_BYPASS_OFFSET,
 			   CODA9_CMD_SET_FRAME_CACHE_CONFIG);
 		return;
@@ -1041,8 +1067,6 @@ static void coda9_set_frame_cache(struct coda_ctx *ctx, u32 fourcc)
 				8 << CODA9_CACHE_CR_BUFFER_SIZE_OFFSET |
 				8 << CODA9_CACHE_CB_BUFFER_SIZE_OFFSET;
 	}
-	if (coda_tcc_quirks & 1)
-		cache_config |= 1 << CODA9_CACHE_BYPASS_OFFSET;
 	coda_write(ctx->dev, cache_config, CODA9_CMD_SET_FRAME_CACHE_CONFIG);
 }
 
@@ -2144,7 +2168,7 @@ static int __coda_start_decoding(struct coda_ctx *ctx)
 
 		coda_write(dev, max_mb_num << 16 | max_mb_x << 8 | max_mb_y,
 				CODA7_CMD_SET_FRAME_MAX_DEC_SIZE);
-	} else if (dev->devtype->product == CODA_960 && !(coda_tcc_quirks & 4)) {
+	} else if (dev->devtype->product == CODA_960) {
 		int max_mb_x = 1920 / 16;
 		int max_mb_y = 1088 / 16;
 		int max_mb_num = max_mb_x * max_mb_y;

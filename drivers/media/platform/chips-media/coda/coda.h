@@ -11,6 +11,7 @@
 #ifndef __CODA_H__
 #define __CODA_H__
 
+#include <linux/bits.h>
 #include <linux/debugfs.h>
 #include <linux/idr.h>
 #include <linux/irqreturn.h>
@@ -56,10 +57,17 @@ enum coda_product {
 struct coda_video_device;
 struct coda_dev;
 
+/* Frame cache: write only the bypass bit, never the cache size (vendor sequence). */
+#define CODA_QUIRK_FRAME_CACHE_BYPASS	BIT(0)
+/* No tiled frame map: NV12 is always linear. */
+#define CODA_QUIRK_LINEAR_ONLY		BIT(1)
+/* Wait for BIT_BUSY by sleeping instead of spinning. */
+#define CODA_QUIRK_SLEEP_WAIT		BIT(2)
+/* The reset loses code and registers: reload them after it. */
+#define CODA_QUIRK_RESET_RELOAD		BIT(3)
+
 struct coda_devtype {
 	char			*firmware[3];
-	/* Names the firmware the hardware asks for, tried before firmware[]; NULL: none. */
-	const char		*(*select_firmware)(struct coda_dev *dev);
 	enum coda_product	product;
 	/* The product word a vendor build of the firmware reports, if not product. */
 	u16			fw_product;
@@ -70,6 +78,9 @@ struct coda_devtype {
 	size_t			workbuf_size;
 	size_t			tempbuf_size;
 	size_t			iram_size;
+	/* Instances the firmware has tables for; 0: no cap beyond the product's. */
+	unsigned int		max_instances;
+	u32			quirks;
 };
 
 struct coda_aux_buf {
@@ -86,8 +97,6 @@ struct coda_dev {
 	struct device		*dev;
 	const struct coda_devtype *devtype;
 	int			firmware;
-	bool			fw_selecting;
-	const char		*fw_name;
 	struct vdoa_data	*vdoa;
 
 	void __iomem		*regs_base;
@@ -301,7 +310,6 @@ struct coda_ctx {
 };
 
 extern int coda_debug;
-extern unsigned int coda_tcc_quirks;
 
 #define coda_dbg(level, ctx, fmt, arg...)				\
 	do {								\
@@ -325,6 +333,7 @@ int coda_decoder_queue_init(void *priv, struct vb2_queue *src_vq,
 			    struct vb2_queue *dst_vq);
 
 int coda_hw_reset(struct coda_ctx *ctx);
+void coda_hw_load(struct coda_dev *dev);
 
 void coda_fill_bitstream(struct coda_ctx *ctx, struct list_head *buffer_list);
 
