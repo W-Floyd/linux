@@ -193,6 +193,8 @@
  * The stock HAL speaks a binary protocol on it ("hippo"), not NMEA.
  */
 &uart3 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart3_grp>;
 	status = "okay";
 };
 
@@ -225,6 +227,8 @@
 
 /* The link to the micom, which resets the SoC unless userspace answers it. */
 &uart2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart2_grp>;
 	status = "okay";
 };
 

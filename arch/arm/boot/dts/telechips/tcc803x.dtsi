@@ -546,8 +546,8 @@
 
 		/*
 		 * The micom link (vendor /dev/ttyTCC2): vendor mobis/tcc803x.dtsi
-		 * :1422-1429. No pinctrl: the driver's group table only has uart0, and
-		 * the vendor's mux (gpc-8/-9, function 7) is left as Android set it.
+		 * :1422-1429. Pads: uart2_grp (gpc-8/-9, function 7), claimed by the
+		 * board.
 		 */
 		uart2: serial@16620000 {
 			compatible = "arm,pl011", "arm,primecell";
@@ -561,10 +561,9 @@
 
 		/*
 		 * The GNSS link (vendor /dev/ttyTCC3, ttyGPS0 to the HAL): vendor
-		 * mobis/tcc803x.dtsi:1431-1438, SPI 91. No pinctrl, as for uart1/2:
-		 * the vendor's mux (gpa-18/-19, function 7: uart8_data, board
-		 * tcc8031-android-avn.dtsi:1001) is left as Android set it. The vendor
-		 * board's UDMA channels are not used.
+		 * mobis/tcc803x.dtsi:1431-1438, SPI 91. Pads: uart3_grp (gpa-18/-19,
+		 * function 7: uart8_data, board tcc8031-android-avn.dtsi:1001),
+		 * claimed by the board. The vendor board's UDMA channels are not used.
 		 */
 		uart3: serial@16630000 {
 			compatible = "arm,pl011", "arm,primecell";
@@ -611,6 +610,18 @@
 			/* uart1 data and RTS/CTS, the Bluetooth HCI on the AVN boards. */
 			uart1_grp: uart1-grp {
 				telechips,pins = "gpc-16", "gpc-17", "gpc-18", "gpc-19";
+				telechips,pin-function = <7>;
+			};
+
+			/* uart2 data, the micom link. */
+			uart2_grp: uart2-grp {
+				telechips,pins = "gpc-8", "gpc-9";
+				telechips,pin-function = <7>;
+			};
+
+			/* uart3 data, the GNSS link (vendor uart8_data). */
+			uart3_grp: uart3-grp {
+				telechips,pins = "gpa-18", "gpa-19";
 				telechips,pin-function = <7>;
 			};
 

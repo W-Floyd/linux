@@ -116,6 +116,18 @@ static unsigned int tcc803x_uart0_pins[2];
 static unsigned int tcc803x_uart1_pins[4];
 
 /*
+ * uart2 (micom link): gpc-8 TX, gpc-9 RX, function 7. uart3 (GNSS, vendor
+ * uart8_data, board tcc8031-android-avn.dtsi:1001): gpa-18 TX, gpa-19 RX,
+ * function 7. The vendor LK board table (AVNT5W_TCC803XKK_bootloadernew/
+ * target/tcc803x_android_widepe/gpio.c:53-54,106-107, WIDE_PE_BOARD branch)
+ * sets the same functions with pull disabled on all four; this driver has no
+ * pinconf, so the pull is left as reset/stock has it. Its gpa-19 note says
+ * "Pull-up needed", presumably external: unverified.
+ */
+static unsigned int tcc803x_uart2_pins[2];
+static unsigned int tcc803x_uart3_pins[2];
+
+/*
  * Audio pads, function values from the vendor board pinctrl (the active
  * branch, past the "#if 0" copies): arch/arm/boot/dts/mobis/
  * tcc8031-pinctrl.dtsi:2093-2230.
@@ -131,6 +143,8 @@ static unsigned int tcc803x_spdif2_tx_pins[1];
 
 static const char * const tcc803x_uart0_groups[] = { "uart0-grp" };
 static const char * const tcc803x_uart1_groups[] = { "uart1-grp" };
+static const char * const tcc803x_uart2_groups[] = { "uart2-grp" };
+static const char * const tcc803x_uart3_groups[] = { "uart3-grp" };
 static const char * const tcc803x_i2s0_groups[] = { "i2s0-grp" };
 static const char * const tcc803x_i2s3_groups[] = { "i2s3-grp" };
 static const char * const tcc803x_spdif2_tx_groups[] = { "spdif2-tx-grp" };
@@ -161,6 +175,20 @@ static struct tcc803x_group tcc803x_groups[] = {
 		.func_val = 7,
 	},
 	{
+		.name = "uart2-grp",
+		.function = "uart2",
+		.pins = tcc803x_uart2_pins,
+		.npins = ARRAY_SIZE(tcc803x_uart2_pins),
+		.func_val = 7,
+	},
+	{
+		.name = "uart3-grp",
+		.function = "uart3",
+		.pins = tcc803x_uart3_pins,
+		.npins = ARRAY_SIZE(tcc803x_uart3_pins),
+		.func_val = 7,
+	},
+	{
 		.name = "i2s0-grp",
 		.function = "i2s0",
 		.pins = tcc803x_i2s0_pins,
@@ -188,6 +216,10 @@ static const struct pinfunction tcc803x_functions[] = {
 			     ARRAY_SIZE(tcc803x_uart0_groups)),
 	PINCTRL_PINFUNCTION("uart1", tcc803x_uart1_groups,
 			     ARRAY_SIZE(tcc803x_uart1_groups)),
+	PINCTRL_PINFUNCTION("uart2", tcc803x_uart2_groups,
+			     ARRAY_SIZE(tcc803x_uart2_groups)),
+	PINCTRL_PINFUNCTION("uart3", tcc803x_uart3_groups,
+			     ARRAY_SIZE(tcc803x_uart3_groups)),
 	PINCTRL_PINFUNCTION("i2s0", tcc803x_i2s0_groups,
 			     ARRAY_SIZE(tcc803x_i2s0_groups)),
 	PINCTRL_PINFUNCTION("i2s3", tcc803x_i2s3_groups,
@@ -521,9 +553,13 @@ static int tcc803x_build_pins(struct tcc803x_pinctrl *pctl)
 	tcc803x_uart0_pins[0] = tcc803x_banks[7].pin_base + 11;
 	tcc803x_uart0_pins[1] = tcc803x_banks[7].pin_base + 12;
 
-	/* gpc is tcc803x_banks[2], gpe tcc803x_banks[4]. */
+	/* gpa is tcc803x_banks[0], gpc tcc803x_banks[2], gpe tcc803x_banks[4]. */
 	for (i = 0; i < ARRAY_SIZE(tcc803x_uart1_pins); i++)
 		tcc803x_uart1_pins[i] = tcc803x_banks[2].pin_base + 16 + i;
+	for (i = 0; i < ARRAY_SIZE(tcc803x_uart2_pins); i++)
+		tcc803x_uart2_pins[i] = tcc803x_banks[2].pin_base + 8 + i;
+	for (i = 0; i < ARRAY_SIZE(tcc803x_uart3_pins); i++)
+		tcc803x_uart3_pins[i] = tcc803x_banks[0].pin_base + 18 + i;
 	for (i = 0; i < ARRAY_SIZE(tcc803x_i2s0_pins); i++)
 		tcc803x_i2s0_pins[i] = tcc803x_banks[2].pin_base +
 				       tcc803x_i2s0_local[i];
