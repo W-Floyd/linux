@@ -13,44 +13,69 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
+#include <linux/slab.h>
 
 #include "wave4.h"
 
-#define WAVE4_DEFAULT_FW	"vpu/tcc803x/hevc_bit_code"
+#define WAVE4_FW	"vpu/tcc803x/hevc_bit_code"
 
-static int wave4_boot(struct wave4_dev *dev)
+/* Kept until the device is released: a firmware restart loads it again. */
+static int wave4_load_firmware(struct wave4_dev *dev)
 {
-	const struct firmware *fw;
-	const char *name = WAVE4_DEFAULT_FW;
 	int ret;
 
-	of_property_read_string(dev->dev->of_node, "firmware-name", &name);
-	ret = request_firmware(&fw, name, dev->dev);
+	ret = request_firmware(&dev->fw, WAVE4_FW, dev->dev);
 	if (ret)
-		return dev_err_probe(dev->dev, ret, "firmware %s\n", name);
+		return dev_err_probe(dev->dev, ret, "firmware %s\n", WAVE4_FW);
 
-	if (!fw->size || fw->size > WAVE4_CODE_SIZE || fw->size & 1) {
-		dev_err(dev->dev, "firmware %s: bad size %zu\n", name, fw->size);
-		ret = -EINVAL;
-		goto out;
+	if (!dev->fw->size || dev->fw->size > WAVE4_CODE_SIZE ||
+	    dev->fw->size & 1) {
+		dev_err(dev->dev, "firmware %s: bad size %zu\n", WAVE4_FW,
+			dev->fw->size);
+		release_firmware(dev->fw);
+		dev->fw = NULL;
+		return -EINVAL;
 	}
+	return 0;
+}
 
+/* Reset and boot: at probe, and from w4_recover(). */
+int wave4_restart(struct wave4_dev *dev)
+{
+	int ret;
+
+	lockdep_assert_held(&dev->hw_lock);
 	/* The block must start cold: a boot over a running VCPU fails on CODA. */
 	ret = reset_control_reset(dev->rst);
 	if (ret)
-		goto out;
+		return ret;
+	return wave4_hw_boot(dev, dev->fw->data, dev->fw->size);
+}
 
-	mutex_lock(&dev->hw_lock);
-	ret = wave4_hw_boot(dev, fw->data, fw->size);
-	mutex_unlock(&dev->hw_lock);
-	if (ret)
-		dev_err(dev->dev, "firmware boot failed: %d\n", ret);
-	else
-		dev_info(dev->dev, "firmware %s (%zu bytes) up, version %#x\n",
-			 name, fw->size, dev->fw_version);
-out:
-	release_firmware(fw);
-	return ret;
+/* The last reference: remove() has run and every file is closed. */
+static void wave4_v4l2_release(struct v4l2_device *v4l2_dev)
+{
+	struct wave4_dev *dev = container_of(v4l2_dev, struct wave4_dev,
+					     v4l2_dev);
+
+	if (dev->m2m_dev)
+		v4l2_m2m_release(dev->m2m_dev);
+	if (dev->wq)
+		destroy_workqueue(dev->wq);
+	release_firmware(dev->fw);
+	ida_destroy(&dev->inst_ida);
+	mutex_destroy(&dev->dev_lock);
+	mutex_destroy(&dev->hw_lock);
+	kfree(dev);
+}
+
+/* Registered first, so it runs after the rest of devres, irq included. */
+static void wave4_put(void *data)
+{
+	struct wave4_dev *dev = data;
+
+	v4l2_device_unregister(&dev->v4l2_dev);
+	v4l2_device_put(&dev->v4l2_dev);
 }
 
 static int wave4_probe(struct platform_device *pdev)
@@ -59,14 +84,25 @@ static int wave4_probe(struct platform_device *pdev)
 	struct wave4_dev *dev;
 	int ret;
 
-	dev = devm_kzalloc(d, sizeof(*dev), GFP_KERNEL);
+	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
 	if (!dev)
 		return -ENOMEM;
 	dev->dev = d;
 	mutex_init(&dev->hw_lock);
 	mutex_init(&dev->dev_lock);
+	spin_lock_init(&dev->irq_lock);
 	init_completion(&dev->cmd_done);
 	ida_init(&dev->inst_ida);
+
+	dev->v4l2_dev.release = wave4_v4l2_release;
+	ret = v4l2_device_register(d, &dev->v4l2_dev);
+	if (ret) {
+		wave4_v4l2_release(&dev->v4l2_dev);
+		return ret;
+	}
+	ret = devm_add_action_or_reset(d, wave4_put, dev);
+	if (ret)
+		return ret;
 	platform_set_drvdata(pdev, dev);
 
 	dev->base = devm_platform_ioremap_resource(pdev, 0);
@@ -77,7 +113,8 @@ static int wave4_probe(struct platform_device *pdev)
 	if (dev->num_clks < 0)
 		return dev_err_probe(d, dev->num_clks, "clocks\n");
 
-	dev->rst = devm_reset_control_get_optional_exclusive(d, NULL);
+	/* Required: a firmware restart starts from a reset. */
+	dev->rst = devm_reset_control_get_exclusive(d, NULL);
 	if (IS_ERR(dev->rst))
 		return dev_err_probe(d, PTR_ERR(dev->rst), "reset\n");
 
@@ -97,44 +134,52 @@ static int wave4_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	ret = wave4_boot(dev);
+	ret = wave4_load_firmware(dev);
 	if (ret)
 		return ret;
 
+	mutex_lock(&dev->hw_lock);
+	ret = wave4_restart(dev);
+	mutex_unlock(&dev->hw_lock);
+	if (ret) {
+		/* Leave it held in reset: devres is about to free the DMA
+		 * memory a half-booted VCPU could still be holding.
+		 */
+		wave4_hw_halt(dev);
+		return dev_err_probe(d, ret, "firmware boot\n");
+	}
+	dev_info(d, "firmware %s (%zu bytes) up, version %#x\n", WAVE4_FW,
+		 dev->fw->size, dev->fw_version);
+
+	/* Both freed by wave4_v4l2_release(). */
 	dev->wq = alloc_ordered_workqueue("wave4", 0);
 	if (!dev->wq) {
 		ret = -ENOMEM;
 		goto err_halt;
 	}
 
-	ret = v4l2_device_register(d, &dev->v4l2_dev);
-	if (ret)
-		goto err_wq;
-
 	ret = wave4_dec_register(dev);
 	if (ret)
-		goto err_v4l2;
+		goto err_halt;
 
 	return 0;
 
-err_v4l2:
-	v4l2_device_unregister(&dev->v4l2_dev);
-err_wq:
-	destroy_workqueue(dev->wq);
 err_halt:
 	wave4_hw_halt(dev);
 	return ret;
 }
 
+/*
+ * dev itself stays until the last file is closed (wave4_v4l2_release()).
+ * The halt waits for a command in progress and keeps every later one off
+ * the hardware, whose registers and clocks devres is about to drop.
+ */
 static void wave4_remove(struct platform_device *pdev)
 {
 	struct wave4_dev *dev = platform_get_drvdata(pdev);
 
 	wave4_dec_unregister(dev);
-	v4l2_device_unregister(&dev->v4l2_dev);
-	destroy_workqueue(dev->wq);
 	wave4_hw_halt(dev);
-	ida_destroy(&dev->inst_ida);
 }
 
 /* Stop the VCPU and its DMA before a kexec'd kernel owns the memory. */
@@ -160,6 +205,6 @@ static struct platform_driver wave4_driver = {
 };
 module_platform_driver(wave4_driver);
 
-MODULE_FIRMWARE(WAVE4_DEFAULT_FW);
+MODULE_FIRMWARE(WAVE4_FW);
 MODULE_DESCRIPTION("Chips&Media Wave410 HEVC decoder");
 MODULE_LICENSE("GPL");

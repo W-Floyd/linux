@@ -36,6 +36,7 @@ irqreturn_t wave4_irq(int irq, void *data)
 {
 	struct wave4_dev *dev = data;
 	u32 reason = w4_read(dev, W4_VPU_VINT_REASON_USR);
+	u32 usr;
 
 	if (!reason)
 		return IRQ_NONE;
@@ -43,18 +44,28 @@ irqreturn_t wave4_irq(int irq, void *data)
 	/* The vendor's order: reason clear, VINT clear, then the user bits. */
 	w4_write(dev, W4_VPU_VINT_REASON_CLR, reason);
 	w4_write(dev, W4_VPU_VINT_CLEAR, 1);
-	w4_write(dev, W4_VPU_VINT_REASON_USR,
-		 w4_read(dev, W4_VPU_VINT_REASON_USR) & ~0xffff);
+	/*
+	 * USR is cleared by read-modify-write, not write-one-to-clear: record
+	 * a completion bit the firmware set after the first read, or the write
+	 * clears it unseen.
+	 */
+	usr = w4_read(dev, W4_VPU_VINT_REASON_USR);
+	w4_write(dev, W4_VPU_VINT_REASON_USR, usr & ~0xffff);
+	reason |= usr & 0xffff;
 
+	spin_lock(&dev->irq_lock);
 	dev->irq_reason |= reason;
+	spin_unlock(&dev->irq_lock);
 	complete(&dev->cmd_done);
 	return IRQ_HANDLED;
 }
 
 static void w4_issue(struct wave4_dev *dev, u32 inst, u32 cmd)
 {
-	reinit_completion(&dev->cmd_done);
+	spin_lock_irq(&dev->irq_lock);
 	dev->irq_reason = 0;
+	reinit_completion(&dev->cmd_done);
+	spin_unlock_irq(&dev->irq_lock);
 
 	w4_write(dev, W4_VPU_BUSY_STATUS, 1);
 	w4_write(dev, W4_RET_SUCCESS, 0);
@@ -67,15 +78,20 @@ static void w4_issue(struct wave4_dev *dev, u32 inst, u32 cmd)
 
 static int w4_wait(struct wave4_dev *dev, u32 cmd)
 {
+	u32 reason;
+
 	if (!wait_for_completion_timeout(&dev->cmd_done,
 					 msecs_to_jiffies(WAVE4_CMD_TIMEOUT_MS))) {
 		dev_err(dev->dev, "command %#x timed out (pc %#x)\n", cmd,
 			w4_read(dev, W4_VCPU_CUR_PC));
 		return -ETIMEDOUT;
 	}
-	if (!(dev->irq_reason & cmd)) {
+	spin_lock_irq(&dev->irq_lock);
+	reason = dev->irq_reason;
+	spin_unlock_irq(&dev->irq_lock);
+	if (!(reason & cmd)) {
 		dev_err(dev->dev, "command %#x: interrupt reason %#x\n", cmd,
-			dev->irq_reason);
+			reason);
 		return -EIO;
 	}
 	return 0;
@@ -185,11 +201,80 @@ int wave4_hw_boot(struct wave4_dev *dev, const void *fw, size_t fw_size)
 	return 0;
 }
 
+/* No command after this one: remove() and shutdown() are on the way. */
 void wave4_hw_halt(struct wave4_dev *dev)
 {
 	mutex_lock(&dev->hw_lock);
-	w4_reset(dev);
+	if (!dev->gone)
+		w4_reset(dev);
+	dev->gone = true;
 	mutex_unlock(&dev->hw_lock);
+}
+
+/*
+ * Reset the block and boot the firmware again, as at probe. The vendor
+ * resets on a timeout too, but also cycles the clocks; unverified whether
+ * the reset alone frees a wedged VCPU. Every instance is lost with it: the
+ * bumped generation fails their later commands before any reaches the
+ * firmware.
+ */
+static void w4_recover(struct wave4_dev *dev)
+{
+	int ret;
+
+	lockdep_assert_held(&dev->hw_lock);
+	if (dev->gone)
+		return;
+	dev->generation++;
+	dev_warn(dev->dev, "restarting the firmware\n");
+	ret = wave4_restart(dev);
+	if (ret) {
+		/*
+		 * A failed restart leaves the state unknown: hold the block
+		 * in reset and stop issuing it commands, rather than let
+		 * every later command time out again against whatever it's
+		 * now in.
+		 */
+		dev_err(dev->dev, "firmware restart failed: %d, giving up on this block\n", ret);
+		w4_reset(dev);
+		dev->gone = true;
+	}
+}
+
+void wave4_hw_recover(struct wave4_dev *dev)
+{
+	mutex_lock(&dev->hw_lock);
+	w4_recover(dev);
+	mutex_unlock(&dev->hw_lock);
+}
+
+/* Takes hw_lock for a command on ctx's instance, unless that is gone. */
+static int w4_lock_ctx(struct wave4_ctx *ctx)
+{
+	struct wave4_dev *dev = ctx->dev;
+
+	mutex_lock(&dev->hw_lock);
+	if (dev->gone) {
+		mutex_unlock(&dev->hw_lock);
+		return -ENODEV;
+	}
+	if (ctx->generation != dev->generation) {
+		mutex_unlock(&dev->hw_lock);
+		return -ESTALE;
+	}
+	return 0;
+}
+
+/*
+ * A command that timed out may still be running: the VCPU state is unknown,
+ * and so is what the next command would do. Restart the firmware.
+ */
+static int w4_unlock(struct wave4_dev *dev, int ret)
+{
+	if (ret == -ETIMEDOUT)
+		w4_recover(dev);
+	mutex_unlock(&dev->hw_lock);
+	return ret;
 }
 
 /* What stock writes ahead of every INIT_SEQ and DEC_PIC. */
@@ -243,11 +328,16 @@ int wave4_hw_create_instance(struct wave4_ctx *ctx)
 	int ret;
 
 	mutex_lock(&dev->hw_lock);
+	if (dev->gone) {
+		mutex_unlock(&dev->hw_lock);
+		return -ENODEV;
+	}
 	w4_set_work(ctx);
 	ret = w4_cmd(dev, ctx->id, W4_CMD_CREATE_INSTANCE,
 		     W4_CMD_CREATE_INSTANCE);
-	mutex_unlock(&dev->hw_lock);
-	return ret;
+	if (!ret)
+		ctx->generation = dev->generation;
+	return w4_unlock(dev, ret);
 }
 
 static void w4_read_seq_info(struct wave4_ctx *ctx)
@@ -285,21 +375,23 @@ int wave4_hw_init_seq(struct wave4_ctx *ctx)
 	struct wave4_dev *dev = ctx->dev;
 	int ret;
 
-	mutex_lock(&dev->hw_lock);
+	ret = w4_lock_ctx(ctx);
+	if (ret)
+		return ret;
 	w4_set_dec_params(ctx, false);
 	w4_write(dev, W4_CMD_DEC_DISP_FLAG, 0);
 	w4_write(dev, W4_COMMAND_OPTION, W4_INIT_SEQ_OPTION_NORMAL);
 	w4_write(dev, W4_CMD_DEC_SKIP, 0);
 	ret = w4_cmd(dev, ctx->id, W4_CMD_INIT_SEQ, W4_CMD_INIT_SEQ);
-	ctx->bs_rd = w4_read(dev, W4_BS_RD_PTR);
+	if (ret != -ETIMEDOUT)
+		ctx->bs_rd = w4_read(dev, W4_BS_RD_PTR);
 	if (!ret)
 		w4_read_seq_info(ctx);
 	else if (ret == -EIO)
 		dev_dbg(dev->dev, "INIT_SEQ: reason %#x, error %#x\n",
 			w4_read(dev, W4_RET_FAIL_REASON),
 			w4_read(dev, W4_RET_DEC_ERR_INFO));
-	mutex_unlock(&dev->hw_lock);
-	return ret;
+	return w4_unlock(dev, ret);
 }
 
 /* One SET_FRAMEBUF per group of eight, START on the first, END on the last. */
@@ -374,7 +466,9 @@ int wave4_hw_set_framebufs(struct wave4_ctx *ctx, const dma_addr_t *linear_y,
 		fbc_cb[i] = ctx->fbc[i].daddr + luma;
 	}
 
-	mutex_lock(&dev->hw_lock);
+	ret = w4_lock_ctx(ctx);
+	if (ret)
+		return ret;
 	w4_write(dev, W4_PIC_SIZE, (s->width << 16) | s->height);
 	w4_write(dev, W4_COMMON_PIC_INFO,
 		 W4_PIC_INFO_LINEAR | W4_PIC_INFO_PIXEL_ORDER |
@@ -387,20 +481,23 @@ int wave4_hw_set_framebufs(struct wave4_ctx *ctx, const dma_addr_t *linear_y,
 	w4_write(dev, W4_COMMON_PIC_INFO, wave4_fbc_stride(s->width));
 	ret = w4_set_fb_group(ctx, false, fbc_y, fbc_cb);
 out:
-	mutex_unlock(&dev->hw_lock);
-	return ret;
+	return w4_unlock(dev, ret);
 }
 
 int wave4_hw_decode(struct wave4_ctx *ctx, struct wave4_dec_result *res)
 {
 	struct wave4_dev *dev = ctx->dev;
-	u32 val;
+	u32 val, flag;
 	int ret;
 
-	mutex_lock(&dev->hw_lock);
+	ret = w4_lock_ctx(ctx);
+	if (ret)
+		return ret;
 	w4_set_dec_params(ctx, true);
-	w4_write(dev, W4_CMD_DEC_DISP_FLAG,
-		 ctx->disp_flag & ~(u32)xchg(&ctx->disp_clr, 0));
+	flag = ctx->disp_flag & ~(u32)xchg(&ctx->disp_clr, 0);
+	/* Frames released stay so unless a successful DEC_PIC returns flags. */
+	ctx->disp_flag = flag;
+	w4_write(dev, W4_CMD_DEC_DISP_FLAG, flag);
 	w4_write(dev, W4_CMD_DEC_TEMPORAL_ID_PLUS1, W4_TEMPORAL_ID_ALL);
 	w4_write(dev, W4_CMD_SEQ_CHANGE_ENABLE_FLAG,
 		 W4_SEQ_CHANGE_ENABLE_ALL_HEVC);
@@ -413,7 +510,12 @@ int wave4_hw_decode(struct wave4_ctx *ctx, struct wave4_dec_result *res)
 		goto out;
 
 	res->success = w4_read(dev, W4_RET_SUCCESS);
-	res->fail_reason = res->success ? 0 : w4_read(dev, W4_RET_FAIL_REASON);
+	if (!res->success) {
+		/* Unverified which results are valid on failure: read none. */
+		res->fail_reason = w4_read(dev, W4_RET_FAIL_REASON);
+		res->err_info = w4_read(dev, W4_RET_DEC_ERR_INFO);
+		goto out;
+	}
 	res->pic_type = w4_read(dev, W4_RET_DEC_PIC_TYPE);
 	res->seq_changed = w4_read(dev, W4_RET_DEC_NOTIFICATION) & 0x7fffffff;
 	/* With linear frames registered the upper half is the linear index. */
@@ -424,8 +526,7 @@ int wave4_hw_decode(struct wave4_ctx *ctx, struct wave4_dec_result *res)
 	ctx->bs_rd = w4_read(dev, W4_BS_RD_PTR);
 	ctx->disp_flag = w4_read(dev, W4_CMD_DEC_DISP_FLAG);
 out:
-	mutex_unlock(&dev->hw_lock);
-	return ret;
+	return w4_unlock(dev, ret);
 }
 
 int wave4_hw_fini_seq(struct wave4_ctx *ctx)
@@ -433,9 +534,10 @@ int wave4_hw_fini_seq(struct wave4_ctx *ctx)
 	struct wave4_dev *dev = ctx->dev;
 	int ret;
 
-	mutex_lock(&dev->hw_lock);
+	ret = w4_lock_ctx(ctx);
+	if (ret)
+		return ret;
 	w4_set_work(ctx);
 	ret = w4_cmd(dev, ctx->id, W4_CMD_FINI_SEQ, W4_CMD_FINI_SEQ);
-	mutex_unlock(&dev->hw_lock);
-	return ret;
+	return w4_unlock(dev, ret);
 }

@@ -11,6 +11,7 @@
 #include <linux/mutex.h>
 #include <linux/reset.h>
 #include <linux/sizes.h>
+#include <linux/spinlock.h>
 #include <linux/workqueue.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
@@ -41,7 +42,16 @@
 #define WAVE4_MAX_HEIGHT	2176
 
 #define WAVE4_CMD_TIMEOUT_MS	500
+/* Consecutive failed DEC_PICs on one instance before the firmware restarts. */
+#define WAVE4_MAX_DEC_FAILS	3
 
+struct firmware;
+
+/*
+ * Freed from the v4l2_device release callback, not by devm: an open file
+ * can outlive remove(). Register access and devm memory are gone by then;
+ * the 'gone' flag keeps the remaining file operations off the hardware.
+ */
 struct wave4_dev {
 	struct device *dev;
 	void __iomem *base;
@@ -49,6 +59,7 @@ struct wave4_dev {
 	struct clk_bulk_data *clks;
 	int num_clks;
 	struct reset_control *rst;
+	const struct firmware *fw;	/* kept for a restart */
 
 	struct v4l2_device v4l2_dev;
 	struct video_device vfd;
@@ -58,7 +69,11 @@ struct wave4_dev {
 	/* One command at a time: the Wave410 has no command queue. */
 	struct mutex hw_lock;
 	struct completion cmd_done;
+	spinlock_t irq_lock;	/* irq_reason, against the handler */
 	u32 irq_reason;
+	/* Under hw_lock: bumped by each firmware restart, see ctx->generation. */
+	u32 generation;
+	bool gone;		/* under hw_lock: halted for remove or shutdown */
 
 	/* Serializes the vb2 queues and file operations. */
 	struct mutex dev_lock;
@@ -100,7 +115,12 @@ struct wave4_ctx {
 	struct work_struct run_work;
 
 	int id;
+	/* dev->generation at CREATE_INSTANCE; a restart since loses the instance. */
+	u32 generation;
 	enum wave4_state state;
+	bool abort;		/* job_abort() came before the worker ran the job */
+	bool closing;		/* release() started: no more jobs */
+	unsigned int dec_fails;	/* consecutive failed DEC_PICs */
 
 	struct v4l2_pix_format src_fmt;
 	struct v4l2_pix_format dst_fmt;
@@ -151,11 +171,16 @@ struct wave4_dec_result {
 	u32 seq_changed;
 	bool success;
 	u32 fail_reason;
+	u32 err_info;
 };
+
+/* wave4-drv.c */
+int wave4_restart(struct wave4_dev *dev);
 
 /* wave4-hw.c */
 int wave4_hw_boot(struct wave4_dev *dev, const void *fw, size_t fw_size);
 void wave4_hw_halt(struct wave4_dev *dev);
+void wave4_hw_recover(struct wave4_dev *dev);
 irqreturn_t wave4_irq(int irq, void *data);
 int wave4_hw_create_instance(struct wave4_ctx *ctx);
 int wave4_hw_init_seq(struct wave4_ctx *ctx);

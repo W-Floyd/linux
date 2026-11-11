@@ -183,7 +183,11 @@ static int wave4_enum_fmt_out(struct file *file, void *priv,
 	if (f->index)
 		return -EINVAL;
 	f->pixelformat = V4L2_PIX_FMT_HEVC;
-	f->flags = V4L2_FMT_FLAG_COMPRESSED | V4L2_FMT_FLAG_DYN_RESOLUTION;
+	/*
+	 * Not V4L2_FMT_FLAG_DYN_RESOLUTION: a mid-stream sequence change fails
+	 * the queues (wave4_run_decode()).
+	 */
+	f->flags = V4L2_FMT_FLAG_COMPRESSED;
 	return 0;
 }
 
@@ -287,6 +291,8 @@ static int wave4_selection(struct file *file, void *priv,
 	}
 }
 
+static void wave4_finish_drain(struct wave4_ctx *ctx);
+
 static int wave4_decoder_cmd(struct file *file, void *priv,
 			     struct v4l2_decoder_cmd *dc)
 {
@@ -299,19 +305,31 @@ static int wave4_decoder_cmd(struct file *file, void *priv,
 		return ret;
 
 	if (dc->cmd == V4L2_DEC_CMD_START) {
-		ctx->eos = false;
-		return v4l2_m2m_ioctl_decoder_cmd(file, priv, dc);
+		ret = v4l2_m2m_ioctl_decoder_cmd(file, priv, dc);
+		if (!ret)
+			ctx->eos = false;
+		return ret;
 	}
 
-	/* Without frames nothing is held back: the generic STOP will do. */
-	if (ctx->state == WAVE4_STATE_NEED_SEQ)
-		return v4l2_m2m_ioctl_decoder_cmd(file, priv, dc);
-
+	/*
+	 * Not v4l2_m2m_ioctl_decoder_cmd(): when it finds the OUTPUT queue
+	 * empty, which the worker can make it at any moment, it flags the next
+	 * CAPTURE buffer LAST at once, ahead of the frames the DPB still holds
+	 * and without the EOS event. Set the draining state it would, minus
+	 * that; the worker drains and ends in wave4_finish_drain().
+	 */
 	if (m2m->is_draining)
 		return -EBUSY;
-	if (m2m->has_stopped)
+	if (v4l2_m2m_has_stopped(m2m))
 		return 0;
 	m2m->is_draining = true;
+
+	/* No job runs then, and before a header no frame is held either. */
+	if (ctx->state == WAVE4_STATE_NEED_SEQ &&
+	    !vb2_is_streaming(v4l2_m2m_get_src_vq(m2m))) {
+		wave4_finish_drain(ctx);
+		return 0;
+	}
 	v4l2_m2m_try_schedule(m2m);
 	return 0;
 }
@@ -374,8 +392,8 @@ static int wave4_queue_setup(struct vb2_queue *q, unsigned int *nbufs,
 	} else {
 		size = ctx->dst_fmt.sizeimage;
 		if (ctx->state != WAVE4_STATE_NEED_SEQ)
-			*nbufs = clamp_t(unsigned int, *nbufs,
-					 ctx->seq.min_fbs, WAVE4_MAX_FBS);
+			*nbufs = max(*nbufs, ctx->seq.min_fbs);
+		/* DISP_FLAG has a bit per frame: no more than that. */
 		*nbufs = min_t(unsigned int, *nbufs, WAVE4_MAX_FBS);
 	}
 
@@ -524,14 +542,19 @@ static void wave4_stop_streaming(struct vb2_queue *q)
 	} else {
 		wave4_return_bufs(ctx, false, VB2_BUF_STATE_ERROR);
 		if (ctx->state != WAVE4_STATE_NEED_SEQ) {
-			/* Start over from the next sequence header. */
+			/*
+			 * Start over from the next sequence header. After a
+			 * firmware restart FINI_SEQ is skipped (-ESTALE) and
+			 * this makes a fresh instance.
+			 */
 			wave4_hw_fini_seq(ctx);
 			wave4_free_fbs(ctx);
-			wave4_hw_create_instance(ctx);
-			ctx->state = WAVE4_STATE_NEED_SEQ;
+			ctx->state = wave4_hw_create_instance(ctx) ?
+				     WAVE4_STATE_ERROR : WAVE4_STATE_NEED_SEQ;
 		}
 		ctx->eos = false;
 		ctx->ts_count = 0;
+		ctx->dec_fails = 0;
 	}
 
 	v4l2_m2m_update_stop_streaming_state(m2m, q);
@@ -642,18 +665,27 @@ static bool wave4_feed(struct wave4_ctx *ctx)
 	return true;
 }
 
-static void wave4_finish_drain(struct wave4_ctx *ctx);
-
 static void wave4_run_init_seq(struct wave4_ctx *ctx)
 {
 	struct v4l2_m2m_ctx *m2m = ctx->fh.m2m_ctx;
 	struct wave4_seq_info *seq = &ctx->seq;
 	int ret;
 
-	if (!ctx->bs_pending && !wave4_feed(ctx))
+	if (!ctx->bs_pending && !wave4_feed(ctx)) {
+		if (m2m->is_draining && !v4l2_m2m_num_src_bufs_ready(m2m))
+			wave4_finish_drain(ctx);
 		return;
+	}
 
 	ret = wave4_hw_init_seq(ctx);
+	if (ret && ret != -EIO) {
+		/* Timed out (firmware restarted), restarted before, or removed. */
+		ctx->state = WAVE4_STATE_ERROR;
+		ctx->bs_pending = false;
+		wave4_release_src(ctx, VB2_BUF_STATE_ERROR);
+		vb2_queue_error(v4l2_m2m_get_src_vq(m2m));
+		return;
+	}
 	if (ret) {
 		/* No usable header here: drop it and wait for the next buffer. */
 		ctx->bs_pending = false;
@@ -690,12 +722,20 @@ static void wave4_run_init_seq(struct wave4_ctx *ctx)
 	});
 }
 
+/* Every drain ends here (wave4_decoder_cmd()): the one place EOS is sent. */
 static void wave4_finish_drain(struct wave4_ctx *ctx)
 {
 	struct v4l2_m2m_ctx *m2m = ctx->fh.m2m_ctx;
 	struct vb2_v4l2_buffer *dst = v4l2_m2m_dst_buf_remove(m2m);
 
+	v4l2_event_queue_fh(&ctx->fh, &(struct v4l2_event){
+		.type = V4L2_EVENT_EOS });
 	if (!dst) {
+		/*
+		 * The core has no setter for this; as it does itself, leave the
+		 * LAST flag to the next CAPTURE buffer queued: wave4_buf_queue(),
+		 * or v4l2_m2m_qbuf() before CAPTURE streams.
+		 */
 		m2m->next_buf_last = true;
 		return;
 	}
@@ -703,8 +743,6 @@ static void wave4_finish_drain(struct wave4_ctx *ctx)
 	dst->field = V4L2_FIELD_NONE;
 	vb2_set_plane_payload(&dst->vb2_buf, 0, 0);
 	v4l2_m2m_last_buffer_done(m2m, dst);
-	v4l2_event_queue_fh(&ctx->fh, &(struct v4l2_event){
-		.type = V4L2_EVENT_EOS });
 }
 
 static void wave4_run_decode(struct wave4_ctx *ctx)
@@ -725,21 +763,44 @@ static void wave4_run_decode(struct wave4_ctx *ctx)
 
 	rd = ctx->bs_rd;
 	ret = wave4_hw_decode(ctx, &res);
-	if (ret) {
-		ctx->state = WAVE4_STATE_ERROR;
-		vb2_queue_error(v4l2_m2m_get_src_vq(m2m));
-		vb2_queue_error(v4l2_m2m_get_dst_vq(m2m));
-		return;
+	if (ret)
+		goto fail;
+
+	/*
+	 * No free frame (dec_idx -1) and a skipped picture (-2) are results,
+	 * not failures, in the Chips&Media API this firmware follows; unverified
+	 * on the unit, as is which fail reasons a good stream can see.
+	 */
+	if (!res.success) {
+		dev_warn_ratelimited(ctx->dev->dev,
+				     "DEC_PIC failed: reason %#x, error %#x\n",
+				     res.fail_reason, res.err_info);
+		if (ctx->eos) {
+			/* Nothing more to show. */
+			wave4_finish_drain(ctx);
+			return;
+		}
+		/* Drop the data, or every job decodes it again. */
+		ctx->bs_pending = false;
+		ctx->ts_count = 0;
+		wave4_release_src(ctx, VB2_BUF_STATE_ERROR);
+		if (++ctx->dec_fails < WAVE4_MAX_DEC_FAILS)
+			return;
+		/*
+		 * This is a per-instance firmware response, not a stuck
+		 * command: the VCPU is known to still be alive. Fail only
+		 * this context rather than resetting the whole block, which
+		 * would also kill every other instance's state.
+		 */
+		goto fail;
 	}
+	ctx->dec_fails = 0;
 
 	if (res.seq_changed) {
 		/* A mid-stream change needs new frames: not handled yet. */
 		dev_warn(ctx->dev->dev, "sequence change %#x not supported\n",
 			 res.seq_changed);
-		ctx->state = WAVE4_STATE_ERROR;
-		vb2_queue_error(v4l2_m2m_get_src_vq(m2m));
-		vb2_queue_error(v4l2_m2m_get_dst_vq(m2m));
-		return;
+		goto fail;
 	}
 
 	if (res.dec_idx >= 0 && res.dec_idx < ctx->num_fbs)
@@ -770,11 +831,23 @@ static void wave4_run_decode(struct wave4_ctx *ctx)
 	} else if (ctx->eos && res.disp_idx == -1) {
 		wave4_finish_drain(ctx);
 	}
+	return;
+
+fail:
+	ctx->state = WAVE4_STATE_ERROR;
+	vb2_queue_error(v4l2_m2m_get_src_vq(m2m));
+	vb2_queue_error(v4l2_m2m_get_dst_vq(m2m));
 }
 
 static void wave4_run_work(struct work_struct *work)
 {
 	struct wave4_ctx *ctx = container_of(work, struct wave4_ctx, run_work);
+
+	if (READ_ONCE(ctx->abort)) {
+		/* A late abort skips the next job instead: harmless. */
+		WRITE_ONCE(ctx->abort, false);
+		goto finish;
+	}
 
 	switch (ctx->state) {
 	case WAVE4_STATE_NEED_SEQ:
@@ -786,6 +859,7 @@ static void wave4_run_work(struct work_struct *work)
 	default:
 		break;
 	}
+finish:
 	v4l2_m2m_job_finish(ctx->dev->m2m_dev, ctx->fh.m2m_ctx);
 }
 
@@ -802,9 +876,13 @@ static int wave4_job_ready(void *priv)
 	struct v4l2_m2m_ctx *m2m = ctx->fh.m2m_ctx;
 	bool have_src = ctx->bs_pending || v4l2_m2m_num_src_bufs_ready(m2m);
 
+	/* dst_buf_is_last: drained, only the LAST flag waits for a buffer. */
+	if (READ_ONCE(ctx->closing) || v4l2_m2m_dst_buf_is_last(m2m))
+		return 0;
+
 	switch (ctx->state) {
 	case WAVE4_STATE_NEED_SEQ:
-		return have_src;
+		return have_src || m2m->is_draining;
 	case WAVE4_STATE_DECODING:
 		/*
 		 * After a DEC_PIC that found no free frame, wait for a CAPTURE
@@ -821,9 +899,21 @@ static int wave4_job_ready(void *priv)
 	}
 }
 
+/*
+ * A job is one firmware command, which cannot be interrupted and is bounded
+ * by WAVE4_CMD_TIMEOUT_MS: skip it if the worker has not started it yet.
+ */
+static void wave4_job_abort(void *priv)
+{
+	struct wave4_ctx *ctx = priv;
+
+	WRITE_ONCE(ctx->abort, true);
+}
+
 static const struct v4l2_m2m_ops wave4_m2m_ops = {
 	.device_run = wave4_device_run,
 	.job_ready = wave4_job_ready,
+	.job_abort = wave4_job_abort,
 };
 
 static int wave4_open(struct file *file)
@@ -901,11 +991,24 @@ static int wave4_release(struct file *file)
 {
 	struct wave4_ctx *ctx = file_to_ctx(file);
 	struct wave4_dev *dev = ctx->dev;
+	struct v4l2_m2m_ctx *m2m = ctx->fh.m2m_ctx;
 
+	/*
+	 * The worker still uses m2m after v4l2_m2m_job_finish() wakes the
+	 * waiter (it queues the next job), so it must be idle before
+	 * v4l2_m2m_ctx_release() frees m2m. From 'closing' on job_ready()
+	 * refuses; the OUTPUT STREAMOFF takes the ctx off the job queue, or
+	 * waits for its job.
+	 */
 	mutex_lock(&dev->dev_lock);
-	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
+	WRITE_ONCE(ctx->closing, true);
+	v4l2_m2m_streamoff(file, m2m, V4L2_BUF_TYPE_VIDEO_OUTPUT);
 	mutex_unlock(&dev->dev_lock);
 	flush_work(&ctx->run_work);
+
+	mutex_lock(&dev->dev_lock);
+	v4l2_m2m_ctx_release(m2m);
+	mutex_unlock(&dev->dev_lock);
 
 	wave4_hw_fini_seq(ctx);
 	wave4_free_fbs(ctx);
@@ -949,13 +1052,15 @@ int wave4_dec_register(struct wave4_dev *dev)
 	video_set_drvdata(vfd, dev);
 
 	ret = video_register_device(vfd, VFL_TYPE_VIDEO, -1);
-	if (ret)
+	if (ret) {
 		v4l2_m2m_release(dev->m2m_dev);
+		dev->m2m_dev = NULL;
+	}
 	return ret;
 }
 
+/* m2m_dev stays for the files still open: wave4_v4l2_release() frees it. */
 void wave4_dec_unregister(struct wave4_dev *dev)
 {
 	video_unregister_device(&dev->vfd);
-	v4l2_m2m_release(dev->m2m_dev);
 }

@@ -37,17 +37,13 @@ properties:
   resets:
     maxItems: 1
 
-  firmware-name:
-    maxItems: 1
-    description:
-      Firmware image to load; defaults to vpu/tcc803x/hevc_bit_code.
-
 required:
   - compatible
   - reg
   - interrupts
   - clocks
   - clock-names
+  - resets
 
 additionalProperties: false
 
