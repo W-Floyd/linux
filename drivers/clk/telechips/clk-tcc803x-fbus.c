@@ -5,13 +5,17 @@
  * SMC calls (SIP_CLK_*); the registers at the CKC base are not the kernel's to
  * touch.
  *
- * This is the read-only half, a diagnostic for bring-up: at probe it asks the
- * monitor for each channel's rate and enable state, and for the state of the
- * clock gates the monitor owns (IOBUS, VPUBUS, ISOTOP), and says what it got.
- * It then times the CPU with its own cycle counter: the real clock, the cost of
- * a dependent add, and the latency of loads from L1, L2 and DRAM.
+ * Each channel is registered as a clk_hw, indexed by its CLKCTRL id (one-cell
+ * specifier): the rate is read from the monitor, never cached. No enable or
+ * disable op, so the framework never gates a channel. Rate setting is off
+ * unless fbus_set_rate is given (below).
+ *
+ * At probe it also logs the state of the clock gates the monitor owns (IOBUS,
+ * VPUBUS, ISOTOP) and times the CPU with its own cycle counter: the real clock,
+ * the cost of a dependent add, and the latency of loads from L1, L2 and DRAM.
  */
 #include <linux/arm-smccc.h>
+#include <linux/clk-provider.h>
 #include <linux/irqflags.h>
 #include <linux/ktime.h>
 #include <linux/math64.h>
@@ -20,6 +24,7 @@
 #include <linux/random.h>
 #include <linux/vmalloc.h>
 
+#define SIP_CLK_SET_CLKCTRL	0x82000003
 #define SIP_CLK_GET_CLKCTRL	0x82000004
 #define SIP_CLK_IS_CLKCTRL	0x82000007
 #define SIP_CLK_IS_IOBUS	0x82000013
@@ -39,6 +44,96 @@ static const struct {
 	{ 8, "gpu" },
 	{ 9, "ddi" },
 	{ 11, "io" },
+};
+
+#define TCC803X_FBUS_NR		12	/* CLKCTRL ids 0-11; 1, 3 and 10 unregistered */
+
+/*
+ * EXPERIMENTAL, default off: let the framework set a channel's rate with the
+ * monitor's SET_CLKCTRL (id, 1, rate) -- the (id, enable, rate) argument
+ * shape is the real vendor calling convention, confirmed against vendor
+ * clock-driver source, not copied over from SET_PCLKCTRL by assumption.
+ * Still gated: neither call has ever been run on this unit for these
+ * channels, and a bad CPU or memory-bus rate can hang the head unit of a
+ * running car.
+ *
+ * fbus_set_rate=0: read-only. determine_rate answers the current rate and
+ * set_rate refuses, so nothing but GET/IS calls reach the monitor.
+ */
+static bool fbus_set_rate;
+/* 0444, not 0644: a live sysfs flip at runtime could retune the memory bus
+ * under a running kernel. Set only at module load (modprobe fbus_set_rate=1).
+ */
+module_param(fbus_set_rate, bool, 0444);
+MODULE_PARM_DESC(fbus_set_rate, "EXPERIMENTAL, untested on hardware: allow setting CPU/GPU/bus clock rates through the monitor (default 0, read-only)");
+
+struct tcc803x_fbus_clk {
+	struct clk_hw hw;
+	u32 id;
+};
+
+#define to_fbus_clk(_hw) container_of(_hw, struct tcc803x_fbus_clk, hw)
+
+static unsigned long sip_call(unsigned long fn, unsigned long a1,
+			      unsigned long a2, unsigned long a3)
+{
+	struct arm_smccc_res res;
+
+	arm_smccc_smc(fn, a1, a2, a3, 0, 0, 0, 0, &res);
+	return res.a0;
+}
+
+/* The monitor answers an unknown call with a negative SMCCC code. */
+static bool sip_failed(unsigned long ret)
+{
+	return (long)ret < 0;
+}
+
+/* IS_CLKCTRL answers 1 for enabled, unlike IS_IOBUS. */
+static int fbus_is_enabled(struct clk_hw *hw)
+{
+	return sip_call(SIP_CLK_IS_CLKCTRL, to_fbus_clk(hw)->id, 0, 0) == 1;
+}
+
+static unsigned long fbus_recalc_rate(struct clk_hw *hw,
+				      unsigned long parent_rate)
+{
+	unsigned long rate = sip_call(SIP_CLK_GET_CLKCTRL, to_fbus_clk(hw)->id, 0, 0);
+
+	return sip_failed(rate) ? 0 : rate;
+}
+
+/*
+ * The monitor picks the PLL and divider, and what it lands on for a given
+ * request is unknown (unconfirmed whether it rounds up, down, or reprograms a
+ * shared PLL): pass the request through and let recalc_rate read back the result.
+ */
+static int fbus_determine_rate(struct clk_hw *hw, struct clk_rate_request *req)
+{
+	if (!READ_ONCE(fbus_set_rate))
+		req->rate = fbus_recalc_rate(hw, 0);
+	return 0;
+}
+
+static int fbus_set_rate_op(struct clk_hw *hw, unsigned long rate,
+			    unsigned long parent_rate)
+{
+	struct tcc803x_fbus_clk *c = to_fbus_clk(hw);
+
+	if (!READ_ONCE(fbus_set_rate)) {
+		pr_warn_once("tcc803x-fbus: rate change refused, fbus_set_rate=0\n");
+		return -EPERM;
+	}
+	if (sip_failed(sip_call(SIP_CLK_SET_CLKCTRL, c->id, 1, rate)))
+		return -EIO;
+	return 0;
+}
+
+static const struct clk_ops fbus_ops = {
+	.is_enabled = fbus_is_enabled,
+	.recalc_rate = fbus_recalc_rate,
+	.determine_rate = fbus_determine_rate,
+	.set_rate = fbus_set_rate_op,
 };
 
 /* The gates the RTC, audio, UARTs and the video codecs sit behind. */
@@ -199,28 +294,60 @@ static void tcc803x_fbus_measure(struct device *dev)
 
 static int tcc803x_fbus_probe(struct platform_device *pdev)
 {
-	struct arm_smccc_res rate, on;
+	struct device *dev = &pdev->dev;
+	struct clk_hw_onecell_data *data;
+	struct arm_smccc_res on;
 	unsigned int i;
+	int ret;
+
+	data = devm_kzalloc(dev, struct_size(data, hws, TCC803X_FBUS_NR), GFP_KERNEL);
+	if (!data)
+		return -ENOMEM;
+	data->num = TCC803X_FBUS_NR;
+	for (i = 0; i < TCC803X_FBUS_NR; i++)
+		data->hws[i] = ERR_PTR(-ENOENT);
 
 	for (i = 0; i < ARRAY_SIZE(tcc803x_fbus); i++) {
-		arm_smccc_smc(SIP_CLK_GET_CLKCTRL, tcc803x_fbus[i].id,
-			      0, 0, 0, 0, 0, 0, &rate);
-		arm_smccc_smc(SIP_CLK_IS_CLKCTRL, tcc803x_fbus[i].id,
-			      0, 0, 0, 0, 0, 0, &on);
-		dev_info(&pdev->dev, "%-5s %10lu Hz, enable %#lx\n",
-			 tcc803x_fbus[i].name, rate.a0, on.a0);
+		struct tcc803x_fbus_clk *c;
+		struct clk_init_data init = {
+			.name = devm_kasprintf(dev, GFP_KERNEL, "fbus_%s",
+					       tcc803x_fbus[i].name),
+			.ops = &fbus_ops,
+			.flags = CLK_GET_RATE_NOCACHE | CLK_IGNORE_UNUSED,
+		};
+
+		c = devm_kzalloc(dev, sizeof(*c), GFP_KERNEL);
+		if (!c || !init.name)
+			return -ENOMEM;
+		c->id = tcc803x_fbus[i].id;
+		c->hw.init = &init;
+
+		ret = devm_clk_hw_register(dev, &c->hw);
+		if (ret)
+			return ret;
+		data->hws[c->id] = &c->hw;
+
+		dev_info(dev, "%-5s %10lu Hz, %s\n", tcc803x_fbus[i].name,
+			 clk_hw_get_rate(&c->hw),
+			 fbus_is_enabled(&c->hw) ? "enabled" : "disabled");
 	}
+
+	ret = devm_of_clk_add_hw_provider(dev, of_clk_hw_onecell_get, data);
+	if (ret)
+		return ret;
 
 	/* IS_* answers 1 for a gate that is powered down (the vendor's clk.c). */
 	for (i = 0; i < ARRAY_SIZE(tcc803x_gates); i++) {
 		arm_smccc_smc(tcc803x_gates[i].fn, tcc803x_gates[i].id,
 			      0, 0, 0, 0, 0, 0, &on);
-		dev_info(&pdev->dev, "gate %-17s %s (a0 %#lx)\n", tcc803x_gates[i].name,
+		dev_info(dev, "gate %-17s %s (a0 %#lx)\n", tcc803x_gates[i].name,
 			 on.a0 == 1 ? "powered down" : "up", on.a0);
 	}
 
-	tcc803x_fbus_measure(&pdev->dev);
+	tcc803x_fbus_measure(dev);
 
+	dev_info(dev, "CPU and bus clocks via the secure monitor%s\n",
+		 fbus_set_rate ? ", rate setting ENABLED (experimental)" : ", read-only");
 	return 0;
 }
 
@@ -235,6 +362,7 @@ static struct platform_driver tcc803x_fbus_driver = {
 	.driver = {
 		.name = "tcc803x-fbus",
 		.of_match_table = tcc803x_fbus_of_match,
+		.suppress_bind_attrs = true,
 	},
 };
 module_platform_driver(tcc803x_fbus_driver);
