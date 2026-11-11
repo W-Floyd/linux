@@ -315,6 +315,30 @@ static int sdhci_tcc803x_probe(struct platform_device *pdev)
 	return 0;
 }
 
+/*
+ * Reboot and kexec call .shutdown, not .remove. The card's bus shutdown runs
+ * first and quiesces the eMMC, but on the SDIO side (BCM4359 on sdhc2)
+ * brcmfmac has no .shutdown, so an ADMA/SDMA job can still be writing memory
+ * the next kernel owns. Mask the interrupts and reset the CMD and DATA lines,
+ * which aborts the DMA engine; RESET_ALL is avoided so bus power and the card
+ * clock stay as the card's shutdown left them. Not run on the unit.
+ */
+static void sdhci_tcc803x_shutdown(struct platform_device *pdev)
+{
+	struct sdhci_host *host = platform_get_drvdata(pdev);
+	unsigned long flags;
+
+	if (!host)
+		return;
+
+	spin_lock_irqsave(&host->lock, flags);
+	host->ier = 0;
+	sdhci_writel(host, 0, SDHCI_INT_ENABLE);
+	sdhci_writel(host, 0, SDHCI_SIGNAL_ENABLE);
+	sdhci_reset(host, SDHCI_RESET_CMD | SDHCI_RESET_DATA);
+	spin_unlock_irqrestore(&host->lock, flags);
+}
+
 static const struct of_device_id sdhci_tcc803x_of_match[] = {
 	{ .compatible = "telechips,tcc803x-sdhci" },
 	{}
@@ -330,6 +354,7 @@ static struct platform_driver sdhci_tcc803x_driver = {
 	},
 	.probe	= sdhci_tcc803x_probe,
 	.remove	= sdhci_pltfm_remove,
+	.shutdown = sdhci_tcc803x_shutdown,
 };
 module_platform_driver(sdhci_tcc803x_driver);
 

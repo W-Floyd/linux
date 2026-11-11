@@ -26,10 +26,19 @@
 #define SIP_WATCHDOG_PING	0x82002003
 
 #define WDT_PMU_EN		BIT(31)
+#define WDT_PMU_RESET		BIT(6)
 
-/* The vendor programs 20 s as about 6 s of real time: ping well inside that. */
+/*
+ * This 20 s / 6 s ratio is unconfirmed: it has not been checked against
+ * w->rate or an actual reset test.
+ */
 #define TCC_WDT_TIMEOUT		20
 #define TCC_WDT_HW_MS		2000
+
+/* 28-bit down-counter: a requested timeout beyond 0x10000000 / rate wraps
+ * it and can reset far sooner than asked.
+ */
+#define TCC_WDT_MAX_COUNT	0x10000000U
 
 struct tcc803x_wdt {
 	struct watchdog_device wdd;
@@ -70,7 +79,15 @@ static int tcc803x_wdt_start(struct watchdog_device *wdd)
 
 	tcc803x_wdt_set_timeout(wdd, wdd->timeout);
 	tcc803x_wdt_ping(wdd);
-	arm_smccc_smc(SIP_WATCHDOG_START, 0, WDT_PMU_EN, 0, 0, 0, 0, 0, &res);
+	/*
+	 * WDT_PMU_RESET must be set here: this chip has separate IRQ and
+	 * reset-count registers, and nothing else in this driver sets it, so
+	 * without it expiry likely only raises the IRQ (SPI 39) rather than
+	 * resetting the board. Unconfirmed on hardware: GET_STATUS only
+	 * returns bits 23:16, so confirming this bit took effect needs a real
+	 * reset test or a direct read of WDTCTRL (0x144000D8) bit 6.
+	 */
+	arm_smccc_smc(SIP_WATCHDOG_START, 0, WDT_PMU_EN | WDT_PMU_RESET, 0, 0, 0, 0, 0, &res);
 	return 0;
 }
 
@@ -125,6 +142,7 @@ static int tcc803x_wdt_probe(struct platform_device *pdev)
 	w->wdd.ops = &tcc803x_wdt_ops;
 	w->wdd.timeout = TCC_WDT_TIMEOUT;
 	w->wdd.min_timeout = 1;
+	w->wdd.max_timeout = TCC_WDT_MAX_COUNT / w->rate;
 	w->wdd.max_hw_heartbeat_ms = TCC_WDT_HW_MS;
 	w->wdd.parent = dev;
 	watchdog_set_drvdata(&w->wdd, w);
