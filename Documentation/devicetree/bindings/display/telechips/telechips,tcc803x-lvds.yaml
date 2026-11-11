@@ -10,52 +10,36 @@ maintainers:
   - William Floyd <git@notmy.space>
 
 description: |
-  The TCC803x SoC has an on-die LVDS transmitter (PHY + serializer),
-  distinct from the VIOC MISCCFG MRGB mux documented in
-  telechips,tcc803x-mrgb-panel.yaml -- see that binding for the full
-  LVDS-vs-MRGB evidence trail (vendor driver, same-board-family
-  precedent, live MISCCFG read, live PERI_LVDS_PHY clock-gate read).
-  This binding only documents the LVDS block itself.
+  The TCC803x on-die LVDS transmitter (PHY + serializer), distinct from
+  the VIOC MISCCFG MRGB mux in telechips,tcc803x-mrgb-panel.yaml.
 
-  reg (4 regions) and the PERI_LVDS_PHY clock are confirmed from vendor
-  source (AVNT5W_TCC803XKK_kernel, Hyundai Mobis supplier-portal
-  release, Telechips Inc., GPLv2):
-    arch/arm/boot/dts/tcc/tcc803x.dtsi:2266-2271
-      lvds_phy:lvds_phy@12370000 {
-          compatible = "telechips,lvds_phy";
-          clocks = <&clk_peri PERI_LVDS_PHY>;
-          phy-frequency = <100000000>;
-          reg = <0x12370000 0x400 0x12370400 0x400
-                 0x12360800 0x400 0x12360C00 0x400>;
-      };
-    include/dt-bindings/clock/tcc803x-clks.h:145 (PERI_LVDS_PHY == 105)
+  reg and the PERI_LVDS_PHY clock (ID 105) are from the vendor kernel
+  (AVNT5W_TCC803XKK_kernel tcc803x.dtsi, lvds_phy@12370000, GPLv2). The
+  vendor LK bootloader (platform/tcc803x/vioc/lvds_phy.c, GPLv2) names the
+  regions: on system_rev == 0 its PHY ports are HwVIOC_BASE + 0x370000 /
+  0x360000 + (port << 10), i.e. single port S0 = 0x12370000, S1 =
+  0x12370400 (unused by the vendor), dual ports D0 = 0x12360800 and D1 =
+  0x12360c00. On system_rev != 0 it uses 0x1b941000 / 0x1b942800 /
+  0x1b942c00 instead, plus an LVDS wrapper at 0x1b940000 this binding does
+  not describe.
 
-  phy-frequency (100 MHz) is not carried into this binding: it is not
-  a mainline graph/clock property, and nothing in the extracted vendor
-  source consumes it outside that same static DT value, so it would
-  add a number without adding confirmed behavior.
+  Unresolved: a live read on a displaying unit found all 4 regions reading
+  0x00000000, while the vendor init leaves RESETB (offset 0) at 0x1fff.
+  Three explanations, not distinguished yet: this unit is a system_rev != 0
+  part and the PHY lives at the 0x1b94xxxx addresses instead; the read was
+  wrong; or this product's actual display path doesn't use this PHY at all
+  (one vendor LK build target for this product compiles an HDMI->ADV7613
+  path instead and excludes the LVDS panel code entirely, which would leave
+  RESETB at its unprogrammed reset value of 0 for an unrelated reason). A
+  live clock-gate read on this unit found the LVDS PHY's own clock enabled,
+  which argues against the third explanation but doesn't rule it out (a
+  gate can be left on for other reasons). system_rev is read with the
+  read-only SMC SIP_CHIP_REV (SIP_CMD(7,0) = 0x82007000); source alone
+  can't give its value on this unit -- check cat /proc/chipinfo or the
+  stock boot log. Check before setting telechips,phy-init.
 
-  A live register read tonight confirmed PERI_LVDS_PHY's own
-  CKC_PCLKCTRL gate (clock ID 105, CKC_PCLKCTRL(105) = 0x14000274) is
-  enabled on the real running head unit: 0xe5000000, decoded as
-  SEL=5=XIN, EN (bit 29) = 1, via the same PCLKCTRL field layout
-  already confirmed for PERI_UART0/PERI_LCD0. That is real, direct
-  evidence this clock gate is live right now -- not merely present in
-  vendor source. The same read found the lvds_phy block's own 4
-  register regions all reading 0x00000000; their bit layout is not
-  confirmed from any source in this extracted GPL package (vendor
-  panel driver drivers/video/fbdev/tcc-fb/lcd_TM123XDHP90.c only calls
-  clk_prepare_enable() on this clock -- no lower-level PHY register
-  writes exist anywhere in the tree), so an all-zero read is exactly
-  what reset state looks like and proves nothing either way about PHY
-  programming. The real init sequence most likely lives in this
-  board's bootloader package, not extracted here.
-
-  CONSEQUENCE FOR THIS BINDING: it documents reg and the one
-  vendor-confirmed clock only. No PHY-control or PHY-status register
-  property is defined, because no source confirms what such a
-  property would mean. See drivers/gpu/drm/bridge/tcc803x-lvds.c for
-  what the driver built against this binding does and does not do.
+  The telechips,phy-init properties below drive the vendor's init sequence.
+  Without telechips,phy-init the PHY is left as the bootloader set it.
 
 properties:
   compatible:
@@ -93,12 +77,65 @@ properties:
       both be the live target of that single endpoint at once; which
       one is wired is a board-DT-time choice (see tcc803x-avn.dts).
 
+  telechips,phy-init:
+    type: boolean
+    description:
+      Program the PHY on enable instead of keeping the bootloader's setup.
+
+  telechips,vcm-millivolt:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      Panel's typical LVDS common-mode voltage. Panel-specific, no default.
+    minimum: 0
+    maximum: 2000
+
+  telechips,vsw-millivolt:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      Panel's typical LVDS differential swing. Panel-specific, no default.
+    minimum: 0
+    maximum: 1000
+
+  telechips,dual-link:
+    type: boolean
+    description:
+      Drive dual ports D0 (primary, lvds-cfg0) and D1 (secondary,
+      lvds-cfg1), one pixel each per clock. Absent, single port S0 (lvds0).
+
+  telechips,data-mapping:
+    $ref: /schemas/types.yaml#/definitions/string
+    enum: [vesa-24, jeida-24, jeida-18]
+    default: vesa-24
+
+  telechips,lane-select:
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    description:
+      PHY input feeding each output lane (CLK, DATA0..3) of the primary
+      port, as 0 = CLK, 1..4 = DATA0..3. Board routing; defaults to
+      identity.
+    minItems: 5
+    maxItems: 5
+    items:
+      maximum: 4
+
+  telechips,secondary-lane-select:
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    description: As telechips,lane-select, for the secondary port.
+    minItems: 5
+    maxItems: 5
+    items:
+      maximum: 4
+
 required:
   - compatible
   - reg
   - reg-names
   - clocks
   - clock-names
+
+dependentRequired:
+  telechips,phy-init: [telechips,vcm-millivolt, telechips,vsw-millivolt]
+  telechips,secondary-lane-select: [telechips,dual-link]
 
 additionalProperties: false
 
