@@ -1,0 +1,99 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/media/telechips,tcc803x-vioc-rearview.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Telechips TCC803x VIOC rear-view camera path
+
+maintainers:
+  - William Floyd <git@notmy.space>
+
+description:
+  The VIOC blocks that capture a camera decoder (VIN, simple deinterlacer,
+  scaler, WMIX, WDMA) and the RDMA and async FIFO that feed the frames to
+  image 1 of the display WMIX0. The camera is shown over the UI by raising
+  that image's overlay priority. Block choice follows the vendor's board
+  configuration (VIN0, SC2, WMIX5, WDMA5, RDMA1).
+
+properties:
+  compatible:
+    const: telechips,tcc803x-vioc-rearview
+
+  reg:
+    items:
+      - description: VIN
+      - description: DEINTL_S simple deinterlacer
+      - description: scaler
+      - description: capture WMIX
+      - description: WDMA
+      - description: display RDMA (an input of the display WMIX)
+      - description: async FIFO
+      - description: DDI_CONFIG CIFPORT0, VIN input-port select
+
+  reg-names:
+    items:
+      - const: vin
+      - const: deintls
+      - const: scaler
+      - const: wmix
+      - const: wdma
+      - const: rdma
+      - const: fifo
+      - const: cifport
+
+  clocks:
+    maxItems: 1
+
+  clock-names:
+    const: ddi
+
+  telechips,vioc-config:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: VIOC config block (path select, software resets).
+
+  telechips,display:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description:
+      The display CRTC node, whose "wmix" and "disp" register windows are
+      shared with this device.
+
+  gear-gpios:
+    description: Reverse-gear input; the camera is shown while it is active.
+    maxItems: 1
+
+  port:
+    $ref: /schemas/graph.yaml#/properties/port
+    description: Input from the camera decoder.
+
+required:
+  - compatible
+  - reg
+  - reg-names
+  - telechips,vioc-config
+  - telechips,display
+  - port
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+
+    rearview@12004000 {
+        compatible = "telechips,tcc803x-vioc-rearview";
+        reg = <0x12004000 0x100>, <0x12003800 0x100>, <0x12002200 0x100>,
+              <0x12001d00 0x100>, <0x12002d00 0x100>, <0x12000500 0x100>,
+              <0x12003b00 0x100>, <0x12380008 0x4>;
+        reg-names = "vin", "deintls", "scaler", "wmix", "wdma", "rdma",
+                    "fifo", "cifport";
+        telechips,vioc-config = <&vioc_config>;
+        telechips,display = <&vioc_crtc0>;
+        gear-gpios = <&pinctrl 31 GPIO_ACTIVE_HIGH>;
+
+        port {
+            rearview_in: endpoint {
+                remote-endpoint = <&tw9990_out>;
+            };
+        };
+    };

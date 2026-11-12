@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/soc/telechips/telechips,tcc803x-cm4.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Telechips TCC803x Cortex-M4 subsystem
+
+maintainers:
+  - William Floyd <git@notmy.space>
+
+description: |
+  The Cortex-M4 beside the application cores, with its own code and data
+  SRAM. It runs either the SoC's secure-processor firmware or, when the
+  bootloader starts it, the early rear camera; the kernel stops the latter
+  through the mailbox and holds the core in reset.
+
+properties:
+  compatible:
+    const: telechips,tcc803x-cm4
+
+  reg:
+    items:
+      - description: Application-core side of the mailbox to the M4
+      - description: M4 configuration (reset, IRQ routing, remap)
+      - description: M4 code SRAM
+
+  reg-names:
+    items:
+      - const: mbox
+      - const: cfg
+      - const: code
+
+  clocks:
+    maxItems: 1
+    description: The M4 bus clock (CLKCTRL 3)
+
+required:
+  - compatible
+  - reg
+  - reg-names
+  - clocks
+
+additionalProperties: false
+
+examples:
+  - |
+    cortex-m4@19000000 {
+        compatible = "telechips,tcc803x-cm4";
+        reg = <0x19000000 0x50>, <0x19100000 0x48>, <0x19080000 0x10000>;
+        reg-names = "mbox", "cfg", "code";
+        clocks = <&fbus 3>;
+    };

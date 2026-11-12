@@ -266,6 +266,20 @@
 	 */
 	fbus: clock-fbus {
 		compatible = "telechips,tcc803x-fbus";
+		#clock-cells = <1>;
+	};
+
+	/*
+	 * OTP fuses: secure I/O, owned by the monitor and read through a SiP
+	 * SMC (no registers; see drivers/nvmem/tcc803x-otp.c). Disabled pending
+	 * a hardware test of the read id (0x82008000, recovered from the EL3
+	 * blob, never run on the unit); enable once a read is validated.
+	 */
+	otp: otp {
+		compatible = "telechips,tcc803x-otp";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		status = "disabled";
 	};
 
 	/*
@@ -641,6 +655,19 @@
 				telechips,pins = "gpe-11", "gpe-12", "gpe-13";
 				telechips,pin-function = <2>;
 			};
+
+			/*
+			 * CIF port 0: clock, hsync, vsync, data 7:0. Vendor
+			 * mobis/tcc8031-pinctrl.dtsi cam0_clki/hsync/vsync/data
+			 * (function 3; their input-enable and drive strength
+			 * are not modeled here).
+			 */
+			cam0_grp: cam0-grp {
+				telechips,pins = "gpa-0", "gpa-1", "gpa-2", "gpa-3",
+						 "gpa-4", "gpa-5", "gpa-6", "gpa-7",
+						 "gpa-8", "gpa-9", "gpa-10";
+				telechips,pin-function = <3>;
+			};
 		};
 
 		/*
@@ -749,6 +776,21 @@
 			status = "disabled";
 		};
 
+		/*
+		 * I2C master 3, the camera decoder's bus (vendor
+		 * mobis/tcc8031-android-avn.dtsi "9990" i2c@16330000, port-mux
+		 * 10 = gpb-17/18; LK earlycamera TW9990_I2C_CH_NO 3). Same
+		 * caveats as i2c1: the prescaler and pad mux are the stock
+		 * kernel's.
+		 */
+		i2c3: i2c@16330000 {
+			compatible = "telechips,tcc803x-i2c";
+			reg = <0x16330000 0x1c>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
 		gic: interrupt-controller@17301000 {
 			compatible = "arm,gic-400";
 			reg = <0x17301000 0x1000>,
@@ -841,6 +883,42 @@
 					remote-endpoint = <&hdmi_tx_in>;
 				};
 			};
+		};
+
+		/*
+		 * Rear-view capture path into image 1 of WMIX0. Bases: vendor
+		 * mobis/tcc803x.dtsi vioc_vin (VIN0 0x12004000), vioc_deintls,
+		 * vioc_scaler (SC2), vioc_wmix (WMIX5), vioc_wdma (WDMA5),
+		 * vioc_rdma (RDMA1), vioc_fifo, cifport@12380008. Indices: the
+		 * vendor board config (tcc8031-android-avn.dtsi tcc_camera, LK
+		 * dev/camera/tw9990.c).
+		 */
+		vioc_rearview: rearview@12004000 {
+			compatible = "telechips,tcc803x-vioc-rearview";
+			reg = <0x12004000 0x100>, <0x12003800 0x100>,
+			      <0x12002200 0x100>, <0x12001d00 0x100>,
+			      <0x12002d00 0x100>, <0x12000500 0x100>,
+			      <0x12003b00 0x100>, <0x12380008 0x4>;
+			reg-names = "vin", "deintls", "scaler", "wmix", "wdma",
+				    "rdma", "fifo", "cifport";
+			clocks = <&ckc TCC803X_CLK_DDIBUS_VIOC>;
+			clock-names = "ddi";
+			telechips,vioc-config = <&vioc_config>;
+			telechips,display = <&vioc_crtc0>;
+			status = "disabled";
+		};
+
+		/*
+		 * The Cortex-M4. The bootloader runs the early rear camera on it
+		 * and leaves it running; its driver stops it, and leaves any other
+		 * firmware alone.
+		 */
+		cortex-m4@19000000 {
+			compatible = "telechips,tcc803x-cm4";
+			reg = <0x19000000 0x50>, <0x19100000 0x48>,
+			      <0x19080000 0x10000>;
+			reg-names = "mbox", "cfg", "code";
+			clocks = <&fbus 3>;
 		};
 
 		/*

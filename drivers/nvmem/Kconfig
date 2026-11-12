@@ -526,6 +526,20 @@ config NVMEM_SUNXI_SID
 	  This driver can also be built as a module. If so, the module
 	  will be called nvmem_sunxi_sid.
 
+config NVMEM_TCC803X_OTP
+	tristate "Telechips TCC803x OTP support"
+	depends on ARCH_TCC803X || COMPILE_TEST
+	depends on HAVE_ARM_SMCCC
+	help
+	  Say y here to enable read access to the one-time-programmable fuses
+	  on Telechips TCC803x SoCs. The OTP block is secure I/O, so the driver
+	  reaches it through the secure monitor with a SiP SMC rather than MMIO.
+	  Reads stay disabled until the OTP-read SiP function ID is supplied via
+	  the read_fid module parameter (see the driver). Exposed read-only.
+
+	  This driver can also be built as a module. If so, the module will be
+	  called nvmem-tcc803x-otp.
+
 config NVMEM_U_BOOT_ENV
 	tristate "U-Boot environment variables support"
 	depends on OF && MTD

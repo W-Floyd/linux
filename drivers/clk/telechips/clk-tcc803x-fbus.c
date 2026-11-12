@@ -37,6 +37,7 @@ static const struct {
 } tcc803x_fbus[] = {
 	{ 0, "cpu0" },
 	{ 2, "cbus" },
+	{ 3, "cmbus" },		/* Cortex-M4 */
 	{ 4, "mem" },
 	{ 5, "vbus" },
 	{ 6, "hsio" },
@@ -46,7 +47,7 @@ static const struct {
 	{ 11, "io" },
 };
 
-#define TCC803X_FBUS_NR		12	/* CLKCTRL ids 0-11; 1, 3 and 10 unregistered */
+#define TCC803X_FBUS_NR		12	/* CLKCTRL ids 0-11; 1 and 10 unregistered */
 
 /*
  * EXPERIMENTAL, default off: let the framework set a channel's rate with the

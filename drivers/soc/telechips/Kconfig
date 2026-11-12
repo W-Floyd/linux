@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config TCC803X_CM4
+	bool "Telechips TCC803x Cortex-M4 early-camera stop"
+	depends on ARCH_TCC803X || COMPILE_TEST
+	depends on COMMON_CLK && OF
+	default ARCH_TCC803X
+	help
+	  Stops the rear-camera firmware the bootloader leaves running on the
+	  TCC803x Cortex-M4 and holds the core in reset, so the kernel's own
+	  display and camera drivers own the blocks it would otherwise keep
+	  driving.

@@ -20,8 +20,13 @@ properties:
   compatible:
     const: telechips,tcc803x-fbus
 
+  '#clock-cells':
+    const: 1
+    description: The CLKCTRL channel number (3 is the Cortex-M4 bus).
+
 required:
   - compatible
+  - '#clock-cells'
 
 additionalProperties: false
 
@@ -29,4 +34,5 @@ examples:
   - |
     clock-fbus {
         compatible = "telechips,tcc803x-fbus";
+        #clock-cells = <1>;
     };

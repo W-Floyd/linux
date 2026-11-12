@@ -372,6 +372,47 @@
 };
 
 /*
+ * Rear camera: TW9990 at 0x44 on I2C3, reset on gpa 30, BT.656 into CIF
+ * port 0; reverse gear on gpa 31, active high ("M111_REVERSE_CPU"). All from
+ * the vendor's own board files (mobis/tcc8031-android-avn.dtsi tcc_camera,
+ * tcc_cm_ctrl gear-gpios/gear-active and the mobis-gpios list; LK
+ * dev/camera/tw9990.c), none checked on this unit. Covers the analog
+ * camera variant only (Mobis camera_type 0/1); the LVDS/SVM variants use a
+ * deserializer on the same bus and are not described.
+ *
+ * The rear-view path stays disabled until a hardware session: once enabled
+ * it reprograms the display WMIX whenever gpa 31 reads high.
+ */
+&i2c3 {
+	status = "okay";
+
+	video-decoder@44 {
+		compatible = "techwell,tw9990";
+		reg = <0x44>;
+		reset-gpios = <&pinctrl 30 GPIO_ACTIVE_LOW>;
+
+		port {
+			tw9990_out: endpoint {
+				remote-endpoint = <&rearview_in>;
+			};
+		};
+	};
+};
+
+&vioc_rearview {
+	pinctrl-names = "default";
+	pinctrl-0 = <&cam0_grp>;
+	gear-gpios = <&pinctrl 31 GPIO_ACTIVE_HIGH>;
+	status = "disabled";
+
+	port {
+		rearview_in: endpoint {
+			remote-endpoint = <&tw9990_out>;
+		};
+	};
+};
+
+/*
  * External USB-A host port: forced host-only (dr_mode), see dwc_otg's
  * comment in tcc803x.dtsi for why device mode is physically unreachable
  * on this connector. Enabled here as the board's intended debug-console

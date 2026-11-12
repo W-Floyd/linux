@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config VIDEO_TCC803X_REARVIEW
+	tristate "Telechips TCC803x VIOC rear-view camera overlay"
+	depends on V4L_PLATFORM_DRIVERS
+	depends on VIDEO_DEV && OF && GPIOLIB
+	depends on ARCH_TCC803X || COMPILE_TEST
+	select V4L2_ASYNC
+	select V4L2_FWNODE
+	select VIDEO_V4L2_SUBDEV_API
+	help
+	  Captures an analog camera decoder through the TCC803x VIOC and
+	  overlays it on the display's WMIX0 while the reverse-gear GPIO is
+	  active or userspace asks for it. Untested on hardware.

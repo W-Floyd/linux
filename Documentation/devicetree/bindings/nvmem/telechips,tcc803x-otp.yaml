@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/nvmem/telechips,tcc803x-otp.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Telechips TCC803x OTP fuses behind the secure monitor
+
+maintainers:
+  - William Floyd <git@notmy.space>
+
+description: |
+  The one-time-programmable fuses hold secure-boot keys, chip configuration
+  and the boot-width state. On TCC803x the OTP controller is secure I/O
+  (OP-TEE maps it MEM_AREA_IO_SEC) and the vendor firmware reaches it only
+  through the monitor, so the node carries no registers; the driver reads it
+  with a SiP SMC. Exposed read-only.
+
+allOf:
+  - $ref: nvmem.yaml#
+  - $ref: nvmem-deprecated-cells.yaml#
+
+properties:
+  compatible:
+    const: telechips,tcc803x-otp
+
+required:
+  - compatible
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    otp {
+        compatible = "telechips,tcc803x-otp";
+        #address-cells = <1>;
+        #size-cells = <1>;
+
+        boot-width@2 {
+            reg = <0x2 0x1>;
+        };
+    };
+
+...
