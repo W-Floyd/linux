@@ -20,6 +20,7 @@
 #include <linux/clk-provider.h>
 #include <linux/delay.h>
 #include <linux/io.h>
+#include <linux/iopoll.h>
 #include <linux/jiffies.h>
 #include <linux/mod_devicetable.h>
 #include <linux/platform_device.h>
@@ -31,7 +32,10 @@
 #define MBOX_RX(n)		(0x20 + 4 * (n))
 #define MBOX_CTL		0x40
 #define MBOX_CTL_OEN		BIT(5)	/* raise: the message is complete */
+#define MBOX_CTL_CFLUSH		BIT(6)
+#define MBOX_CTL_DFLUSH		BIT(7)
 #define MBOX_STS		0x44
+#define MBOX_STS_TX_EMPTY	BIT(0)
 #define MBOX_STS_SCOUNT		GENMASK(23, 20)
 #define MBOX_WORDS		8
 
@@ -81,13 +85,27 @@ static bool cm4_rx(void __iomem *mbox, u32 *msg)
 static int cm4_stop_camera(struct device *dev, void __iomem *mbox)
 {
 	unsigned long timeout;
-	u32 msg[MBOX_WORDS];
-	int i;
+	u32 msg[MBOX_WORDS], sts;
+	int i, ret;
 
 	/* Drain a stale message so the reply matched below is to this one. */
 	cm4_rx(mbox, msg);
 
 	writel(readl(mbox + MBOX_CTL) & ~MBOX_CTL_OEN, mbox + MBOX_CTL);
+
+	/*
+	 * Words left in our TX FIFO by the bootloader would be sent ahead of
+	 * STOP. The flush bits are never cleared by the vendor drivers.
+	 */
+	writel(readl(mbox + MBOX_CTL) | MBOX_CTL_CFLUSH | MBOX_CTL_DFLUSH,
+	       mbox + MBOX_CTL);
+	ret = readl_poll_timeout(mbox + MBOX_STS, sts, sts & MBOX_STS_TX_EMPTY,
+				 10, 10000);
+	if (ret) {
+		dev_warn(dev, "TX FIFO not empty after flush (STS %#x)\n", sts);
+		return ret;
+	}
+
 	writel(MSG_STOP, mbox + MBOX_TX(0));
 	for (i = 1; i < MBOX_WORDS - 1; i++)
 		writel(0, mbox + MBOX_TX(i));
