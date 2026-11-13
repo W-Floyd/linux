@@ -285,6 +285,18 @@
 	};
 
 	/*
+	 * Reset reason, kept by the secure monitor and read back by U-Boot as
+	 * bootreason=. Magics from vendor dt-bindings/soc/tcc803x,boot-mode.h.
+	 */
+	reboot_mode: reboot-mode {
+		compatible = "telechips,tcc803x-reboot-mode";
+		mode-normal = <0x77665501>;
+		mode-fastboot = <0x77665500>;
+		mode-recovery = <0x77665502>;
+		status = "disabled";
+	};
+
+	/*
 	 * PMU watchdog, owned by the secure monitor and driven through SiP
 	 * calls (vendor tcc803x.dtsi watchdog@144000D0: clock-frequency 24 MHz,
 	 * clear-bit 0). The vendor kernel leaves it running across the kexec.

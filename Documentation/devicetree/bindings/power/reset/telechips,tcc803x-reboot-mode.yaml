@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/power/reset/telechips,tcc803x-reboot-mode.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Telechips TCC803x reboot mode
+
+maintainers:
+  - William Floyd <git@notmy.space>
+
+description:
+  The TCC803x reset reason is a secure register kept across the reset by the
+  secure monitor, which the bootloader reads back to choose the boot path.
+  The node carries no registers; the magic is written with a SiP SMC.
+
+allOf:
+  - $ref: reboot-mode.yaml#
+
+properties:
+  compatible:
+    const: telechips,tcc803x-reboot-mode
+
+required:
+  - compatible
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    reboot-mode {
+        compatible = "telechips,tcc803x-reboot-mode";
+        mode-normal = <0x77665501>;
+        mode-fastboot = <0x77665500>;
+        mode-recovery = <0x77665502>;
+    };
+...

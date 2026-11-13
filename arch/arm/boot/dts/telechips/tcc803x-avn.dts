@@ -224,6 +224,10 @@
 	status = "okay";
 };
 
+&reboot_mode {
+	status = "okay";
+};
+
 /*
  * The CODA960 and the clock gates it needs. Its registers were read once from
  * userspace (tools/vpu-probe in the nura repo) with the gates up, and the
