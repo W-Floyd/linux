@@ -32,6 +32,13 @@ properties:
       Port VBUS supply enable. Driven inactive for as long as the PHY is bound,
       as this PHY is only used in peripheral mode, where the host supplies VBUS.
 
+  telechips,pcfg3:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    default: 0
+    description:
+      Raw value for the PHY tuning register PCFG3 (offset 0x0c). The vendor
+      BSP writes 0x11 (VDATREFTUNE0 | RETENABLEN).
+
 required:
   - compatible
   - reg

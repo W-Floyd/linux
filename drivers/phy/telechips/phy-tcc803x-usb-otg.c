@@ -15,6 +15,7 @@
 #include <linux/io.h>
 #include <linux/iopoll.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/phy/phy.h>
 #include <linux/platform_device.h>
 
@@ -44,6 +45,7 @@
 
 struct tcc803x_otg_phy {
 	void __iomem *base;
+	u32 pcfg3;
 };
 
 static int tcc803x_otg_phy_init(struct phy *phy)
@@ -52,14 +54,20 @@ static int tcc803x_otg_phy_init(struct phy *phy)
 	u32 val;
 	int ret;
 
+	/*
+	 * Zeroing the mux holds both controllers behind it in reset (the
+	 * vendor's pulse); the EHCI/OHCI pair must not be in use.
+	 */
 	val = readl(p->base + OTGMUX);
 	val |= MUX_OPSEL | MUX_O_CLKEN | MUX_O_RUN | MUX_H_CLKEN | MUX_H_RUN;
+	writel(0, p->base + OTGMUX);
+	udelay(10);
 	writel(val, p->base + OTGMUX);
 
 	writel(PCFG0_INIT, p->base + PCFG0);
 	writel(PCFG1_INIT, p->base + PCFG1);
 	writel(PCFG2_INIT, p->base + PCFG2);
-	writel(0, p->base + PCFG3);
+	writel(p->pcfg3, p->base + PCFG3);
 	writel(0, p->base + PCFG4);
 	writel(LCFG0_RESETS, p->base + LCFG0);
 
@@ -123,6 +131,9 @@ static int tcc803x_otg_phy_probe(struct platform_device *pdev)
 	p->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(p->base))
 		return PTR_ERR(p->base);
+
+	/* Optional: the vendor's 0x11 is unvalidated here, so default to 0. */
+	of_property_read_u32(dev->of_node, "telechips,pcfg3", &p->pcfg3);
 
 	/* Peripheral only: the host supplies VBUS, never back-feed it. */
 	vbus = devm_gpiod_get_optional(dev, "vbus", GPIOD_OUT_LOW);
