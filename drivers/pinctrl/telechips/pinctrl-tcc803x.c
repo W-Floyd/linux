@@ -35,11 +35,9 @@
  * driver only implements the banks that fit inside the declared window
  * (GPA..GPSD1). See the binding doc for the same caveat.
  *
- * Also out of scope for this skeleton: pin bias (pull-up/down), drive
- * strength and slew rate. Their register formats are cited in the vendor
- * source (pinctrl-tcc803x.c:299-323) but wiring up generic pinconf is left
- * for a follow-up; this driver only does pinmux (function select) and
- * plain GPIO.
+ * Pinconf covers bias, input buffer and schmitt only. Drive strength is a
+ * 2-bit field whose encoding is not monotonic in strength and whose units
+ * are unknown, so it and slew rate are left out.
  */
 
 #include <linux/err.h>
@@ -48,12 +46,14 @@
 #include <linux/kernel.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
+#include <linux/pinctrl/pinconf-generic.h>
 #include <linux/pinctrl/pinconf.h>
 #include <linux/pinctrl/pinctrl.h>
 #include <linux/pinctrl/pinmux.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 
+#include "../pinconf.h"
 #include "../pinctrl-utils.h"
 
 /* Per-bank register offsets, relative to each bank's own base address.
@@ -63,6 +63,11 @@
 #define TCC803X_GPIO_OUTPUT_ENABLE	0x04
 #define TCC803X_GPIO_DATA_OR		0x08
 #define TCC803X_GPIO_DATA_BIC		0x0c
+/* One bit per pin; both vendor drivers and the 805x manual agree. */
+#define TCC803X_GPIO_PULL_EN		0x1c
+#define TCC803X_GPIO_PULL_SEL		0x20	/* 1 = pull-up */
+#define TCC803X_GPIO_INPUT_EN		0x24
+#define TCC803X_GPIO_INPUT_TYPE		0x28	/* 1 = schmitt */
 #define TCC803X_GPIO_FUNC		0x30
 
 /* FUNC is a 4-bit field per pin, 8 pins per 32-bit register.
@@ -120,8 +125,8 @@ static unsigned int tcc803x_uart1_pins[4];
  * uart8_data, board tcc8031-android-avn.dtsi:1001): gpa-18 TX, gpa-19 RX,
  * function 7. The vendor LK board table (AVNT5W_TCC803XKK_bootloadernew/
  * target/tcc803x_android_widepe/gpio.c:53-54,106-107, WIDE_PE_BOARD branch)
- * sets the same functions with pull disabled on all four; this driver has no
- * pinconf, so the pull is left as reset/stock has it. Its gpa-19 note says
+ * sets the same functions with pull disabled on all four; the group sets no
+ * bias, so the pull is left as reset/stock has it. Its gpa-19 note says
  * "Pull-up needed", presumably external: unverified.
  */
 static unsigned int tcc803x_uart2_pins[2];
@@ -244,7 +249,8 @@ struct tcc803x_pinctrl {
 	 * readl()/writel() pair. Also taken around the DATA_OR/DATA_BIC
 	 * write in tcc803x_gpio_set() for the same reason, even though that
 	 * one write is itself atomic - it keeps a direction_set() and a
-	 * set() on sibling pins from interleaving unpredictably.
+	 * set() on sibling pins from interleaving unpredictably. FUNC and
+	 * the pinconf registers are packed the same way.
 	 */
 	spinlock_t lock;
 };
@@ -392,8 +398,11 @@ static int tcc803x_pctl_dt_node_to_map(struct pinctrl_dev *pctldev,
 	/*
 	 * Groups are static (see KNOWN GAP note): the DT node's name picks
 	 * the compiled-in group; its telechips,pins/pin-function are not read.
+	 * Generic pinconf properties on the node apply to that group's pins.
 	 */
 	unsigned int reserved = 0;
+	unsigned long *configs = NULL;
+	unsigned int nconfigs = 0;
 	unsigned int i;
 	int ret;
 
@@ -406,13 +415,35 @@ static int tcc803x_pctl_dt_node_to_map(struct pinctrl_dev *pctldev,
 	if (i == ARRAY_SIZE(tcc803x_groups))
 		return -EINVAL;
 
-	ret = pinctrl_utils_reserve_map(pctldev, map, &reserved, num_maps, 1);
+	ret = pinconf_generic_parse_dt_config(np, pctldev, &configs, &nconfigs);
 	if (ret)
 		return ret;
 
-	return pinctrl_utils_add_map_mux(pctldev, map, &reserved, num_maps,
-					  tcc803x_groups[i].name,
-					  tcc803x_groups[i].function);
+	ret = pinctrl_utils_reserve_map(pctldev, map, &reserved, num_maps,
+					nconfigs ? 2 : 1);
+	if (ret)
+		goto out;
+
+	ret = pinctrl_utils_add_map_mux(pctldev, map, &reserved, num_maps,
+					tcc803x_groups[i].name,
+					tcc803x_groups[i].function);
+	if (ret)
+		goto out;
+
+	if (nconfigs)
+		ret = pinctrl_utils_add_map_configs(pctldev, map, &reserved,
+						    num_maps,
+						    tcc803x_groups[i].name,
+						    configs, nconfigs,
+						    PIN_MAP_TYPE_CONFIGS_GROUP);
+out:
+	kfree(configs);
+	if (ret) {
+		pinctrl_utils_free_map(pctldev, *map, *num_maps);
+		*map = NULL;
+		*num_maps = 0;
+	}
+	return ret;
 }
 
 static const struct pinctrl_ops tcc803x_pctl_ops = {
@@ -421,6 +452,169 @@ static const struct pinctrl_ops tcc803x_pctl_ops = {
 	.get_group_pins		= tcc803x_pctl_get_group_pins,
 	.dt_node_to_map		= tcc803x_pctl_dt_node_to_map,
 	.dt_free_map		= pinctrl_utils_free_map,
+};
+
+/* --- pinconf_ops --- */
+
+static int tcc803x_pinconf_get(struct pinctrl_dev *pctldev, unsigned int pin,
+			       unsigned long *config)
+{
+	struct tcc803x_pinctrl *pctl = pinctrl_dev_get_drvdata(pctldev);
+	enum pin_config_param param = pinconf_to_config_param(*config);
+	unsigned int local;
+	const struct tcc803x_bank *bank = tcc803x_pin_to_bank(pin, &local);
+	void __iomem *base;
+	bool pe, pu, on;
+
+	if (!bank)
+		return -ENOTSUPP;
+
+	base = pctl->base + bank->reg_offset;
+	pe = readl(base + TCC803X_GPIO_PULL_EN) & BIT(local);
+	pu = readl(base + TCC803X_GPIO_PULL_SEL) & BIT(local);
+
+	switch (param) {
+	case PIN_CONFIG_BIAS_DISABLE:
+		on = !pe;
+		break;
+	case PIN_CONFIG_BIAS_PULL_UP:
+		on = pe && pu;
+		break;
+	case PIN_CONFIG_BIAS_PULL_DOWN:
+		on = pe && !pu;
+		break;
+	case PIN_CONFIG_INPUT_ENABLE:
+		on = readl(base + TCC803X_GPIO_INPUT_EN) & BIT(local);
+		break;
+	case PIN_CONFIG_INPUT_SCHMITT_ENABLE:
+		on = readl(base + TCC803X_GPIO_INPUT_TYPE) & BIT(local);
+		break;
+	default:
+		return -ENOTSUPP;
+	}
+
+	if (!on)
+		return -EINVAL;
+
+	*config = pinconf_to_config_packed(param, 1);
+	return 0;
+}
+
+static void tcc803x_pinconf_rmw(void __iomem *reg, unsigned int local,
+				bool set)
+{
+	u32 val = readl(reg);
+
+	if (set)
+		val |= BIT(local);
+	else
+		val &= ~BIT(local);
+	writel(val, reg);
+}
+
+static int tcc803x_pinconf_set(struct pinctrl_dev *pctldev, unsigned int pin,
+			       unsigned long *configs, unsigned int num_configs)
+{
+	struct tcc803x_pinctrl *pctl = pinctrl_dev_get_drvdata(pctldev);
+	unsigned int local;
+	const struct tcc803x_bank *bank = tcc803x_pin_to_bank(pin, &local);
+	void __iomem *base;
+	unsigned long flags;
+	unsigned int i;
+	int ret = 0;
+
+	if (!bank)
+		return -ENOTSUPP;
+
+	base = pctl->base + bank->reg_offset;
+
+	spin_lock_irqsave(&pctl->lock, flags);
+	for (i = 0; i < num_configs; i++) {
+		enum pin_config_param param = pinconf_to_config_param(configs[i]);
+		u32 arg = pinconf_to_config_argument(configs[i]);
+
+		switch (param) {
+		case PIN_CONFIG_BIAS_DISABLE:
+			tcc803x_pinconf_rmw(base + TCC803X_GPIO_PULL_EN, local,
+					    false);
+			break;
+		case PIN_CONFIG_BIAS_PULL_UP:
+		case PIN_CONFIG_BIAS_PULL_DOWN:
+			/* Select before enable: never pull the wrong way. */
+			tcc803x_pinconf_rmw(base + TCC803X_GPIO_PULL_SEL, local,
+					    param == PIN_CONFIG_BIAS_PULL_UP);
+			tcc803x_pinconf_rmw(base + TCC803X_GPIO_PULL_EN, local,
+					    true);
+			break;
+		case PIN_CONFIG_INPUT_ENABLE:
+			tcc803x_pinconf_rmw(base + TCC803X_GPIO_INPUT_EN, local,
+					    arg);
+			break;
+		case PIN_CONFIG_INPUT_SCHMITT_ENABLE:
+			tcc803x_pinconf_rmw(base + TCC803X_GPIO_INPUT_TYPE, local,
+					    arg);
+			break;
+		default:
+			ret = -ENOTSUPP;
+			break;
+		}
+		if (ret)
+			break;
+	}
+	spin_unlock_irqrestore(&pctl->lock, flags);
+
+	return ret;
+}
+
+static int tcc803x_pinconf_group_get(struct pinctrl_dev *pctldev,
+				     unsigned int selector,
+				     unsigned long *config)
+{
+	const struct tcc803x_group *grp = &tcc803x_groups[selector];
+	unsigned long first = 0;
+	unsigned int i;
+	int ret;
+
+	for (i = 0; i < grp->npins; i++) {
+		unsigned long cfg = *config;
+
+		ret = tcc803x_pinconf_get(pctldev, grp->pins[i], &cfg);
+		if (ret)
+			return ret;
+		if (i && cfg != first)
+			return -EINVAL;
+		first = cfg;
+	}
+
+	*config = first;
+	return 0;
+}
+
+static int tcc803x_pinconf_group_set(struct pinctrl_dev *pctldev,
+				     unsigned int selector,
+				     unsigned long *configs,
+				     unsigned int num_configs)
+{
+	const struct tcc803x_group *grp = &tcc803x_groups[selector];
+	unsigned int i;
+	int ret;
+
+	for (i = 0; i < grp->npins; i++) {
+		ret = tcc803x_pinconf_set(pctldev, grp->pins[i], configs,
+					  num_configs);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+static const struct pinconf_ops tcc803x_pinconf_ops = {
+	.is_generic		= true,
+	.pin_config_get		= tcc803x_pinconf_get,
+	.pin_config_set		= tcc803x_pinconf_set,
+	.pin_config_group_get	= tcc803x_pinconf_group_get,
+	.pin_config_group_set	= tcc803x_pinconf_group_set,
 };
 
 /* --- gpio_chip --- */
@@ -607,6 +801,7 @@ static int tcc803x_pinctrl_probe(struct platform_device *pdev)
 	pctl->desc.owner = THIS_MODULE;
 	pctl->desc.pctlops = &tcc803x_pctl_ops;
 	pctl->desc.pmxops = &tcc803x_pmx_ops;
+	pctl->desc.confops = &tcc803x_pinconf_ops;
 	pctl->desc.pins = pctl->pins;
 	pctl->desc.npins = pctl->npins;
 

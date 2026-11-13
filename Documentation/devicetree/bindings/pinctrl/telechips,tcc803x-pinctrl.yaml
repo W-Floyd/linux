@@ -55,9 +55,13 @@ required:
 patternProperties:
   "-grp$":
     type: object
-    additionalProperties: false
+    allOf:
+      - $ref: pincfg-node.yaml#
+      - $ref: pinmux-node.yaml#
+    unevaluatedProperties: false
     description:
-      A pin group assigning one function to a list of pins.
+      A pin group assigning one function to a list of pins, optionally with
+      pin configuration applied to every pin in it.
 
     properties:
       telechips,pins:
@@ -72,6 +76,14 @@ patternProperties:
           There is no symbolic name for these in vendor source beyond the
           raw integer; see the driver for the one value currently known
           (UART0, 7).
+
+      bias-disable: true
+      bias-pull-up: true
+      bias-pull-down: true
+      input-enable: true
+      input-disable: true
+      input-schmitt-enable: true
+      input-schmitt-disable: true
 
     required:
       - telechips,pins
@@ -90,6 +102,8 @@ examples:
         uart0_grp: uart0-grp {
             telechips,pins = "gpsd0-11", "gpsd0-12";
             telechips,pin-function = <7>;
+            bias-disable;
+            input-enable;
         };
     };
 ...
