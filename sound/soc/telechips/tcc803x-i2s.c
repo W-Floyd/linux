@@ -65,6 +65,7 @@
 #define  ADRCNT_MODE			BIT(31)
 #define  ADRCNT_COUNT			GENMASK(30, 0)
 #define ADMA_RESET		0x180
+#define  RESET_TX			BIT(0)
 #define  RESET_DAI_TX			BIT(2)
 
 /* DAI block, tcc_audio_hw.h:111-137, 640-910 */
@@ -124,6 +125,7 @@ struct tcc803x_i2s {
 	spinlock_t lock;
 	struct snd_pcm_substream *substream;
 	bool pclk_on;
+	u32 damr_filter;
 	unsigned int amp_volume;
 };
 
@@ -241,8 +243,11 @@ static int tcc803x_i2s_startup(struct snd_pcm_substream *substream,
 	reg_update(i2s->dai, DAI_DAMR, DAMR_EN | DAMR_TX_EN | DAMR_RX_EN, 0);
 	reg_update(i2s->dai, DAI_MCCR0, MCCR0_DAO_MASK, MCCR0_DAO_MASK);
 
-	/* tcc_adma_pcm_open(): take the DAI TX channel out of reset. */
-	reg_update(i2s->adma, ADMA_RESET, RESET_DAI_TX, 0);
+	/*
+	 * tcc_adma_pcm_open() releases only the DAI TX reset; the common TX
+	 * reset (bit 0) is released too in case the boot stages left it set.
+	 */
+	reg_update(i2s->adma, ADMA_RESET, RESET_TX | RESET_DAI_TX, 0);
 
 	return 0;
 
@@ -307,6 +312,8 @@ static int tcc803x_i2s_hw_params(struct snd_pcm_substream *substream,
 	 */
 	writel(DCLKDIV_FRAME_64 | DCLKDIV_BIT_16, i2s->dai + DAI_DCLKDIV);
 	reg_update(i2s->dai, DAI_MCCR0, MCCR0_TDM_BIT_CLK_DIV, 0);
+	/* The 805x manual wants DAMR set after MCCR0/MCCR1. */
+	reg_update(i2s->dai, DAI_MCCR1, MCCR1_DAO_PATH_ASRC, 0);
 
 	/* I2S, 16-bit LSB-aligned in the FIFO word, ADMA-fed, no multiport. */
 	reg_update(i2s->dai, DAI_DAMR,
@@ -315,8 +322,7 @@ static int tcc803x_i2s_hw_params(struct snd_pcm_substream *substream,
 		   DAMR_DSP_TDM | DAMR_MULTIPORT | DAMR_TX_SHIFT |
 		   DAMR_THRESHOLD | DAMR_FILTER,
 		   FIELD_PREP(DAMR_TX_SHIFT, DAMR_TX_SHIFT_LSB_16) |
-		   DAMR_THRESHOLD | DAMR_FILTER);
-	reg_update(i2s->dai, DAI_MCCR1, MCCR1_DAO_PATH_ASRC, 0);
+		   DAMR_THRESHOLD | i2s->damr_filter);
 
 	/* Provider of mclk, bit clock and frame clock. */
 	reg_update(i2s->dai, DAI_DAMR,
@@ -611,6 +617,7 @@ static int tcc803x_i2s_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct tcc803x_i2s *i2s;
 	int irq, ret;
+	u32 val;
 
 	i2s = devm_kzalloc(dev, sizeof(*i2s), GFP_KERNEL);
 	if (!i2s)
@@ -618,6 +625,9 @@ static int tcc803x_i2s_probe(struct platform_device *pdev)
 
 	i2s->dev = dev;
 	i2s->amp_volume = AMP_VOLUME_DEFAULT;
+	i2s->damr_filter = DAMR_FILTER;
+	if (!of_property_read_u32(dev->of_node, "telechips,audio-filter", &val))
+		i2s->damr_filter = val ? DAMR_FILTER : 0;
 	spin_lock_init(&i2s->lock);
 	platform_set_drvdata(pdev, i2s);
 

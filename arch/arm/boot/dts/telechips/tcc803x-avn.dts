@@ -535,6 +535,7 @@
 &i2s3 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&i2s3_grp>;
+	telechips,audio-filter = <0>;
 	status = "okay";
 };
 

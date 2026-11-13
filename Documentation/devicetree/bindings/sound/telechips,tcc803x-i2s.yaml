@@ -52,6 +52,12 @@ properties:
           - description: pad port the block drives
     description: Which pad port this DAI is routed to.
 
+  telechips,audio-filter:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    enum: [0, 1]
+    description:
+      DAI audio (clock) filter, DAMR bit 27. The driver enables it when absent.
+
   '#sound-dai-cells':
     const: 0
 
@@ -83,5 +89,6 @@ examples:
                  <&sipclk TCC803X_SIPCLK_IOBUS_SR_ADMA0>;
         clock-names = "pclk", "hclk", "filter", "adma";
         telechips,chmux = <&audio_chmux 3 4>;
+        telechips,audio-filter = <0>;
         #sound-dai-cells = <0>;
     };
