@@ -55,6 +55,7 @@
  *    controller needs to not corrupt I/O even at its power-on defaults.
  */
 
+#include <linux/arm-smccc.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/err.h>
@@ -81,6 +82,20 @@
 #define TCC_SDHC_DELAY_CON3		0x34
 #define TCC_SDHC_DELAY_CON4		0x38
 #define TCC_SDHC_CD_WP			0x4C
+
+#define TCC_SDHC_VENDOR			0x78
+
+/*
+ * Diagnostics only. Offsets from the shared channel-control base (reg[1]
+ * minus controller-id * stride): the rev > 0 clock-delay block at 0xFC, and
+ * CMD/DATA taps at 0x12C + ch * 0x24 (U-Boot) or 0x12C - ch * 0x2C (vendor).
+ * The dump spans every channel's candidate under both.
+ */
+#define TCC_SDHC_CHCTRL_STRIDE		0x50
+#define TCC_SDHC_REV1_DUMP_START	0xD0
+#define TCC_SDHC_REV1_DUMP_END		0x1A0
+
+#define TCC_SIP_CHIP_REV		0x82007000
 
 #define TCC_SDHC_TAPDLY_TUNE_CNT(x)	(((x) & 0x3F) << 16)
 #define TCC_SDHC_TAPDLY_OTAP_SEL(x)	(((x) & 0x1F) << 8)
@@ -161,6 +176,60 @@ static void sdhci_tcc803x_set_channel_configs(struct sdhci_host *host,
 
 	/* Clear CD/WP override; card detect comes from the SDHCI core. */
 	writel(0, base + TCC_SDHC_CD_WP);
+}
+
+static void sdhci_tcc803x_log_chip_rev(struct device *dev)
+{
+	struct arm_smccc_res res;
+
+	/* Firmware below SMCCC 1.1 reports no conduit, but still takes the SMC. */
+	if (!IS_ENABLED(CONFIG_HAVE_ARM_SMCCC) ||
+	    (IS_ENABLED(CONFIG_HAVE_ARM_SMCCC_DISCOVERY) &&
+	     arm_smccc_1_1_get_conduit() == SMCCC_CONDUIT_HVC))
+		return;
+
+	/* SMC32 call: only w0 is defined on arm64. */
+	arm_smccc_smc(TCC_SIP_CHIP_REV, 0, 0, 0, 0, 0, 0, 0, &res);
+	if ((s32)res.a0 < 0)
+		dev_info(dev, "chip rev unavailable (%d)\n", (s32)res.a0);
+	else
+		dev_info(dev, "chip rev %u (rev-0 register layout in use)\n",
+			 (u32)res.a0);
+}
+
+static void sdhci_tcc803x_dump_regs(struct sdhci_host *host, const char *when,
+				    resource_size_t size)
+{
+	struct sdhci_tcc803x *tcc = to_tcc803x(host);
+	struct device *dev = mmc_dev(host->mmc);
+	void __iomem *base = tcc->chctrl_base;
+	u32 ch_off = tcc->controller_id * TCC_SDHC_CHCTRL_STRIDE;
+	unsigned int off;
+
+	dev_dbg(dev, "%s: TAPDLY %08x CAP %08x %08x DLY %08x %08x %08x %08x %08x CD_WP %08x VENDOR %08x\n",
+		when, readl(base + TCC_SDHC_TAPDLY),
+		readl(base + TCC_SDHC_CAPREG0), readl(base + TCC_SDHC_CAPREG1),
+		readl(base + TCC_SDHC_DELAY_CON0),
+		readl(base + TCC_SDHC_DELAY_CON1),
+		readl(base + TCC_SDHC_DELAY_CON2),
+		readl(base + TCC_SDHC_DELAY_CON3),
+		readl(base + TCC_SDHC_DELAY_CON4),
+		readl(base + TCC_SDHC_CD_WP),
+		sdhci_readl(host, TCC_SDHC_VENDOR));
+
+	if (ch_off > TCC_SDHC_REV1_DUMP_START ||
+	    TCC_SDHC_REV1_DUMP_END - ch_off > size) {
+		dev_dbg(dev, "%s: chctrl 0x%x-0x%x outside mapped window, skipped\n",
+			when, TCC_SDHC_REV1_DUMP_START, TCC_SDHC_REV1_DUMP_END);
+		return;
+	}
+
+	for (off = TCC_SDHC_REV1_DUMP_START; off < TCC_SDHC_REV1_DUMP_END;
+	     off += 16)
+		dev_dbg(dev, "%s: chctrl+%03x: %08x %08x %08x %08x\n", when, off,
+			readl(base + off - ch_off), readl(base + off - ch_off + 4),
+			readl(base + off - ch_off + 8),
+			readl(base + off - ch_off + 12));
 }
 
 /*
@@ -274,6 +343,8 @@ static int sdhci_tcc803x_probe(struct platform_device *pdev)
 	if (!tcc->chctrl_base)
 		return -ENOMEM;
 
+	sdhci_tcc803x_log_chip_rev(dev);
+
 	tcc->reset_gpio = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_LOW);
 	if (IS_ERR(tcc->reset_gpio)) {
 		ret = PTR_ERR(tcc->reset_gpio);
@@ -306,7 +377,10 @@ static int sdhci_tcc803x_probe(struct platform_device *pdev)
 				 clk_get_rate(pltfm_host->clk), host->mmc->f_max, ret);
 	}
 
+	/* "pre" is what firmware left; "post" shows whether rev-0 writes stuck. */
+	sdhci_tcc803x_dump_regs(host, "pre", resource_size(res));
 	sdhci_tcc803x_set_channel_configs(host, clk_out_tap, cmd_tap, data_tap);
+	sdhci_tcc803x_dump_regs(host, "post", resource_size(res));
 
 	ret = sdhci_add_host(host);
 	if (ret)
