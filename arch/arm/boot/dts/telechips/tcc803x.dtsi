@@ -251,12 +251,14 @@
 
 	/* The cores' PMU, one SPI each (vendor tcc803x.dtsi:238-244): for perf. */
 	pmu {
-		compatible = "arm,cortex-a15-pmu";
+		/* a53 for the arm64 PMUv3 driver, a15 for the 32-bit v7 one. */
+		compatible = "arm,cortex-a53-pmu", "arm,cortex-a15-pmu";
 		/* Level high: this GIC takes no level-low SPI (the vendor's patched one did). */
 		interrupts = <GIC_SPI 165 IRQ_TYPE_LEVEL_HIGH>,
 			     <GIC_SPI 166 IRQ_TYPE_LEVEL_HIGH>,
 			     <GIC_SPI 167 IRQ_TYPE_LEVEL_HIGH>,
 			     <GIC_SPI 168 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-affinity = <&cpu0>, <&cpu1>, <&cpu2>, <&cpu3>;
 	};
 
 	/*
