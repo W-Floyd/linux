@@ -40,6 +40,11 @@
  */
 #define TCC_WDT_MAX_COUNT	0x10000000U
 
+static bool pmu_reset = true;
+module_param(pmu_reset, bool, 0644);
+MODULE_PARM_DESC(pmu_reset,
+		 "Set WDT_PMU_RESET (bit 6) on start, read at each start (default true)");
+
 struct tcc803x_wdt {
 	struct watchdog_device wdd;
 	u32 rate;
@@ -76,18 +81,20 @@ static int tcc803x_wdt_set_timeout(struct watchdog_device *wdd, unsigned int t)
 static int tcc803x_wdt_start(struct watchdog_device *wdd)
 {
 	struct arm_smccc_res res;
+	u32 ctrl = WDT_PMU_EN;
 
 	tcc803x_wdt_set_timeout(wdd, wdd->timeout);
 	tcc803x_wdt_ping(wdd);
 	/*
-	 * WDT_PMU_RESET must be set here: this chip has separate IRQ and
-	 * reset-count registers, and nothing else in this driver sets it, so
-	 * without it expiry likely only raises the IRQ (SPI 39) rather than
-	 * resetting the board. Unconfirmed on hardware: GET_STATUS only
-	 * returns bits 23:16, so confirming this bit took effect needs a real
-	 * reset test or a direct read of WDTCTRL (0x144000D8) bit 6.
+	 * Whether expiry resets the unit or only raises the IRQ (SPI 39)
+	 * without WDT_PMU_RESET is unconfirmed on 803x: the MX-30 vendor
+	 * kernel sets it, topst's does not. GET_STATUS only returns bits
+	 * 23:16, so only an expiry test or a read of WDTCTRL (0x144000D8)
+	 * shows its effect; pmu_reset allows testing both ways.
 	 */
-	arm_smccc_smc(SIP_WATCHDOG_START, 0, WDT_PMU_EN | WDT_PMU_RESET, 0, 0, 0, 0, 0, &res);
+	if (pmu_reset)
+		ctrl |= WDT_PMU_RESET;
+	arm_smccc_smc(SIP_WATCHDOG_START, 0, ctrl, 0, 0, 0, 0, 0, &res);
 	return 0;
 }
 
