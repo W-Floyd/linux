@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR MIT)
+/*
+ * The AVN board with the panel on the path the stock firmware drives: DISP0
+ * into the HDMI TX, then an ADV7613 and the serdes. The LVDS PHY is idle on
+ * this unit. vioc_crtc0 resolves a single bridge off its one endpoint, so
+ * LVDS is unwired here.
+ */
+
+#include "tcc803x-avn.dts"
+
+&hdmi_tx {
+	status = "okay";
+};
+
+&vioc_crtc0_out {
+	remote-endpoint = <&hdmi_tx_in>;
+};
+
+&lvds_phy {
+	status = "disabled";
+};
+
+&lvds_phy_in {
+	/delete-property/ remote-endpoint;
+};
