@@ -4,4 +4,5 @@
 dtb-$(CONFIG_ARCH_TCC803X) += \
 	tcc803x-avn.dtb \
 	tcc803x-avn-gadget.dtb \
-	tcc803x-avn-gpucoherent.dtb
+	tcc803x-avn-gpucoherent.dtb \
+	tcc803x-avn-resv.dtb

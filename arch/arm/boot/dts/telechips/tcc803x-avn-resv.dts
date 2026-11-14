@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR MIT)
+/*
+ * tcc803x-avn with the regions the secure and companion cores may use kept out
+ * of the allocator. A bisect for system-wide memory corruption: tcc803x-avn.dts
+ * hands Linux all of the stock kernel's System RAM, which still contains the
+ * OP-TEE TZDRAM (0x2e000000, 32 MiB, no-map in the vendor DT), the vendor's
+ * vpu_share_m (0x30000000) and the window the A7S companion core would use
+ * (0x80000000 up; the stock firmware enables it only for dual-boot builds).
+ * Nothing says any of these is touched while Linux runs; delete a node to
+ * bisect which one matters. Nothing here has run on hardware.
+ */
+#include "tcc803x-avn.dts"
+
+/ {
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		optee_os: optee-os@2e000000 {
+			reg = <0x2e000000 0x02000000>;
+			no-map;
+		};
+
+		vpu_share_m: vpu-share@30000000 {
+			reg = <0x30000000 0x00001000>;
+			no-map;
+		};
+
+		a7s_avm: a7s-avm@80000000 {
+			reg = <0x80000000 0x06500000>;
+			no-map;
+		};
+	};
+};
