@@ -384,8 +384,8 @@ config DRM_TCC803X_DW_HDMI
 	  Choose this to enable the HDMI TX bridge on Telechips TCC803x
 	  SoCs. This is a Synopsys DesignWare HDMI TX controller with a
 	  Telechips-specific MMIO-mapped (non-I2C) companion PHY. Minimal
-	  support: PHY init and TMDS output for a single, vendor-confirmed
-	  pixel clock (1920x1080p60). No HDCP, audio, or CEC.
+	  support: PHY init and TMDS output for two pixel clocks (99.7 MHz,
+	  148.5 MHz) at 8 bits per component. No HDCP, audio, or CEC.
 
 config DRM_TCC803X_LVDS
 	tristate "Telechips TCC803x on-die LVDS bridge"

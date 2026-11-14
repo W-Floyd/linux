@@ -15,14 +15,13 @@
  * uses for Amlogic's non-I2C PHY.
  *
  * SCOPE: this is deliberately minimal -- PHY init and TMDS output enable
- * for a single, vendor-confirmed pixel clock (148.5 MHz / 1920x1080p60,
- * 8 bits/component), matching this board's fixed_video_id_code = 16 and
- * the dw-hdmi core's own mode negotiation, link training, EDID handling,
- * and AVI infoframe generation above this glue. No HDCP, no audio, no CEC.
- * The vendor's phy_803x.c carries ~100 further per-clock PHY register
- * tables (25.175 MHz through 594 MHz, 8/10/12 bpc each) that a fuller port
- * would need; only the one entry this board actually drives is reproduced
- * below, each byte cited against that table rather than invented.
+ * for two pixel clocks at 8 bits/component (99.7 MHz, the AVN unit's
+ * 1920x720 panel mode, and 148.5 MHz / 1920x1080p60, the vendor board's
+ * fixed_video_id_code = 16), with the dw-hdmi core's own mode negotiation,
+ * EDID handling and AVI infoframe generation above this glue. No HDCP, no
+ * audio, no CEC. The vendor's phy_803x.c carries ~100 further per-clock
+ * PHY register tables (25.175 MHz through 594 MHz, 8/10/12 bpc each) that
+ * a fuller port would need.
  *
  * Clock inputs are NOT wired up: the vendor DT lists 8 CKC outputs for
  * this node (PERI_HDMI_CORE/AUDIO/PCLK/CEC/HDCP14/HDCP22, DDIBUS_HDMI,
@@ -64,13 +63,26 @@ struct tcc803x_hdmi_phy_cfg {
 };
 
 /*
- * Single vendor-confirmed entry: phy_803x.c:816-823 (148500000 Hz,
- * .pixel = 8, i.e. 8 bits/component -- this board's only configured mode,
- * 1920x1080p60 / fixed_video_id_code 16). The 10/12 bpc siblings at the
- * same clock (phy_803x.c:824-841) are not reproduced: nothing in this
- * board's DT requests deep color.
+ * 8 bits/component only; nothing requests deep color.
+ *
+ * 99700000: read back from the PHY with the stock firmware's 1920x720
+ * picture up, the row LK's own table holds for this clock (its leading
+ * bytes match). Those values follow LK's tuning step, and LK never writes
+ * 0x21: 0x82 is what the PHY held, not a table value.
+ *
+ * 148500000: phy_803x.c:816-823 (vendor 1920x1080p60, vic 16).
  */
 static const struct tcc803x_hdmi_phy_cfg tcc803x_hdmi_phy_cfgs[] = {
+	{
+		.mpixelclock = 99700000,
+		.reg = {
+			0xd1, 0x53, 0x32, 0x8c, 0x01, 0x90, 0x4d, 0x4f, 0x30,
+			0x33, 0x65, 0x10, 0x7c, 0x24, 0x80, 0x6c, 0xf2, 0x67,
+			0x00, 0x10, 0x83, 0x30, 0x00, 0x40, 0x8f, 0x00, 0x00,
+			0x08, 0x00, 0x00, 0x00, 0x00, 0x82, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0xe0, 0x83, 0x0f, 0x3e, 0xf8, 0x00,
+		},
+	},
 	{
 		.mpixelclock = 148500000,
 		.reg = {
@@ -115,9 +127,9 @@ tcc803x_hdmi_mode_valid(struct dw_hdmi *dw_hdmi, void *data,
 			 const struct drm_display_mode *mode)
 {
 	/*
-	 * Only the one PHY table entry this glue carries is usable. Reject
-	 * everything else rather than silently applying the wrong PHY
-	 * settings -- see the file header on why the table is this sparse.
+	 * Only clocks with a PHY table entry are usable. Reject everything
+	 * else rather than silently applying the wrong PHY settings -- see
+	 * the file header on why the table is this sparse.
 	 */
 	if (!tcc803x_hdmi_find_phy_cfg(mode->clock * 1000))
 		return MODE_CLOCK_RANGE;
