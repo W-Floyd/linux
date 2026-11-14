@@ -224,7 +224,15 @@
 	status = "okay";
 };
 
+/*
+ * The unit boots LK, which reads the reason's low nibble (1 fastboot, 2
+ * recovery, 3 force_normal, 4 panic, else normal) and writes small codes, not
+ * the U-Boot magics the SoC dtsi carries. Unconfirmed on the unit.
+ */
 &reboot_mode {
+	mode-normal = <0>;
+	mode-fastboot = <1>;
+	mode-recovery = <2>;
 	status = "okay";
 };
 
