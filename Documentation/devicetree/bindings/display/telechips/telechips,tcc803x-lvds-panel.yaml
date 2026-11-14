@@ -12,8 +12,8 @@ maintainers:
 description: |
   Same physical panel as telechips,tcc803x-mrgb-panel.yaml -- same
   board, same 1920x720 touch-coordinate-matched dimensions, same
-  live-captured DISP0 timing (LHTIME1/2, LVTIME1/2, decoded through
-  drivers/gpu/drm/telechips/tcc803x_drm_vioc.c's bitfield layout, which
+  live-captured DISP0 timing (LHTIME1/2, LVTIME1/2, each field plus one,
+  per drivers/gpu/drm/telechips/tcc803x_drm_vioc.c's bitfield layout, which
   DISP0 generates and this output path passes through unmodified
   regardless of whether it leaves the SoC via MRGB pins or the on-die
   LVDS PHY). A separate compatible string instead of reusing
@@ -23,11 +23,7 @@ description: |
   telechips,tcc803x-mrgb-panel.yaml's description for the full
   LVDS-vs-MRGB evidence trail, which this binding does not repeat.
 
-  clock-frequency is omitted from panel-timing for the same reason as
-  the MRGB binding: the real pixel clock is an open question (live
-  LCLKDIV reads PXCLKDIV=0, ACDIV=0, which does not resolve cleanly
-  against the divider formula tcc803x_drm_vioc.c cites) independent of
-  which output stage is used.
+  Timing as in the MRGB binding.
 
 properties:
   compatible:
@@ -52,23 +48,30 @@ properties:
   panel-timing:
     type: object
     properties:
+      clock-frequency:
+        const: 99700000
       hactive:
         const: 1920
       vactive:
         const: 720
       hsync-len:
-        const: 31
+        const: 32
       hfront-porch:
-        const: 49
+        const: 50
       hback-porch:
-        const: 159
+        const: 160
       vsync-len:
-        const: 4
+        const: 5
       vfront-porch:
-        const: 14
+        const: 15
       vback-porch:
-        const: 27
+        const: 28
+      hsync-active:
+        const: 1
+      vsync-active:
+        const: 1
     required:
+      - clock-frequency
       - hactive
       - vactive
       - hsync-len
@@ -93,14 +96,17 @@ examples:
         height-mm = <243>;
 
         panel-timing {
+            clock-frequency = <99700000>;
             hactive = <1920>;
             vactive = <720>;
-            hsync-len = <31>;
-            hfront-porch = <49>;
-            hback-porch = <159>;
-            vsync-len = <4>;
-            vfront-porch = <14>;
-            vback-porch = <27>;
+            hsync-len = <32>;
+            hfront-porch = <50>;
+            hback-porch = <160>;
+            vsync-len = <5>;
+            vfront-porch = <15>;
+            vback-porch = <28>;
+            hsync-active = <1>;
+            vsync-active = <1>;
         };
     };
 

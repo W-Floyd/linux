@@ -341,22 +341,29 @@
 #define DISP_LCLKDIV_PXCLKDIV_MASK	GENMASK(7, 0)
 #define DISP_LCLKDIV_ACDIV_MASK		GENMASK(23, 16)
 
-/* LHTIME1 (0x00c): LPC bits[13:0] = hdisplay - 1, LPW bits[24:16] = hsync width. */
+/*
+ * Every DISP count field holds its value minus one: U-Boot's
+ * VIOC_DISP_SetTimingParam() and fb_dm_lcd_interface.c subtract 1 from
+ * each, and the live LHTIME2 + LPW decode that way to the HDMI link's
+ * hblank of 242.
+ */
+
+/* LHTIME1 (0x00c): LPC bits[13:0] = hdisplay - 1, LPW bits[24:16] = hsync width - 1. */
 #define DISP_LHTIME1		0x00C
 #define DISP_LHTIME1_LPC_MASK	GENMASK(13, 0)
 #define DISP_LHTIME1_LPW_MASK	GENMASK(24, 16)
 
-/* LHTIME2 (0x010): LEWC bits[8:0] = h front porch, LSWC bits[24:16] = h back porch. */
+/* LHTIME2 (0x010): LEWC bits[8:0] = h front porch - 1, LSWC bits[24:16] = h back porch - 1. */
 #define DISP_LHTIME2		0x010
 #define DISP_LHTIME2_LEWC_MASK	GENMASK(8, 0)
 #define DISP_LHTIME2_LSWC_MASK	GENMASK(24, 16)
 
-/* LVTIME1 (0x014): FLC bits[13:0] = vdisplay - 1, FPW bits[21:16] = vsync width. */
+/* LVTIME1 (0x014): FLC bits[13:0] = vdisplay - 1, FPW bits[21:16] = vsync width - 1. */
 #define DISP_LVTIME1		0x014
 #define DISP_LVTIME1_FLC_MASK	GENMASK(13, 0)
 #define DISP_LVTIME1_FPW_MASK	GENMASK(21, 16)
 
-/* LVTIME2 (0x018): FEWC bits[8:0] = v front porch, FSWC bits[24:16] = v back porch. */
+/* LVTIME2 (0x018): FEWC bits[8:0] = v front porch - 1, FSWC bits[24:16] = v back porch - 1. */
 #define DISP_LVTIME2		0x018
 #define DISP_LVTIME2_FEWC_MASK	GENMASK(8, 0)
 #define DISP_LVTIME2_FSWC_MASK	GENMASK(24, 16)
@@ -397,12 +404,12 @@
  */
 #define DISP0_HDISPLAY		1920
 #define DISP0_VDISPLAY		720
-#define DISP0_HSYNC_WIDTH	31	/* LPW, LHTIME1[24:16] */
-#define DISP0_HBACK_PORCH	159	/* LSWC, LHTIME2[24:16] */
-#define DISP0_HFRONT_PORCH	49	/* LEWC, LHTIME2[8:0] */
-#define DISP0_VSYNC_WIDTH	4	/* FPW, LVTIME1[21:16] */
-#define DISP0_VBACK_PORCH	27	/* FSWC, LVTIME2[24:16] */
-#define DISP0_VFRONT_PORCH	14	/* FEWC, LVTIME2[8:0] */
+#define DISP0_HSYNC_WIDTH	32	/* LPW + 1, LHTIME1[24:16] */
+#define DISP0_HBACK_PORCH	160	/* LSWC + 1, LHTIME2[24:16] */
+#define DISP0_HFRONT_PORCH	50	/* LEWC + 1, LHTIME2[8:0] */
+#define DISP0_VSYNC_WIDTH	5	/* FPW + 1, LVTIME1[21:16] */
+#define DISP0_VBACK_PORCH	28	/* FSWC + 1, LVTIME2[24:16] */
+#define DISP0_VFRONT_PORCH	15	/* FEWC + 1, LVTIME2[8:0] */
 #define DISP0_PXCLKDIV		0	/* live LCLKDIV read: passthrough, not /(2*0) */
 #define DISP0_ACDIV		0	/* live LCLKDIV read: NOT the vendor-forced 1 */
 
@@ -548,24 +555,24 @@ static void tcc803x_crtc_atomic_enable(struct drm_crtc *crtc_base,
 	       crtc->disp + DISP_LCLKDIV);
 
 	writel(FIELD_PREP(DISP_LHTIME1_LPC_MASK, DISP0_HDISPLAY - 1) |
-	       FIELD_PREP(DISP_LHTIME1_LPW_MASK, DISP0_HSYNC_WIDTH),
+	       FIELD_PREP(DISP_LHTIME1_LPW_MASK, DISP0_HSYNC_WIDTH - 1),
 	       crtc->disp + DISP_LHTIME1);
-	writel(FIELD_PREP(DISP_LHTIME2_LEWC_MASK, DISP0_HFRONT_PORCH) |
-	       FIELD_PREP(DISP_LHTIME2_LSWC_MASK, DISP0_HBACK_PORCH),
+	writel(FIELD_PREP(DISP_LHTIME2_LEWC_MASK, DISP0_HFRONT_PORCH - 1) |
+	       FIELD_PREP(DISP_LHTIME2_LSWC_MASK, DISP0_HBACK_PORCH - 1),
 	       crtc->disp + DISP_LHTIME2);
 
 	writel(FIELD_PREP(DISP_LVTIME1_FLC_MASK, DISP0_VDISPLAY - 1) |
-	       FIELD_PREP(DISP_LVTIME1_FPW_MASK, DISP0_VSYNC_WIDTH),
+	       FIELD_PREP(DISP_LVTIME1_FPW_MASK, DISP0_VSYNC_WIDTH - 1),
 	       crtc->disp + DISP_LVTIME1);
-	writel(FIELD_PREP(DISP_LVTIME2_FEWC_MASK, DISP0_VFRONT_PORCH) |
-	       FIELD_PREP(DISP_LVTIME2_FSWC_MASK, DISP0_VBACK_PORCH),
+	writel(FIELD_PREP(DISP_LVTIME2_FEWC_MASK, DISP0_VFRONT_PORCH - 1) |
+	       FIELD_PREP(DISP_LVTIME2_FSWC_MASK, DISP0_VBACK_PORCH - 1),
 	       crtc->disp + DISP_LVTIME2);
 	/* Progressive scan: LVTIME3/4 mirror LVTIME1/2 (tca_lcdc.c:199-204). */
 	writel(FIELD_PREP(DISP_LVTIME1_FLC_MASK, DISP0_VDISPLAY - 1) |
-	       FIELD_PREP(DISP_LVTIME1_FPW_MASK, DISP0_VSYNC_WIDTH),
+	       FIELD_PREP(DISP_LVTIME1_FPW_MASK, DISP0_VSYNC_WIDTH - 1),
 	       crtc->disp + DISP_LVTIME3);
-	writel(FIELD_PREP(DISP_LVTIME2_FEWC_MASK, DISP0_VFRONT_PORCH) |
-	       FIELD_PREP(DISP_LVTIME2_FSWC_MASK, DISP0_VBACK_PORCH),
+	writel(FIELD_PREP(DISP_LVTIME2_FEWC_MASK, DISP0_VFRONT_PORCH - 1) |
+	       FIELD_PREP(DISP_LVTIME2_FSWC_MASK, DISP0_VBACK_PORCH - 1),
 	       crtc->disp + DISP_LVTIME4);
 
 	/*

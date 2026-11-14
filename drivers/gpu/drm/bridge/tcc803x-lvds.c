@@ -513,8 +513,7 @@ static int tcc803x_lvds_attach(struct drm_bridge *bridge,
  * The one panel mode: live DISP0 timing captured off the running unit
  * (tcc803x-avn.dts lvds-panel, tcc803x_drm_vioc.c DISP0_*). Sync polarity
  * is the live CTRL.IP/IH/IV = 0, i.e. active high. The pixel clock is
- * nominal (htotal * vtotal * 60): the real rate is whatever the
- * bootloader left running and nothing here programs it.
+ * LK's for this mode (vic 0x402); nothing here programs it.
  */
 static int tcc803x_lvds_get_modes(struct drm_bridge *bridge,
 				  struct drm_connector *connector)
@@ -525,15 +524,15 @@ static int tcc803x_lvds_get_modes(struct drm_bridge *bridge,
 	if (!mode)
 		return 0;
 
-	mode->clock = 99100;
+	mode->clock = 99700;
 	mode->hdisplay = 1920;
-	mode->hsync_start = mode->hdisplay + 49;
-	mode->hsync_end = mode->hsync_start + 31;
-	mode->htotal = mode->hsync_end + 159;
+	mode->hsync_start = mode->hdisplay + 50;
+	mode->hsync_end = mode->hsync_start + 32;
+	mode->htotal = mode->hsync_end + 160;
 	mode->vdisplay = 720;
-	mode->vsync_start = mode->vdisplay + 14;
-	mode->vsync_end = mode->vsync_start + 4;
-	mode->vtotal = mode->vsync_end + 27;
+	mode->vsync_start = mode->vdisplay + 15;
+	mode->vsync_end = mode->vsync_start + 5;
+	mode->vtotal = mode->vsync_end + 28;
 	mode->flags = DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC;
 	mode->type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED;
 	drm_mode_set_name(mode);

@@ -131,18 +131,12 @@ description: |
   Timing values below are not estimated: they are the same live DISP0
   register capture (LHTIME1/2, LVTIME1/2) already used to program the
   CRTC in drivers/gpu/drm/telechips/tcc803x_drm_vioc.c, decoded through
-  that file's DISP_LHTIME1/2 and DISP_LVTIME1/2 bitfield layout. They
-  describe DISP0's own timing generator, which this output path merely
-  passes through unmodified -- not an MRGB-specific register.
-  clock-frequency is deliberately left unlisted among this binding's
-  properties (and absent from its DT instance): the real pixel-clock
-  rate is the same open PLL/clock-source question tcc803x_drm_vioc.c's
-  atomic_enable() comment already tracks (live LCLKDIV reads
-  PXCLKDIV=0, ACDIV=0, which does not resolve cleanly against the
-  divider formula in that driver's own citation of
-  vioc_disp.h/tca_lcdc.c) -- supplying a number here would be a guess
-  presented as fact. This is a known, separately-tracked gap, not an
-  oversight.
+  that file's DISP_LHTIME1/2 and DISP_LVTIME1/2 bitfield layout (each
+  field holds its count minus one); the HDMI link's frame composer reads
+  the same blanking. They describe DISP0's own timing generator, which
+  this output path merely passes through unmodified -- not an
+  MRGB-specific register. clock-frequency is the stock LK's rate for
+  this mode (vic 0x402); the clock source itself is not modeled.
 
 properties:
   compatible:
@@ -174,27 +168,32 @@ properties:
     type: object
     description:
       Live-captured DISP0 hactive/vactive/porch/sync counts (see
-      description above). A reduced property set compared to the
-      generic panel-timing.yaml schema -- clock-frequency, which that
-      schema requires, is intentionally not among the properties below.
+      description above).
     properties:
+      clock-frequency:
+        const: 99700000
       hactive:
         const: 1920
       vactive:
         const: 720
       hsync-len:
-        const: 31
+        const: 32
       hfront-porch:
-        const: 49
+        const: 50
       hback-porch:
-        const: 159
+        const: 160
       vsync-len:
-        const: 4
+        const: 5
       vfront-porch:
-        const: 14
+        const: 15
       vback-porch:
-        const: 27
+        const: 28
+      hsync-active:
+        const: 1
+      vsync-active:
+        const: 1
     required:
+      - clock-frequency
       - hactive
       - vactive
       - hsync-len
@@ -219,14 +218,17 @@ examples:
         height-mm = <243>;
 
         panel-timing {
+            clock-frequency = <99700000>;
             hactive = <1920>;
             vactive = <720>;
-            hsync-len = <31>;
-            hfront-porch = <49>;
-            hback-porch = <159>;
-            vsync-len = <4>;
-            vfront-porch = <14>;
-            vback-porch = <27>;
+            hsync-len = <32>;
+            hfront-porch = <50>;
+            hback-porch = <160>;
+            vsync-len = <5>;
+            vfront-porch = <15>;
+            vback-porch = <28>;
+            hsync-active = <1>;
+            vsync-active = <1>;
         };
     };
 

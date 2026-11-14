@@ -143,23 +143,17 @@
 		height-mm = <110>;
 
 		panel-timing {
+			clock-frequency = <99700000>;
 			hactive = <1920>;
 			vactive = <720>;
-			hsync-len = <31>;
-			hfront-porch = <49>;
-			hback-porch = <159>;
-			vsync-len = <4>;
-			vfront-porch = <14>;
-			vback-porch = <27>;
-			/*
-			 * clock-frequency intentionally omitted -- see the
-			 * binding's description for why this is a tracked
-			 * gap, not an oversight. A dtbs_check run against
-			 * mainline's generic panel-timing.yaml (which lists
-			 * clock-frequency as required) will flag this node;
-			 * that failure is expected until the real pixel
-			 * clock is known, not a sign this node is wrong.
-			 */
+			hsync-len = <32>;
+			hfront-porch = <50>;
+			hback-porch = <160>;
+			vsync-len = <5>;
+			vfront-porch = <15>;
+			vback-porch = <28>;
+			hsync-active = <1>;
+			vsync-active = <1>;
 		};
 	};
 };
@@ -321,7 +315,7 @@
  * vendor's reference board; it isn't, though that file is compiled out of
  * at least one build config for this product (see the panel node's
  * comment above). This unit's actual panel model is still unconfirmed;
- * its live mode is 99.1 MHz and may be single link. Lane selects are that
+ * its live mode is 99.7 MHz and may be single link. Lane selects are that
  * code's PCB routing, not necessarily this board's.
  */
 &lvds_phy {
@@ -353,14 +347,17 @@
 		height-mm = <110>;
 
 		panel-timing {
+			clock-frequency = <99700000>;
 			hactive = <1920>;
 			vactive = <720>;
-			hsync-len = <31>;
-			hfront-porch = <49>;
-			hback-porch = <159>;
-			vsync-len = <4>;
-			vfront-porch = <14>;
-			vback-porch = <27>;
+			hsync-len = <32>;
+			hfront-porch = <50>;
+			hback-porch = <160>;
+			vsync-len = <5>;
+			vfront-porch = <15>;
+			vback-porch = <28>;
+			hsync-active = <1>;
+			vsync-active = <1>;
 		};
 	};
 };
